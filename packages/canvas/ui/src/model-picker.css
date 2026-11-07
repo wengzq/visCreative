@@ -1,0 +1,35 @@
+.vis-model-picker { position: relative; min-width: 0; }
+.vis-model-trigger { border: 0; background: transparent; color: var(--vis-text-dim); font-size: 11px; padding: 4px 0; text-align: left; }
+.vis-model-trigger > svg { vertical-align: middle; margin-left: 6px; }
+.vis-model-trigger:hover { color: var(--vis-text); }
+.vis-model-warning { color: var(--vis-warn); }
+.vis-model-popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; width: 300px; max-width: calc(100vw - 16px); max-height: min(520px, calc(100vh - 16px)); display: flex; flex-direction: column; overflow: hidden; background: var(--vis-panel); border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius); box-shadow: var(--vis-shadow); padding: 12px; }
+.vis-model-popover.is-beside { position: fixed; bottom: auto; }
+.vis-model-list { flex: none; max-height: min(220px, 30vh); overflow-y: auto; }
+.vis-model-list h4 { font-size: 11px; font-weight: 500; letter-spacing: 1px; color: var(--vis-text-dim); margin: 8px 0 4px; }
+.vis-model-list button { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 6px; text-align: left; border: 0; background: transparent; }
+.vis-model-list button:hover { background: var(--vis-node); }
+.vis-model-list button > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-model-list button > svg { flex: none; }
+.vis-model-list button > small { flex: none; font-size: 10px; padding: 2px 4px; border-radius: 3px; background: var(--vis-node); }
+.vis-model-list .is-unconfigured { color: var(--vis-text-faint); }
+.vis-param-segments button[aria-pressed=true] { background: var(--vis-accent-soft); border-color: var(--vis-accent); }
+.vis-model-params { flex: 0 1 auto; min-height: 0; overflow-y: auto; border-top: 1px solid var(--vis-panel-border); margin-top: 12px; padding-top: 8px; }
+.vis-param-field { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; }
+.vis-model-params small { color: var(--vis-text-faint); margin-left: 8px; }
+.vis-model-params input, .vis-model-params select { width: 140px; background: var(--vis-bg); color: var(--vis-text); border: 1px solid var(--vis-panel-border); border-radius: 4px; padding: 6px; }
+.vis-param-segments { display: flex; align-items: center; gap: 3px; }
+.vis-param-segments button { font-size: 11px; padding: 4px 6px; }
+.vis-model-params .vis-param-custom { width: 92px; font-size: 11px; padding: 4px 6px; }
+.vis-param-toggle { width: 28px; height: 16px; padding: 2px; border: 0; border-radius: 8px; background: var(--vis-input-edge); flex: none; }
+.vis-param-toggle::before { content: ''; display: block; width: 12px; height: 12px; border-radius: 50%; background: var(--vis-text); transition: transform 120ms; }
+.vis-param-toggle[aria-checked=true] { background: var(--vis-accent); }
+.vis-param-toggle[aria-checked=true]::before { transform: translateX(12px); background: var(--vis-bg); }
+.vis-model-picker :focus-visible { outline: 2px solid var(--vis-accent); outline-offset: 2px; }
+.vis-model-manage { flex: none; width: 100%; margin-top: 8px; }
+/* 与设置对话框的下拉框保持一致：去掉原生外观，用 SVG 箭头 */
+.vis-model-params select { appearance: none; padding-right: 26px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a0a0a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; background-size: 13px; }
+
+/* 所选模型被删除时的提示：单独一行、小号，不挤占触发按钮 */
+.vis-model-removed { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--vis-warn); white-space: nowrap; }
+.vis-model-removed button { height: 20px; padding: 0 8px; font-size: 11px; }

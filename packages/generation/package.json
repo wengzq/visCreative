@@ -1,0 +1,25 @@
+{
+  "name": "@vis/generation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GenerationService：Job / Attempt、Provider 适配（src/providers/）、finalizing 恢复。经 domain 端口交付到画布。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "check:render-assets": "node scripts/check-render-assets.mjs"
+  },
+  "dependencies": {
+    "@vis/assets": "workspace:*",
+    "@vis/domain": "workspace:*",
+    "@vis/protocol": "workspace:*",
+    "@vis/storage": "workspace:*",
+    "animejs": "4.5.0",
+    "playwright-core": "^1.64.1",
+    "roughjs": "^4.6.6",
+    "three": "0.187.0",
+    "zod": "^4.6.7"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@vis/canvas-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CanvasService：节点 / 槽位 / 镜头组、操作批次、修订、工程格式读写；ComponentRegistry 与内置组件（src/components/）。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/domain": "workspace:*",
+    "@vis/storage": "workspace:*",
+    "@vis/assets": "workspace:*",
+    "@vis/library-core": "workspace:*"
+  }
+}

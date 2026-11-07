@@ -1,0 +1,1 @@
+ALTER TABLE `asset_versions` ADD `has_alpha` integer;

@@ -1,0 +1,20 @@
+{
+  "name": "@vis/agent-claude",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Agent 适配器：实现 AgentRuntimePort，每回合一次 SDK 调用（0004“Claude 适配器”）。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.310",
+    "@vis/domain": "workspace:*",
+    "@vis/protocol": "workspace:*",
+    "@vis/storage": "workspace:*",
+    "@vis/workbench-core": "workspace:*"
+  }
+}

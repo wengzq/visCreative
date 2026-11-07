@@ -1,0 +1,8 @@
+.vis-audio-player { display: flex; flex-direction: column; justify-content: center; gap: 10px; width: 100%; height: 100%; padding: 16px; box-sizing: border-box; color: var(--vis-text); background: var(--vis-panel); }
+.vis-audio-waveform { width: 100%; height: 48px; min-height: 12px; stroke: var(--vis-text-dim); stroke-width: 2; }
+.vis-audio-controls { display: flex; align-items: center; gap: 8px; }
+.vis-audio-controls button { display: grid; place-items: center; padding: 5px; border: 0; border-radius: 50%; background: var(--vis-panel); color: var(--vis-text); cursor: pointer; }
+.vis-audio-controls input { min-width: 0; flex: 1; accent-color: var(--vis-text-dim); }
+.vis-audio-controls span { white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
+.vis-audio-player [role="status"] { color: var(--vis-danger); font-size: 11px; }
+@media (prefers-reduced-motion: reduce) { .vis-audio-player * { transition: none; animation: none; } }

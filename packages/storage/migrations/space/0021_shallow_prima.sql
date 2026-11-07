@@ -1,0 +1,1 @@
+ALTER TABLE `slot_revisions` ADD `timeline_doc` text;

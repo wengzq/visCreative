@@ -1,0 +1,50 @@
+.vis-operations-toolbar { display: flex; align-items: center; gap: 3px; padding: 5px; border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius); background: var(--vis-panel); color: var(--vis-text); box-shadow: var(--vis-shadow); white-space: nowrap; }
+.vis-operations-toolbar button { position: relative; display: flex; align-items: center; gap: 5px; padding: 7px 9px; border: 0; background: transparent; color: inherit; font-size: 12px; }
+.vis-operations-toolbar button:hover:enabled, .vis-operations-toolbar button:focus-visible { background: var(--vis-node); }
+.vis-operations-toolbar button:focus-visible, .vis-crop-selection:focus-visible { outline: 2px solid var(--vis-accent); outline-offset: 2px; }
+.vis-operation-divider { width: 1px; align-self: stretch; margin: 5px 3px; background: var(--vis-panel-border); }
+.vis-operation-paid { width: 5px; height: 5px; border-radius: 50%; background: var(--vis-accent); align-self: flex-start; }
+.vis-operation-more { position: relative; }
+.vis-operation-menu { position: absolute; top: calc(100% + 9px); left: 0; min-width: 180px; padding: 5px; border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius); background: var(--vis-panel); box-shadow: var(--vis-shadow); }
+.vis-operation-menu button { width: 100%; text-align: start; }
+.vis-operation-menu > span { display: block; border-top: 1px solid var(--vis-panel-border); margin-top: 4px; padding-top: 4px; }
+.vis-node-title { min-width: 0; display: flex; align-items: center; gap: 5px; color: var(--vis-text-dim); }
+.vis-node-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-node-title svg { flex: none; }
+.vis-node-title input { width: 150px; max-width: 100%; padding: 1px 4px; font-size: 11px; }
+.vis-node-metadata { margin-left: auto; margin-right: 6px; padding-left: 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vis-node-media-progress { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 5px 8px; display: flex; align-items: center; gap: 8px; border-radius: var(--vis-radius-sm); background: var(--vis-panel); color: var(--vis-text); font-size: 11px; pointer-events: none; }
+.vis-node-media-progress progress { flex: 1; min-width: 30px; accent-color: var(--vis-accent); }
+.vis-node-media-failure { position: absolute; inset: auto 0 0; display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--vis-panel); color: var(--vis-text); font-size: 11px; }
+.vis-node-media-failure > span { flex: 1; }
+.vis-node-media-failure button { flex: none; }
+.vis-node > .vis-node-media-failure { position: static; flex: none; border-top: 1px solid var(--vis-panel-border); color: var(--vis-danger); }
+.vis-node-version-strip { position: relative; width: max-content; max-width: 420px; }
+.vis-canvas-wrap:has(.vis-node-version-strip) .react-flow__node-toolbar:has(.vis-node-prompt) { margin-top: 78px; }
+.vis-image-panel { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--vis-node); color: var(--vis-text); }
+.vis-image-stage { flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; }
+.vis-image-surface { position: relative; flex: none; }
+.vis-image-surface > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.vis-image-panel-controls { flex: none; display: flex; gap: 5px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 5px; font-size: 10px; }
+.vis-image-panel-controls select, .vis-image-panel-controls button { padding: 4px; font-size: 10px; }
+.vis-image-panel-controls > span { margin-right: auto; font-variant-numeric: tabular-nums; }
+.vis-image-panel > [role=alert] { padding: 4px 8px; font-size: 11px; }
+.vis-crop-selection { position: absolute; border: 2px solid var(--vis-accent); box-shadow: 0 0 0 1000px color-mix(in srgb, var(--vis-canvas) 65%, transparent); cursor: move; touch-action: none; }
+.vis-crop-handle { position: absolute; right: -5px; bottom: -5px; width: 12px; height: 12px; padding: 0; border: 1px solid var(--vis-panel); border-radius: 2px; background: var(--vis-accent); cursor: nwse-resize; touch-action: none; }
+.vis-image-grid { position: absolute; inset: 0; pointer-events: none; }
+.vis-image-grid i { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--vis-accent); }
+.vis-image-grid b { position: absolute; left: 0; right: 0; border-top: 1px solid var(--vis-accent); }
+@media (max-width: 600px) {
+  .vis-operations-toolbar { max-width: calc(100vw - 24px); flex-wrap: wrap; }
+  .vis-operations-toolbar button { padding: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vis-operations-toolbar *, .vis-image-panel * { animation: none; transition: none; }
+}
+.vis-mov-export { width: min(480px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius); background: var(--vis-panel); color: var(--vis-text); box-shadow: var(--vis-shadow); }
+.vis-mov-export .vis-dialog-header, .vis-mov-export .vis-dialog-actions { display: flex; align-items: center; gap: 8px; padding: 16px; }
+.vis-mov-export .vis-dialog-header h2 { flex: 1; margin: 0; font-size: 16px; }
+.vis-mov-export .vis-dialog-body { padding: 0 16px; }
+.vis-mov-export .vis-dialog-actions { justify-content: flex-end; }
+.vis-mov-export progress { width: 100%; accent-color: var(--vis-accent); }
+.vis-mov-export [role=alert] { color: var(--vis-danger); }

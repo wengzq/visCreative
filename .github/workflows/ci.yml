@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Check and build (${{ matrix.os }})
+    # While the repository is private, reserve the more expensive runners: Windows for main and manual runs, macOS for manual runs.
+    # windows-2022, because node-gyp cannot use the Visual Studio 18 on windows-2025 to build better-sqlite3.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || github.event_name == 'push' && '["ubuntu-24.04", "windows-2022"]' || '["ubuntu-24.04", "windows-2022", "macos-15"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Disable the optional installed-dsh handshake; all agent execution in CI uses test fakes.
+      VIS_DSH_PATH: ''
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm from packageManager
+        uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
+
+      - name: Set up Node 24 and cache the pnpm store
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up ffmpeg and ffprobe on Linux
+        if: runner.os == 'Linux'
+        # Timeline export needs ffmpeg 7+ for `-/filter_complex`; Ubuntu ships 6.1, and the
+        # third-party setup action downloads from a host that has been failing.
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz | tar -xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ffmpeg-n9.0-latest-linux64-gpl-9.0/bin" >> "$GITHUB_PATH"
+
+      # The setup action failed to resolve Windows releases and only has x64 macOS builds; full builds include the ASS filter.
+      - name: Set up ffmpeg and ffprobe on Windows
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg-full --no-progress -y
+
+      - name: Set up ffmpeg and ffprobe on macOS
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew install ffmpeg-full
+          brew link --force ffmpeg-full
+
+      - name: Check runner tools and report caption coverage
+        env:
+          CI_LOGS: ${{ runner.temp }}/vis-ci-logs
+        run: |
+          mkdir -p "$CI_LOGS"
+          printf 'CI_LOGS=%s\n' "$CI_LOGS" >> "$GITHUB_ENV"
+          node --version 2>&1 | tee "$CI_LOGS/tools.log"
+          pnpm --version 2>&1 | tee -a "$CI_LOGS/tools.log"
+          node --input-type=module <<'NODE' 2>&1 | tee -a "$CI_LOGS/tools.log"
+          import { execFileSync } from 'node:child_process'
+          import { appendFileSync, existsSync } from 'node:fs'
+          import { chromePath } from './apps/web/e2e/platform.ts'
+
+          const chrome = chromePath()
+          if (!existsSync(chrome)) throw new Error(`Runner Chrome is missing: ${chrome}`)
+          appendFileSync(process.env.GITHUB_ENV, `VIS_CHROME_PATH=${chrome}\n`)
+          console.log(`Chrome: ${chrome}`)
+          for (const tool of ['ffmpeg', 'ffprobe']) {
+            const output = execFileSync(tool, ['-version'], { encoding: 'utf8', timeout: 15000 })
+            console.log(output.split('\n')[0])
+          }
+          const filters = execFileSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8', timeout: 15000 })
+          const ass = /\bass\s+V->V\b/.test(filters)
+          const coverage = ass
+            ? `${process.platform}: ASS caption rendering enabled (built-in fonts fetched below).`
+            : `${process.platform}: ffmpeg has no ASS filter; packages/assets/src/timeline-captions.integration.test.ts and apps/web/e2e/timeline-text.e2e.ts skip real caption rendering.`
+          console.log(coverage)
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${coverage}\n`)
+          NODE
+
+      - name: Install dependencies with the frozen lockfile
+        run: pnpm install --frozen-lockfile 2>&1 | tee "$CI_LOGS/install.log"
+
+      - name: Fetch and verify built-in fonts
+        run: pnpm fonts:fetch 2>&1 | tee "$CI_LOGS/fonts.log"
+
+      - name: Make fetched fonts available to Linux browsers
+        if: runner.os == 'Linux'
+        run: |
+          export FONTCONFIG_FILE="$RUNNER_TEMP/vis-ci-fonts.conf"
+          node --input-type=module <<'NODE'
+          import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+
+          const xml = value => value.replace(/[<>&"]/g, char => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[char])
+          const cache = join(process.env.RUNNER_TEMP, 'vis-ci-font-cache')
+          mkdirSync(cache, { recursive: true })
+          writeFileSync(process.env.FONTCONFIG_FILE, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n<fontconfig><cachedir>${xml(cache)}</cachedir><include>/etc/fonts/fonts.conf</include><dir>${xml(join(process.cwd(), 'resources/fonts/files'))}</dir></fontconfig>\n`)
+          appendFileSync(process.env.GITHUB_ENV, `FONTCONFIG_FILE=${process.env.FONTCONFIG_FILE}\n`)
+          NODE
+          fc-cache --force 2>&1 | tee "$CI_LOGS/fontconfig.log"
+          fc-match -f '%{family}\n' 'sans-serif:lang=zh-cn' | tee -a "$CI_LOGS/fontconfig.log"
+          fc-match -f '%{family}\n' 'Noto Sans SC' | grep -F 'Noto Sans SC'
+
+      - name: Check boundaries, types and unit tests
+        run: pnpm check 2>&1 | tee "$CI_LOGS/check.log"
+
+      - name: Build
+        run: pnpm build 2>&1 | tee "$CI_LOGS/build.log"
+
+      - name: Check bundled render libraries and licenses
+        run: pnpm --filter @vis/generation check:render-assets 2>&1 | tee "$CI_LOGS/render-assets.log"
+
+      - name: Run the full browser e2e suite once
+        if: runner.os == 'Linux'
+        run: pnpm --filter @vis/web test:e2e 2>&1 | tee "$CI_LOGS/e2e.log"
+
+      # upload-artifact needs one root, and on Windows the runner temp and /tmp are on different paths.
+      - name: Collect failure logs and e2e screenshots
+        if: failure()
+        env:
+          ARTIFACTS: ${{ runner.temp }}/vis-ci-artifacts
+        run: |
+          mkdir -p "$ARTIFACTS"
+          if [ -d "${CI_LOGS:-}" ]; then cp -R "$CI_LOGS" "$ARTIFACTS/logs"; fi
+          find /tmp -path '/tmp/vis-*' \( -name '*.png' -o -name 'vis-u-work-agents-failure.json' \) -type f | while read -r file; do
+            target="$ARTIFACTS/$(dirname "${file#/tmp/}")"
+            mkdir -p "$target"
+            cp "$file" "$target/"
+          done
+
+      - name: Upload failure logs and e2e screenshots
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-failure-${{ matrix.os }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/vis-ci-artifacts/

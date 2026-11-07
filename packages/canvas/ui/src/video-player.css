@@ -1,0 +1,27 @@
+.vis-video-player { position: relative; width: 100%; height: 100%; min-width: 0; background: #161616; }
+.vis-video-player video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.vis-video-player video.is-loading { opacity: 0; }
+.vis-video-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.vis-node .vis-video-player .vis-video-poster { object-fit: cover; }
+.vis-video-controls { position: absolute; inset: auto 0 0; display: flex; align-items: center; gap: 12px; padding: 32px 16px 12px; background: linear-gradient(transparent, rgba(0,0,0,.6)); opacity: 0; transition: opacity 180ms; }
+.is-awake > .vis-video-controls, .vis-video-controls:focus-within { opacity: 1; }
+.vis-video-controls button { flex-shrink: 0; background: transparent; border-color: transparent; color: white; min-width: 30px; height: 30px; padding: 4px; display: grid; place-items: center; }
+.vis-video-controls button[aria-pressed="false"] { opacity: .4; }
+.vis-video-time { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12px; }
+.vis-video-progress { position: relative; flex: 1; height: 3px; background: #ffffff30; }
+.vis-video-progress:hover { height: 5px; }
+.vis-video-buffer, .vis-video-elapsed { position: absolute; inset: 0 auto 0 0; pointer-events: none; background: #ffffff40; }
+.vis-video-elapsed { background: var(--vis-text-dim); }
+.vis-video-progress input { position: absolute; width: 100%; height: 20px; left: 0; top: 50%; transform: translateY(-50%); margin: 0; opacity: 0; cursor: pointer; }
+.vis-video-progress:focus-within { outline: 1px solid white; }
+.vis-video-tooltip { position: absolute; bottom: 16px; transform: translateX(-50%); padding: 4px 6px; border-radius: 4px; background: #111; font-variant-numeric: tabular-nums; }
+.vis-video-volume { display: flex; align-items: center; }
+.vis-video-volume input { width: 0; opacity: 0; accent-color: var(--vis-text-dim); transition: width 150ms; }
+.vis-video-volume:hover input, .vis-video-volume:focus-within input { width: 64px; opacity: 1; }
+.vis-video-duration { position: absolute; right: 8px; bottom: 8px; padding: 2px 4px; font-size: 10px; background: rgba(0,0,0,.55); border-radius: 4px; pointer-events: none; }
+.is-compact > .vis-video-controls { inset: 0; padding: 0; background: none; pointer-events: none; opacity: 0; }
+.is-compact:hover > .vis-video-controls, .is-compact > .vis-video-controls:focus-within { opacity: 1; }
+.is-compact .vis-video-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,.5); backdrop-filter: blur(8px); pointer-events: auto; }
+.is-compact .vis-video-progress { position: absolute; bottom: 0; left: 0; right: 0; pointer-events: auto; }
+
+.vis-video-controls button[aria-pressed="true"] { color: var(--vis-accent); }

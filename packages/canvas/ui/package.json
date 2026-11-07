@@ -1,0 +1,28 @@
+{
+  "name": "@vis/canvas-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "\u65e0\u9650\u753b\u5e03\u3001\u8282\u70b9\u6e32\u67d3\u5668\u3001\u69fd\u4f4d\u7f16\u8f91\u3002\u53ea\u901a\u8fc7 protocol \u4e0e\u540e\u53f0\u4ea4\u4e92\u3002",
+  "exports": {
+    ".": "./src/index.ts",
+    "./canvas.css": "./src/canvas.css"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/ui-kit": "workspace:*",
+    "@xyflow/react": "^12.12.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

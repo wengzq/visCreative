@@ -1,0 +1,17 @@
+{
+  "name": "@vis/devcli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "开发用命令行客户端：以界面身份连接 studiod，发消息、查看会话记录与画布变化。桌面端之前的替代入口（0005）。",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "build": "esbuild src/bin.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/vis-dev.mjs"
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

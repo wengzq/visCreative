@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `service_tier` text;

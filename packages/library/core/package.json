@@ -1,0 +1,19 @@
+{
+  "name": "@vis/library-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Asset library (RFC 0027): listing, Agent labeling and organize runs, project-level settings and merge proposals.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/domain": "workspace:*",
+    "@vis/storage": "workspace:*",
+    "@vis/assets": "workspace:*"
+  }
+}

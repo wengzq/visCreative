@@ -1,0 +1,39 @@
+{
+  "name": "@vis/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "\u672c\u673a\u7f51\u9875\u754c\u9762\uff1a\u5bbf\u4e3b\u8fdb\u7a0b\u8f6c\u53d1\u6d4f\u89c8\u5668\u4e0e studiod \u4e4b\u95f4\u7684 JSON-RPC\uff0c\u63d0\u4f9b\u7d20\u6750\u4e0e\u4e0a\u4f20\uff1b\u627f\u62c5\u5c06\u6765 Electron \u4e3b\u8fdb\u7a0b\u7684\u89d2\u8272\uff080006\uff09\u3002",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.client.json",
+    "build": "node ../../scripts/check-scene-bundle.mjs && esbuild src/host/bin.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/vis-web.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" && node --check dist/vis-web.mjs",
+    "test:e2e": "vitest run -c vitest.e2e.config.ts",
+    "perf": "vitest run -c vitest.perf.config.ts",
+    "readme-shots": "tsc --noEmit -p readme-shots && vitest run -c vitest.shots.config.ts",
+    "agent-eval": "node agent-eval/run.mjs"
+  },
+  "dependencies": {
+    "@vis/canvas-ui": "workspace:*",
+    "@vis/protocol": "workspace:*",
+    "@vis/timeline-ui": "workspace:*",
+    "@vis/library-ui": "workspace:*",
+    "@vis/ui-kit": "workspace:*",
+    "@vis/workbench-ui": "workspace:*",
+    "@xyflow/react": "^12.12.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "ws": "^8.22.0",
+    "@vis/previz-ui": "workspace:*",
+    "@vis/scene-ui": "workspace:*",
+    "@vis/writing-ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.64.1",
+    "vite": "^8.3.5"
+  }
+}

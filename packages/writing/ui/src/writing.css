@@ -1,0 +1,113 @@
+.vis-writing-editor { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; background: var(--vis-bg); color: var(--vis-text); font: 14px/1.5 var(--vis-font, sans-serif); }
+.vis-writing-editor *, .vis-writing-import * { box-sizing: border-box; }
+.vis-writing-editor button, .vis-writing-import button { border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius-sm); background: var(--vis-panel); color: var(--vis-text); padding: 6px 9px; font: inherit; cursor: pointer; }
+.vis-writing-editor button:hover, .vis-writing-import button:hover { background: var(--vis-node); }
+.vis-writing-editor button:focus-visible, .vis-writing-import button:focus-visible { outline: 2px solid var(--vis-accent); outline-offset: 2px; }
+.vis-writing-editor button:disabled, .vis-writing-import button:disabled { opacity: .45; cursor: default; }
+.vis-writing-editor button svg, .vis-writing-import button svg { width: 18px; height: 18px; display: block; }
+.vis-writing-header { height: 56px; flex: 0 0 56px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--vis-panel-border); background: var(--vis-panel); }
+.vis-writing-header h1 { font-size: 14px; margin: 0; font-weight: 600; max-width: 36vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-writing-eyebrow { color: var(--vis-text-dim); font-size: 10px; }
+.vis-writing-header [role=status] { margin-inline-start: auto; color: var(--vis-text-dim); font-size: 12px; }
+.vis-writing-layout { display: flex; flex: 1; min-height: 0; }
+.vis-writing-outline { width: 240px; flex-shrink: 0; padding: 26px 16px; border-right: 1px solid var(--vis-panel-border); overflow: auto; }
+.vis-writing-editor h2 { font-size: 13px; font-weight: 600; margin: 0 0 20px; }
+.vis-writing-outline p { color: var(--vis-text-dim); }
+.vis-writing-outline button { display: block; width: 100%; text-align: start; border-color: transparent; background: transparent; margin: 3px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-writing-outline button[aria-current] { color: var(--vis-accent); background: var(--vis-panel); border-color: var(--vis-panel-border); }
+.vis-writing-main { flex: 1; min-width: 0; min-height: 0; background: var(--vis-bg); }
+.vis-writing-codemirror { height: 100%; }
+.vis-writing-codemirror .cm-editor { height: 100%; outline: none; }
+.vis-writing-codemirror .cm-scroller { overflow: auto; font: 18px/1.95 var(--vis-font, sans-serif); }
+.vis-writing-codemirror .cm-content { width: min(calc(100% - 64px), 790px); flex-grow: 0; min-height: 100%; margin-inline: auto; padding: 52px 48px 160px; caret-color: var(--vis-accent); }
+.vis-writing-codemirror .cm-line { padding: 0; }
+.vis-writing-codemirror .cm-cursor { border-left-color: var(--vis-accent); }
+.vis-writing-codemirror .cm-selectionBackground, .vis-writing-codemirror .cm-focused .cm-selectionBackground { background: var(--vis-accent-soft, var(--vis-node)); }
+.vis-writing-footer { display: flex; gap: 28px; padding: 12px 28px; border-top: 1px solid var(--vis-panel-border); color: var(--vis-text-dim); background: var(--vis-panel); font-size: 12px; }
+.vis-writing-footer span:first-child { margin-inline-end: auto; }
+.vis-writing-conflict { display: flex; gap: 12px; align-items: center; padding: 12px 28px; background: var(--vis-panel); border-bottom: 2px solid var(--vis-accent); }
+.vis-writing-conflict span { flex: 1; }
+.vis-writing-error { margin: 0; padding: 10px 28px; color: var(--vis-danger); }
+.vis-writing-history { width: 330px; border-left: 1px solid var(--vis-panel-border); padding: 20px; overflow: auto; }
+.vis-writing-history header, .vis-writing-import header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.vis-writing-history button { display: block; margin-bottom: 8px; width: 100%; text-align: start; }
+.vis-writing-history button span { display: block; color: var(--vis-text-dim); font-size: 11px; }
+.vis-writing-history pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; font: inherit; }
+.vis-writing-import-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; background: var(--vis-minimap-mask); color: var(--vis-text); }
+.vis-writing-import { width: min(940px, 94vw); max-height: 90vh; overflow: auto; border: 1px solid var(--vis-panel-border); border-radius: 12px; padding: 28px; background: var(--vis-panel); box-shadow: 0 20px 80px var(--vis-minimap-mask); font: 14px/1.6 var(--vis-font, sans-serif); }
+.vis-writing-import h2 { margin: 0; font-size: 20px; }
+.vis-writing-import h3 { margin-bottom: 4px; }
+.vis-writing-import p { color: var(--vis-text-dim); }
+.vis-writing-import-columns { display: grid; grid-template-columns: 220px 1fr; gap: 24px; margin-top: 22px; border-block: 1px solid var(--vis-panel-border); }
+.vis-writing-import-columns nav { padding: 20px 0; max-height: 350px; overflow: auto; }
+.vis-writing-import pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 20px; margin: 0; background: var(--vis-bg); max-height: 350px; overflow: auto; font: inherit; }
+.vis-writing-import footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.vis-writing-import button.is-primary { background: var(--vis-accent); color: var(--vis-on-accent); }
+@media (max-width: 800px) { .vis-writing-outline { width: 170px; } .vis-writing-header { padding: 12px; gap: 8px; } .vis-writing-codemirror .cm-content { padding: 30px 24px 100px; } .vis-writing-history { width: 250px; } }
+.vis-writing-review-bar { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--vis-panel-border); padding: 7px 16px; background: var(--vis-panel); font-size: 12px; }
+.vis-writing-review-bar > span { margin-inline-end: auto; color: var(--vis-text-dim); }
+.vis-writing-working { padding: 8px 28px; color: var(--vis-accent); background: var(--vis-panel); border-bottom: 1px solid var(--vis-panel-border); }
+.vis-writing-main { position: relative; }
+.vis-writing-selection { position: fixed; z-index: 4; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; border: 1px solid var(--vis-panel-border); border-radius: 8px; padding: 3px; background: var(--vis-panel); box-shadow: 0 6px 24px var(--vis-minimap-mask); font-size: 12px; white-space: nowrap; }
+.vis-writing-selection button { display: inline-flex; align-items: center; gap: 4px; border-color: transparent; padding: 3px 7px; }
+.vis-writing-selection button svg { width: 12px; height: 12px; }
+.vis-writing-selection-menu { position: fixed; z-index: 5; min-width: 210px; display: grid; padding: 5px; background: var(--vis-panel); border: 1px solid var(--vis-panel-border); border-radius: 8px; box-shadow: 0 6px 24px var(--vis-minimap-mask); font-size: 12px; }
+.vis-writing-selection-menu button { text-align: start; border-color: transparent; }
+.vis-writing-action-dialog { width: min(480px, 94vw); }
+.vis-writing-action-dialog label { display: grid; gap: 8px; margin-top: 24px; }
+.vis-writing-action-dialog input { width: 100%; font: inherit; background: var(--vis-bg); color: var(--vis-text); border: 1px solid var(--vis-panel-border); border-radius: 5px; padding: 8px; }
+.vis-writing-action-dialog input:focus-visible { outline: 2px solid var(--vis-accent); }
+.vis-writing-old { text-decoration: line-through; color: var(--vis-danger); background: var(--vis-panel); }
+.vis-writing-edit { display: inline; margin-inline-start: .35em; padding: 3px 5px; border: 1px solid var(--vis-panel-border); border-radius: 5px; background: var(--vis-panel); white-space: pre-wrap; overflow-wrap: anywhere; }
+.vis-writing-edit ins { color: var(--vis-accent); text-decoration: none; }
+.vis-writing-edit del { color: var(--vis-text-dim); }
+.vis-writing-edit-note { font-size: 11px; color: var(--vis-text-dim); margin-inline: 8px; }
+.vis-writing-edit button { display: inline; font-size: 11px; padding: 2px 6px; margin-inline-start: 4px; vertical-align: middle; }
+.vis-writing-edit.is-stale, .vis-writing-old.is-stale { color: var(--vis-text-dim); opacity: .7; }
+
+.vis-writing-chapter { height: 42px; display: flex; align-items: start; position: relative; }
+.vis-writing-chapter > button { min-width: 0; flex: 1; }
+.vis-writing-chapter summary { padding: 8px 5px; cursor: pointer; color: var(--vis-text-dim); }
+.vis-writing-chapter details > div { position: absolute; z-index: 5; left: 0; right: 0; padding: 8px; border: 1px solid var(--vis-panel-border); border-radius: 6px; background: var(--vis-panel); box-shadow: 0 6px 24px var(--vis-minimap-mask); }
+.vis-writing-chapter details button { white-space: normal; }
+.vis-writing-shot-passage { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--vis-accent) 45%, transparent); text-underline-offset: 5px; }
+.vis-writing-source-highlight { background: var(--vis-accent-soft); outline: 1px solid var(--vis-accent); }
+.vis-writing-source-gutter { position: absolute; z-index: 2; inset: 0; pointer-events: none; overflow: clip; }
+.vis-writing-marker-line { position: absolute; width: 22px; height: 22px; pointer-events: auto; }
+.vis-writing-editor .vis-writing-shot-marker { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 2px; color: var(--vis-text-dim); background: transparent; border-color: transparent; }
+.vis-writing-editor .vis-writing-shot-marker:hover, .vis-writing-editor .vis-writing-shot-marker:focus-visible { color: var(--vis-accent); background: var(--vis-panel); }
+.vis-writing-editor .vis-writing-shot-marker svg { width: 16px; height: 16px; flex-shrink: 0; }
+.vis-writing-shot-marker span { position: absolute; right: -4px; top: -6px; min-width: 13px; padding: 0 2px; color: var(--vis-accent); background: var(--vis-bg); border-radius: 4px; font-size: 9px; line-height: 13px; }
+.vis-writing-marker-links { display: none; position: absolute; z-index: 3; top: -5px; left: 22px; min-width: 220px; max-width: 350px; padding: 6px; border: 1px solid var(--vis-panel-border); border-radius: 7px; background: var(--vis-panel); box-shadow: 0 6px 24px var(--vis-minimap-mask); }
+.vis-writing-marker-line:hover .vis-writing-marker-links, .vis-writing-marker-line:focus-within .vis-writing-marker-links { display: grid; }
+.vis-writing-marker-links button { border-color: transparent; font-size: 11px; text-align: start; }
+.vis-writing-split-series { display: flex; gap: 20px; margin-block: 20px; }
+.vis-writing-split label { display: flex; gap: 8px; align-items: center; }
+.vis-writing-split input, .vis-writing-split select { font: inherit; color: var(--vis-text); background: var(--vis-bg); border: 1px solid var(--vis-panel-border); border-radius: 5px; padding: 6px 8px; min-width: 0; }
+.vis-writing-split input:focus-visible, .vis-writing-split select:focus-visible { outline: 2px solid var(--vis-accent); }
+.vis-writing-split table { width: 100%; border-collapse: collapse; }
+.vis-writing-split th, .vis-writing-split td { text-align: start; padding: 10px 6px; border-bottom: 1px solid var(--vis-panel-border); }
+.vis-writing-split td:nth-child(2) input { width: 72px; }
+.vis-writing-split td:nth-child(3) input { width: 100%; }
+.vis-writing-split footer > span { margin-inline-end: auto; }
+
+.vis-writing-header button, .vis-writing-review-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; }
+.vis-writing-save { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.vis-writing-save i { width: 6px; height: 6px; border-radius: 50%; background: var(--vis-ok); }
+.vis-writing-save.is-unsaved i { background: var(--vis-warn); }
+.vis-writing-save.is-saving i { background: var(--vis-text-faint); }
+.vis-writing-save.is-conflict i { background: var(--vis-danger); }
+.vis-writing-editor button.is-primary { background: var(--vis-accent); border-color: var(--vis-accent); color: var(--vis-on-accent); }
+.vis-writing-codemirror .vis-writing-h1 { font-size: 1.6em; font-weight: 650; line-height: 1.55; padding-block: .35em; }
+.vis-writing-codemirror .vis-writing-h2 { font-size: 1.35em; font-weight: 650; line-height: 1.6; padding-block: .25em; }
+.vis-writing-codemirror .vis-writing-h3, .vis-writing-codemirror .vis-writing-h4, .vis-writing-codemirror .vis-writing-h5, .vis-writing-codemirror .vis-writing-h6 { font-size: 1.15em; font-weight: 600; padding-block: .2em; }
+.vis-writing-bold { font-weight: 700; }
+.vis-writing-italic { font-style: italic; }
+.vis-writing-codemirror .vis-writing-quote { border-inline-start: 3px solid var(--vis-panel-border); padding-inline-start: 14px; color: var(--vis-text-dim); }
+.vis-writing-list-marker { display: inline-block; min-width: 20px; color: var(--vis-text-dim); }
+.vis-writing-codemirror .vis-writing-list { padding-inline-start: 20px; text-indent: -20px; }
+.vis-writing-table { overflow-x: auto; padding-block: 12px; font-size: 15px; line-height: 1.6; }
+.vis-writing-table table { width: 100%; border-collapse: collapse; cursor: text; }
+.vis-writing-table th, .vis-writing-table td { border: 1px solid var(--vis-panel-border); padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vis-writing-table th { background: var(--vis-panel); font-weight: 600; }
+.vis-writing-table table:focus-visible { outline: 2px solid var(--vis-focus); outline-offset: 2px; }

@@ -1,0 +1,1 @@
+ALTER TABLE `asset_versions` ADD `font_family` text;

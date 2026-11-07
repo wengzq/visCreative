@@ -1,0 +1,24 @@
+{
+  "name": "@vis/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "持久化抽象与事件存储（序号、游标、补发）。存储选型只影响本包。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "db:generate": "drizzle-kit generate --config drizzle.space.config.ts && drizzle-kit generate --config drizzle.app.config.ts && drizzle-kit generate --config drizzle.series.config.ts"
+  },
+  "dependencies": {
+    "@vis/domain": "workspace:*",
+    "@vis/protocol": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "drizzle-kit": "^0.31.11"
+  }
+}

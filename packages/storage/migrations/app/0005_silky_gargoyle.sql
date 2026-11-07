@@ -1,0 +1,1 @@
+ALTER TABLE `generation_quota` ADD `by_agent` integer DEFAULT false NOT NULL;

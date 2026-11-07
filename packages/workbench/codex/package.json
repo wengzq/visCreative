@@ -1,0 +1,19 @@
+{
+  "name": "@vis/agent-codex",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex Agent 适配器：经 codex app-server 实现 AgentRuntimePort，每回合启动一次（0005）。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/domain": "workspace:*",
+    "@vis/protocol": "workspace:*",
+    "@vis/storage": "workspace:*",
+    "@vis/workbench-core": "workspace:*"
+  }
+}

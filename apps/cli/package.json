@@ -1,0 +1,23 @@
+{
+  "name": "@vis/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent 调用的 CLI。薄客户端：只发 RPC，不保存画布、不持有任务、不读密钥。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "build": "esbuild src/bin.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/vis.mjs --banner:js=\"#!/usr/bin/env node\""
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "bin": {
+    "vis": "dist/vis.mjs"
+  }
+}

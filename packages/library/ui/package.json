@@ -1,0 +1,24 @@
+{
+  "name": "@vis/library-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Asset library panel (RFC 0027): media and settings tabs, pending merges, setting card editor. Talks to the backend only through the host it is given.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./library.css": "./src/library.css"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/ui-kit": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

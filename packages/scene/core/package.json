@@ -1,0 +1,20 @@
+{
+  "name": "@vis/scene-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Builds three.js scenes from scene documents. Shared by the scene editor and, from step c, the render provider.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "~0.187.0"
+  }
+}

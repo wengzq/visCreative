@@ -1,0 +1,26 @@
+.vis-version-count { font-size: 11px; color: var(--vis-text-dim); background: transparent; border: none; padding: 0 2px; display: flex; align-items: center; gap: 5px; }
+.vis-version-count:hover { color: var(--vis-text); }
+.vis-version-unread { width: 6px; height: 6px; border-radius: 50%; background: var(--vis-text-dim); }
+.vis-version-strip { --version-size: 52px; display: flex; gap: 6px; padding: 6px; max-width: 472px; overflow-x: auto; background: var(--vis-panel); border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius); box-shadow: var(--vis-shadow); }
+.vis-version-strip.is-lg { --version-size: 72px; max-width: 632px; }
+.vis-version-thumb, .vis-version-pending { flex: none; width: var(--version-size); height: var(--version-size); border-radius: 6px; position: relative; padding: 0; border: none; background: var(--vis-node); }
+.vis-version-thumb img, .vis-version-thumb video { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+/* 外环只标“卡片正在显示的那一版”：平时是当前版本，查看旧版本时移到被查看的那格；“当前”角标始终留在当前版本 */
+.vis-version-thumb[aria-current="true"] { outline: 2px solid var(--vis-accent); outline-offset: 1px; }
+.vis-version-strip:has(.is-viewing) .vis-version-thumb[aria-current="true"] { outline-color: transparent; }
+.vis-version-thumb.is-viewing { outline: 2px solid var(--vis-text); outline-offset: 1px; }
+.vis-version-thumb:not([aria-current="true"]):not(.is-viewing):hover { outline: 1px solid var(--vis-text-dim); outline-offset: 1px; }
+.vis-version-current { position: absolute; bottom: 0; left: 0; font-size: 10px; padding: 1px 3px; background: var(--vis-accent-soft); color: var(--vis-text); border-radius: 0 3px 0 6px; }
+.vis-version-play { position: absolute; right: 3px; bottom: 3px; color: white; font-size: 9px; text-shadow: 0 1px 3px black; }
+.vis-version-pending { border: 1px dashed var(--vis-text-dim); display: grid; place-items: center; font-size: 10px; }
+.vis-version-tooltip { position: absolute; z-index: 10000; max-width: 280px; white-space: pre-line; background: var(--vis-panel); color: var(--vis-text); border: 1px solid var(--vis-panel-border); border-radius: 6px; padding: 8px; font-size: 11px; box-shadow: var(--vis-shadow); pointer-events: none; }
+.vis-node.is-viewing-version { border: 1px dashed var(--vis-border-strong); box-shadow: none; }
+.vis-version-body { position: relative; width: 100%; height: 100%; display: flex; }
+.vis-version-actions { position: absolute; left: 0; right: 0; bottom: 0; height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: rgba(0, 0, 0, .6); backdrop-filter: blur(8px); border-radius: 0 0 var(--vis-radius) var(--vis-radius); font-size: 11px; }
+.vis-version-actions > span { margin-right: auto; white-space: nowrap; }
+.vis-version-actions button { padding: 3px 6px; font-size: 11px; white-space: nowrap; }
+.vis-version-media { position: relative; width: 100%; height: 100%; }
+.vis-version-media .is-previous { position: absolute; inset: 0; pointer-events: none; }
+.vis-version-media.is-changing > :last-child { position: relative; opacity: 0; }
+.vis-version-media.is-changing.is-loaded > :last-child { animation: vis-version-fade 400ms ease-out forwards; }
+@keyframes vis-version-fade { from { opacity: 0; } to { opacity: 1; } }

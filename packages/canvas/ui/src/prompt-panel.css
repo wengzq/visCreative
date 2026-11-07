@@ -1,0 +1,51 @@
+dialog.vis-prompt-shell:not([open]) { display: block; position: static; margin: 0; padding: 0; border: 0; width: auto; max-width: none; max-height: none; overflow: visible; background: transparent; box-shadow: none; }
+dialog.vis-prompt-shell[open] { width: min(820px, calc(100vw - 32px)); overflow: visible; }
+.vis-prompt-shell.is-expanded .vis-prompt-panel { border: 0; box-shadow: none; max-height: calc(90vh - 70px); overflow-y: auto; }
+.vis-prompt-panel { min-width: 0; max-width: calc(100vw - 32px); box-sizing: border-box; }
+.vis-prompt-panel-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.vis-prompt-sources { display: flex; align-items: center; gap: 8px; }
+.vis-prompt-sources button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; font-size: 11px; background: transparent; color: var(--vis-text-dim); }
+.vis-prompt-sources svg { width: 12px; height: 12px; }
+.vis-prompt-sources button[aria-pressed=true] { color: var(--vis-accent); border-color: var(--vis-accent); }
+.vis-prompt-expand { display: grid; place-items: center; padding: 4px; background: transparent; border: 0; color: var(--vis-text-dim); }
+.vis-numbered-reference { position: relative; flex: none; }
+.vis-reference-preview { position: relative; display: flex; align-items: center; justify-content: center; width: 64px; height: 52px; padding: 0; border: 1px solid var(--vis-node-border); border-radius: var(--vis-radius-sm); background: var(--vis-node); overflow: hidden; }
+.vis-reference-preview-text { width: 100px; }
+.vis-reference-preview > img, .vis-reference-preview > video, .vis-reference-choice-preview > img, .vis-reference-choice-preview > video { width: 100%; height: 100%; object-fit: cover; }
+.vis-reference-preview > span:not(.vis-reference-number) { padding: 5px 8px; overflow: hidden; font-size: 10px; line-height: 1.4; text-align: left; max-height: 32px; }
+.vis-reference-preview .vis-reference-number { position: absolute; top: 2px; left: 2px; min-width: 14px; padding: 1px 3px; border-radius: 3px; background: var(--vis-panel); color: var(--vis-text); font-size: 10px; line-height: 14px; }
+.vis-reference-duration { position: absolute; bottom: 1px; right: 3px; color: var(--vis-text); background: var(--vis-panel); font-size: 10px; }
+.vis-reference-remove { position: absolute; right: -4px; top: -4px; display: grid; place-items: center; width: 18px; height: 18px; padding: 2px; border-radius: 50%; color: var(--vis-text); background: var(--vis-panel); opacity: 0; }
+.vis-numbered-reference:hover .vis-reference-remove, .vis-numbered-reference:focus-within .vis-reference-remove { opacity: 1; }
+.vis-reference-remove svg { width: 12px; height: 12px; }
+.vis-prompt-ref-field { position: relative; }
+.vis-prompt-ref-input { min-height: 76px; max-height: 200px; overflow-y: auto; padding: 8px 0; font: inherit; font-size: 13px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; outline: 0; cursor: text; }
+.vis-prompt-ref-input:focus-visible { outline: 1px solid var(--vis-accent); outline-offset: 3px; border-radius: var(--vis-radius-sm); }
+.vis-prompt-ref-input:empty::before { content: attr(data-placeholder); color: var(--vis-text-faint); pointer-events: none; }
+.is-expanded .vis-prompt-ref-input { min-height: min(360px, 45vh); max-height: 55vh; }
+.vis-prompt-ref { display: inline-flex; vertical-align: middle; align-items: center; gap: 4px; height: 24px; padding: 0 5px; margin: 0 2px; border: 1px solid var(--vis-node-border); border-radius: var(--vis-radius-sm); color: var(--vis-text); background: var(--vis-node); font-size: 11px; user-select: all; white-space: nowrap; }
+.vis-prompt-ref img, .vis-prompt-ref video { height: 18px; width: 24px; border-radius: 2px; object-fit: cover; }
+.vis-prompt-ref.is-broken { color: var(--vis-warn); border-color: var(--vis-warn); }
+.vis-prompt-broken { font-size: 11px; color: var(--vis-warn); }
+.vis-prompt-ref-choices { position: absolute; bottom: 100%; left: 0; z-index: 40; width: 230px; max-width: 100%; max-height: 200px; overflow-y: auto; background: var(--vis-panel); border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius); box-shadow: var(--vis-shadow); padding: 5px; }
+.vis-prompt-ref-choices button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; border: 0; padding: 6px; font-size: 12px; }
+.vis-prompt-ref-choices button[aria-selected=true], .vis-prompt-ref-choices button:hover { background: var(--vis-node); }
+.vis-reference-choice-preview { position: relative; display: grid; place-items: center; width: 32px; height: 26px; overflow: hidden; border-radius: 3px; flex: none; font-size: 9px; }
+.vis-prompt-settings { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.vis-prompt-settings .vis-model-picker { flex: 0 1 auto; }
+.vis-prompt-settings .vis-model-trigger { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
+.vis-params-summary { position: relative; min-width: 0; flex: 1; }
+.vis-params-trigger { width: 100%; padding: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--vis-text-dim); font-size: 11px; background: transparent; border: 0; }
+.vis-params-popover .vis-model-params { border-top: 0; padding-top: 0; margin-top: 0; }
+.vis-prompt-panel button:focus-visible { outline: 2px solid var(--vis-accent); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .vis-prompt-settings { flex-wrap: wrap; gap: 3px; }
+  .vis-params-summary { flex-basis: 100%; }
+  .vis-prompt-settings .vis-model-trigger { max-width: 240px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  dialog.vis-prompt-shell[open] { animation: none; }
+  .vis-prompt-panel .vis-param-toggle::before { transition: none; }
+}
+
+.vis-prompt-generation { display: contents; }

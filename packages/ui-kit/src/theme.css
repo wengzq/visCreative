@@ -1,0 +1,115 @@
+/* 深色主题（0006“视觉风格”）：画布底色深，节点卡片稍亮并带细边框。定稿后只改这些变量 */
+:root {
+  --vis-alpha-light: #dcdcdc;
+  --vis-alpha-dark: #bebebe;
+  color-scheme: dark;
+  --vis-bg: #141414;
+  --vis-canvas: #141414;
+  --vis-edge: #696969;
+  --vis-input-edge: #484848;
+  --vis-minimap-mask: rgba(20, 20, 20, 0.65);
+  --vis-minimap-text: #737373;
+  --vis-minimap-image: #969696;
+  --vis-minimap-video: #bdbdbd;
+  --vis-canvas-dot: #242424;
+  --vis-panel: #222222;
+  --vis-panel-border: #303030;
+  --vis-node: #262626;
+  --vis-node-border: #303030;
+  --vis-node-border-selected: #7b7fff;
+  --vis-text: #e6e6e6;
+  --vis-text-dim: #a0a0a0;
+  --vis-text-faint: #707070;
+  /* 主色（0019）：只用于主按钮、选中、输入焦点和选中节点的相关连线，其余保持灰阶 */
+  --vis-accent: #7b7fff;
+  --vis-accent-soft: rgba(123, 127, 255, 0.18);
+  --vis-accent-hover: #9295ff;
+  --vis-on-accent: #ffffff;
+  --vis-focus: #7b7fff;
+  /* 普通按钮悬停用的中性描边，不用主色 */
+  --vis-border-strong: #5a5a5a;
+  --vis-ok: #4cc38a;
+  --vis-warn: #e8b04b;
+  --vis-danger: #ef6a6a;
+  --vis-radius: 10px;
+  --vis-radius-sm: 6px;
+  --vis-font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  --vis-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --vis-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--vis-bg);
+  color: var(--vis-text);
+  font-family: var(--vis-font);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: var(--vis-text);
+  background: var(--vis-node);
+  border: 1px solid var(--vis-node-border);
+  border-radius: var(--vis-radius-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--vis-border-strong); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+/* 全站唯一的主按钮样式（0019）；每个对话框最多一个 */
+button.is-primary { background: var(--vis-accent); border-color: var(--vis-accent); color: var(--vis-on-accent); font-weight: 600; }
+button.is-primary:hover:not(:disabled) { background: var(--vis-accent-hover); border-color: var(--vis-accent-hover); }
+
+/* 圆形发送按钮（0019）：会话输入卡片与画布生成框共用；可发送时主色，运行中加 is-stop 变成停止 */
+button.vis-send-button {
+  display: inline-grid; place-items: center;
+  width: 30px; height: 30px; padding: 0; border-radius: 50%;
+  background: var(--vis-accent); border-color: var(--vis-accent); color: var(--vis-on-accent);
+}
+button.vis-send-button:hover:not(:disabled):not(.is-stop) { background: var(--vis-accent-hover); border-color: var(--vis-accent-hover); }
+button.vis-send-button:disabled { background: var(--vis-node); border-color: var(--vis-node-border); color: var(--vis-text-faint); opacity: 1; }
+button.vis-send-button.is-stop { background: var(--vis-text); border-color: var(--vis-text); color: var(--vis-bg); }
+button.vis-send-button.is-stop:hover:not(:disabled) { background: #ffffff; border-color: #ffffff; }
+button.vis-send-button svg { width: 16px; height: 16px; }
+
+
+/* 模态对话框共用遮罩和外壳，浮层只保留阴影（0020） */
+:root { --vis-scrim: rgb(0 0 0 / 55%); }
+dialog.vis-dialog {
+  background: var(--vis-panel); border: 1px solid var(--vis-panel-border);
+  border-radius: 12px; box-shadow: var(--vis-shadow); color: var(--vis-text); padding: 0;
+  max-height: 90vh;
+}
+dialog.vis-dialog[open] { animation: vis-dialog-appear 120ms ease-out; }
+dialog.vis-dialog::backdrop { background: var(--vis-scrim); }
+.vis-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; }
+.vis-dialog-header h2 { margin: 0; font-size: 16px; }
+.vis-dialog-body { padding: 16px 20px; overflow: auto; }
+.vis-dialog-footer { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 16px 20px; }
+.vis-popover { background: var(--vis-panel); border: 1px solid var(--vis-panel-border); box-shadow: var(--vis-shadow); border-radius: 10px; color: var(--vis-text); }
+button.vis-icon-button { display: inline-grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; padding: 0; background: transparent; border: 0; }
+button.vis-icon-button:hover:not(:disabled) { background: var(--vis-node); }
+button.vis-icon-button svg { width: 16px; height: 16px; }
+.vis-running-icon { color: var(--vis-text-faint); }
+.vis-running-icon.is-active { color: var(--vis-accent); animation: vis-running-spin 1s linear infinite; }
+@keyframes vis-dialog-appear { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vis-running-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  dialog.vis-dialog[open], .vis-running-icon.is-active { animation: none; }
+}
+
+/* Alpha is a media fact, independent of the surrounding surface's theme. */
+.vis-alpha-media:is(div, button, video) {
+  background-color: var(--vis-alpha-light);
+  background-image: conic-gradient(var(--vis-alpha-dark) 25%, transparent 0 50%, var(--vis-alpha-dark) 0 75%, transparent 0);
+  background-size: 24px 24px;
+}

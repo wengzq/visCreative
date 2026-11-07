@@ -1,0 +1,33 @@
+import { defineMessages } from '@vis/ui-kit'
+
+export const previzMessages = defineMessages({
+  render: '渲染预演',
+  previz: '镜头预演', close: '关闭编辑器', panels: '画格',
+  panel: (n: string) => `画格 ${n}`, add: '添加画格', remove: '删除画格', up: '前移画格', down: '后移画格',
+  note: '画格备注', duration: '时长（秒）', aspect: '宽高比', surface: '画格绘图',
+  pen: '画笔', eraser: '橡皮', colour: '颜色', size: '笔刷大小', undo: '撤销',
+  import: '导入图片', fromCanvas: '从画布填充', chooseImage: '选择画布图片', empty: '添加画格以绘制或导入图片',
+  saved: '已保存', saving: '保存中…', unsaved: '有未保存的修改', conflict: '有冲突',
+  conflictBanner: (session: string) => `镜头预演已被 ${session} 修改。`,
+  conflictUnknown: '镜头预演已在别处被修改。', loadTheirs: '载入新版本', showDiff: '查看差异', yours: '你的版本', theirs: '新版本',
+  retry: '重试保存', discard: '不保存并关闭', save: '保存',
+  panelMenu: '画格操作', insertBefore: '在前面插入画格', insertAfter: '在后面插入画格', duplicate: '复制画格', importHere: '导入图片到此画格',
+  imageOnly: '请选择图片文件', limit: '已达到画格数量上限', loading: '正在载入图片…', failedImage: '无法载入图片',
+  sceneView: '场景视图', useSceneView: '使用场景视图', chooseScene: '选择场景', chooseView: '选择视图',
+  sceneNumber: (number: string) => `场景 ${number}`, sceneChanged: '场景已更改', updateScene: '更新', blockout: '场景画面',
+}, {
+  render: 'Render previz',
+  previz: 'Shot previz', close: 'Close editor', panels: 'Panels',
+  panel: (n: string) => `Panel ${n}`, add: 'Add panel', remove: 'Delete panel', up: 'Move panel earlier', down: 'Move panel later',
+  note: 'Panel note', duration: 'Duration (seconds)', aspect: 'Aspect ratio', surface: 'Panel drawing',
+  pen: 'Pen', eraser: 'Eraser', colour: 'Colour', size: 'Brush size', undo: 'Undo',
+  import: 'Import images', fromCanvas: 'Fill from canvas', chooseImage: 'Choose canvas image', empty: 'Add a panel to draw or import an image',
+  saved: 'Saved', saving: 'Saving…', unsaved: 'Unsaved changes', conflict: 'Conflict',
+  conflictBanner: (session: string) => `This previz was changed by ${session}.`,
+  conflictUnknown: 'This previz was changed elsewhere.', loadTheirs: 'Load their version', showDiff: 'Show differences', yours: 'Your version', theirs: 'Their version',
+  retry: 'Retry save', discard: 'Close without saving', save: 'Save',
+  panelMenu: 'Panel actions', insertBefore: 'Insert panel before', insertAfter: 'Insert panel after', duplicate: 'Duplicate panel', importHere: 'Import image to this panel',
+  imageOnly: 'Choose image files', limit: 'The panel limit has been reached', loading: 'Loading image…', failedImage: 'Could not load image',
+  sceneView: 'Scene view', useSceneView: 'Use a scene view', chooseScene: 'Choose scene', chooseView: 'Choose view',
+  sceneNumber: (number: string) => `Scene ${number}`, sceneChanged: 'Scene changed', updateScene: 'Update', blockout: 'Scene frame',
+})

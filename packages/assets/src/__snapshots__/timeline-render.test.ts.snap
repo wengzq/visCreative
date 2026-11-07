@@ -1,0 +1,681 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Timeline image overlay planning > composites in track order before captions and the encoder filter without mixing image audio 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-i",
+    "logo.png",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "2.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "graph": "[0:v:0]null[i0v0];
+[0:a:0]anull[i0a0];
+[1:v:0]split=2[i1v0][i1v1];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,adelay=0:all=1[a0];
+[v0]concat=n=1:v=1:a=0,tpad=stop_mode=clone:stop_duration=2.000,trim=duration=2.000[base];
+[i1v0]loop=loop=-1:size=1:start=0,fps=30,settb=AVTB,trim=duration=1.000,setpts=round((N+15)/(30*TB))-0.500/TB,scale=160:80,format=yuva420p,colorchannelmixer=aa=0.5,tpad=stop_mode=clone:stop=1,fade=t=in:st=0:d=0.200:alpha=1,fade=t=out:st=0.700:d=0.300:alpha=1,setpts=PTS+0.500/TB[ov0];
+[base][ov0]overlay=x=0:y=80:eof_action=pass:enable='between(t,0.500,1.500)*lt(t,1.500)'[over0];
+[i1v1]loop=loop=-1:size=1:start=0,fps=30,settb=AVTB,trim=duration=2.000,setpts=round((N+0)/(30*TB))-0.000/TB,scale=80:40,format=yuva420p,colorchannelmixer=aa=1,tpad=stop_mode=clone:stop=1,setpts=PTS+0.000/TB[ov1];
+[over0][ov1]overlay=x=200:y=100:eof_action=pass:enable='between(t,0.000,2.000)*lt(t,2.000)'[over1];
+[over1]format=yuv420p,ass=captions.ass:fontsdir=fonts,format=nv12[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=2.000[silence];
+[silence][a0]amix=inputs=2:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=2.000[audio]
+",
+}
+`;
+
+exports[`Timeline render planning > snapshots a crossfade and the clips own audio crossfade 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "3.500",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 3500,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]split=2[i0v0][i0v1];
+[0:a:0]asplit=2[i0a0][i0a1];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=out:st=1.500:d=0.500,adelay=0:all=1[a0];
+[i0v1]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v1];
+[i0a1]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=in:st=0:d=0.500,adelay=1500:all=1[a1];
+[v0][v1]xfade=transition=fade:duration=0.500:offset=1.500,fps=30,settb=AVTB[fold1];
+[fold1]tpad=stop_mode=clone:stop_duration=3.500,trim=duration=3.500[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=3.500[silence];
+[silence][a0][a1]amix=inputs=3:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=3.500[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots a different output aspect and encoder upload filter 1`] = `
+{
+  "args": [
+    "-init_hw_device",
+    "vaapi=gpu",
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "2.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 2000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]null[i0v0];
+[0:a:0]anull[i0a0];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=640:360:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black,fps=24,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.8,adelay=0:all=1[a0];
+[v0]concat=n=1:v=1:a=0,tpad=stop_mode=clone:stop_duration=2.000,trim=duration=2.000,format=nv12,hwupload[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=2.000[silence];
+[silence][a0]amix=inputs=2:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=2.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 24,
+  "height": 360,
+  "mode": "encode",
+  "output": "video",
+  "width": 640,
+}
+`;
+
+exports[`Timeline render planning > snapshots a dip and the clips own audio crossfade 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "3.500",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 3500,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]split=2[i0v0][i0v1];
+[0:a:0]asplit=2[i0a0][i0a1];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=out:st=1.500:d=0.500,adelay=0:all=1[a0];
+[i0v1]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v1];
+[i0a1]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=in:st=0:d=0.500,adelay=1500:all=1[a1];
+[v0][v1]xfade=transition=fadeblack:duration=0.500:offset=1.500,fps=30,settb=AVTB[fold1];
+[fold1]tpad=stop_mode=clone:stop_duration=3.500,trim=duration=3.500[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=3.500[silence];
+[silence][a0][a1]amix=inputs=3:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=3.500[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots a sped-up video with timeline fades 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "1.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 1000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]null[i0v0];
+[0:a:0]anull[i0a0];
+[i0v0]trim=start=0.000:end=2.000,setpts=(PTS-STARTPTS)/2,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=1.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,atempo=2,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=duration=1.000,volume=1,afade=t=in:st=0:d=0.200,afade=t=out:st=0.700:d=0.300,adelay=0:all=1[a0];
+[v0]concat=n=1:v=1:a=0,tpad=stop_mode=clone:stop_duration=1.000,trim=duration=1.000[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=1.000[silence];
+[silence][a0]amix=inputs=2:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=1.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots an image clip and rounds odd dimensions down 1`] = `
+{
+  "args": [
+    "-i",
+    "card.png",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "2.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 2000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]null[i0v0];
+[i0v0]loop=loop=-1:size=1:start=0,setpts=N/(30*TB),trim=duration=2.000,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[v0]concat=n=1:v=1:a=0,tpad=stop_mode=clone:stop_duration=2.000,trim=duration=2.000[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=2.000[silence];
+[silence]amix=inputs=1:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=2.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots audio with gaps, fades and a muted track 1`] = `
+{
+  "args": [
+    "-i",
+    "music.wav",
+    "-/filter_complex",
+    "filter.txt",
+    "-vn",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "5.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 5000,
+  "ext": "m4a",
+  "files": [
+    {
+      "content": "[0:a:0]asplit=2[i0a0][i0a1];
+[i0a0]atrim=start=0.000:end=1.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=in:st=0:d=0.200,afade=t=out:st=0.700:d=0.300,adelay=500:all=1[a0];
+[i0a1]atrim=start=0.000:end=1.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.7,adelay=2000:all=1[a1];
+anullsrc=r=48000:cl=stereo,atrim=duration=5.000[silence];
+[silence][a0][a1]amix=inputs=3:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=5.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "mode": "encode",
+  "output": "audio",
+}
+`;
+
+exports[`Timeline render planning > snapshots mixed concat and transition folds with accumulated timeline offsets 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "9.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 9000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]split=5[i0v0][i0v1][i0v2][i0v3][i0v4];
+[0:a:0]asplit=5[i0a0][i0a1][i0a2][i0a3][i0a4];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,adelay=0:all=1[a0];
+[i0v1]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v1];
+[i0a1]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=out:st=1.500:d=0.500,adelay=2000:all=1[a1];
+[i0v2]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v2];
+[i0a2]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=in:st=0:d=0.500,adelay=3500:all=1[a2];
+[i0v3]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v3];
+[i0a3]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=out:st=1.500:d=0.500,adelay=5500:all=1[a3];
+[i0v4]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v4];
+[i0a4]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,afade=t=in:st=0:d=0.500,adelay=7000:all=1[a4];
+[v0][v1]concat=n=2:v=1:a=0,fps=30,settb=AVTB[fold1];
+[fold1][v2]xfade=transition=fadeblack:duration=0.500:offset=3.500,fps=30,settb=AVTB[fold2];
+[fold2][v3]concat=n=2:v=1:a=0,fps=30,settb=AVTB[fold3];
+[fold3][v4]xfade=transition=fade:duration=0.500:offset=7.000,fps=30,settb=AVTB[fold4];
+[fold4]tpad=stop_mode=clone:stop_duration=9.000,trim=duration=9.000[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=9.000[silence];
+[silence][a0][a1][a2][a3][a4]amix=inputs=6:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=9.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots quarter-speed audio as two pitch-preserving tempo filters 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-vn",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "8.500",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 8500,
+  "ext": "m4a",
+  "files": [
+    {
+      "content": "[0:a:0]anull[i0a0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,atempo=0.5,atempo=0.5,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=duration=8.000,volume=1,afade=t=out:st=7.500:d=0.500,adelay=500:all=1[a0];
+anullsrc=r=48000:cl=stereo,atrim=duration=8.500[silence];
+[silence][a0]amix=inputs=2:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=8.500[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "mode": "encode",
+  "output": "audio",
+}
+`;
+
+exports[`Timeline render planning > snapshots reuse of the same source with split and asplit 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "4.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 4000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]split=2[i0v0][i0v1];
+[0:a:0]asplit=2[i0a0][i0a1];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.8,adelay=0:all=1[a0];
+[i0v1]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v1];
+[i0a1]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,adelay=2000:all=1[a1];
+[v0][v1]concat=n=2:v=1:a=0,tpad=stop_mode=clone:stop_duration=4.000,trim=duration=4.000[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=4.000[silence];
+[silence][a0][a1]amix=inputs=3:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=4.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots video and a music track 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-i",
+    "music.wav",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "3.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 3000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]null[i0v0];
+[0:a:0]anull[i0a0];
+[1:a:0]anull[i1a0];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1,adelay=0:all=1[a0];
+[i1a0]atrim=start=0.000:end=3.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.5,afade=t=out:st=2.500:d=0.500,adelay=0:all=1[a1];
+[v0]concat=n=1:v=1:a=0,tpad=stop_mode=clone:stop_duration=3.000,trim=duration=3.000[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=3.000[silence];
+[silence][a0][a1]amix=inputs=3:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=3.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots video only 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "2.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 2000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]null[i0v0];
+[0:a:0]anull[i0a0];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[i0a0]atrim=start=0.000:end=2.000,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.8,adelay=0:all=1[a0];
+[v0]concat=n=1:v=1:a=0,tpad=stop_mode=clone:stop_duration=2.000,trim=duration=2.000[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=2.000[silence];
+[silence][a0]amix=inputs=2:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=2.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;
+
+exports[`Timeline render planning > snapshots video without audio with a silent output bed 1`] = `
+{
+  "args": [
+    "-i",
+    "one.mp4",
+    "-/filter_complex",
+    "filter.txt",
+    "-map",
+    "[video]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-map",
+    "[audio]",
+    "-c:a",
+    "aac",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-t",
+    "2.000",
+    "-movflags",
+    "+faststart",
+  ],
+  "copies": [],
+  "cwd": "<sources>",
+  "durationMs": 2000,
+  "ext": "mp4",
+  "files": [
+    {
+      "content": "[0:v:0]null[i0v0];
+[i0v0]trim=start=0.000:end=2.000,setpts=PTS-STARTPTS,scale=320:240:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=320:240:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=0.050,trim=duration=2.000,settb=AVTB[v0];
+[v0]concat=n=1:v=1:a=0,tpad=stop_mode=clone:stop_duration=2.000,trim=duration=2.000[video];
+anullsrc=r=48000:cl=stereo,atrim=duration=2.000[silence];
+[silence]amix=inputs=1:normalize=0,alimiter=level=0:latency=1,apad,atrim=duration=2.000[audio]
+",
+      "name": "filter.txt",
+    },
+  ],
+  "fps": 30,
+  "height": 240,
+  "mode": "encode",
+  "output": "video",
+  "width": 320,
+}
+`;

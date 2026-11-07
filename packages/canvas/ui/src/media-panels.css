@@ -1,0 +1,43 @@
+.vis-media-panel { display: flex; flex-direction: column; gap: 10px; width: 100%; height: 100%; min-height: 0; padding: 12px; color: var(--vis-text); background: var(--vis-panel); overflow: auto; }
+/* Short nodes (audio) scroll the whole panel; a shrinking child such as the overflow:auto point list would collapse under its siblings */
+/* The fieldset is display: contents, so its children are the flex items */
+.vis-media-panel > *, .vis-media-panel > fieldset > * { flex-shrink: 0; }
+.vis-media-panel header { font-weight: 600; }
+.vis-media-panel video { display: block; width: 100%; min-height: 60px; max-height: 180px; object-fit: contain; background: var(--vis-bg); }
+.vis-media-panel footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: auto; }
+.vis-media-panel [role="alert"] { color: var(--vis-danger); font-size: 12px; white-space: pre-wrap; }
+.vis-media-panel p { margin: 0; color: var(--vis-text-dim); font-size: 11px; }
+.vis-media-panel input { min-width: 0; accent-color: var(--vis-accent); }
+.vis-media-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.vis-media-panel label input { flex: 1; }
+.vis-media-waveform { position: relative; width: 100%; min-height: 48px; flex-shrink: 0; }
+.vis-media-waveform .vis-audio-waveform { display: block; width: 100%; height: 48px; stroke: var(--vis-text-dim); stroke-width: 2; }
+.vis-media-waveform-seek { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: crosshair; touch-action: none; }
+.vis-media-waveform:has(> input:focus-visible) { outline: 2px solid var(--vis-focus); outline-offset: 3px; }
+.vis-media-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--vis-danger); pointer-events: none; }
+.vis-media-range { position: relative; min-height: 48px; background: var(--vis-node); border-radius: var(--vis-radius-sm); }
+.vis-media-selection { position: absolute; top: 0; bottom: 0; background: var(--vis-accent-soft); border-block: 2px solid var(--vis-accent); pointer-events: none; }
+.vis-media-handle { position: absolute; top: 0; bottom: 0; width: 12px; padding: 0; transform: translateX(-50%); background: var(--vis-accent); border: 1px solid var(--vis-on-accent); border-radius: 3px; cursor: ew-resize; touch-action: none; }
+.vis-media-handle:focus-visible { outline: 2px solid var(--vis-focus); outline-offset: 3px; }
+.vis-media-split-point { top: 3px; bottom: 3px; width: 8px; background: var(--vis-warn); }
+.vis-media-point-list { display: flex; flex-wrap: wrap; gap: 4px; max-height: 80px; overflow: auto; }
+.vis-media-point-list button { font-size: 11px; padding: 3px 6px; }
+.vis-media-times { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.vis-media-rates { display: flex; flex-wrap: wrap; gap: 4px; }
+.vis-media-rates button { flex: 1; min-width: 48px; }
+.vis-media-rates [aria-pressed="true"] { background: var(--vis-accent-soft); border-color: var(--vis-accent); }
+.vis-video-generated { position: absolute; left: 8px; top: 8px; padding: 3px 6px; border-radius: var(--vis-radius-sm); background: var(--vis-scrim); color: var(--vis-on-accent); font-size: 10px; pointer-events: none; }
+.vis-video-player { background: var(--vis-bg); }
+.vis-video-controls { gap: 6px; padding: 18px 8px 8px; color: var(--vis-on-accent); background: linear-gradient(transparent, var(--vis-scrim)); }
+.vis-video-player:not(.is-compact):not(:hover):not(:focus-within) > .vis-video-controls { opacity: 0; }
+.vis-video-player:not(.is-compact):hover > .vis-video-controls, .vis-video-controls:focus-within { opacity: 1; }
+.vis-video-controls .vis-video-time { font-size: 10px; }
+.vis-video-controls .vis-video-progress { min-width: 20px; }
+.vis-video-controls .vis-video-volume input { max-width: 36px; }
+.vis-video-player.is-compact > .vis-video-controls { inset: auto 0 0; padding: 18px 8px 8px; background: linear-gradient(transparent, var(--vis-scrim)); pointer-events: auto; opacity: 0; }
+.vis-video-player.is-compact:hover > .vis-video-controls, .vis-video-player.is-compact > .vis-video-controls:focus-within { opacity: 1; }
+.vis-video-player.is-compact .vis-video-play { position: static; transform: none; width: 30px; height: 30px; border-radius: var(--vis-radius-sm); background: transparent; backdrop-filter: none; }
+.vis-video-player.is-compact .vis-video-progress { position: relative; inset: auto; }
+.vis-audio-controls.vis-media-times { justify-content: space-between; }
+@media (hover: none) { .vis-video-player:not(.is-compact) > .vis-video-controls, .vis-video-player.is-compact > .vis-video-controls { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .vis-media-panel *, .vis-video-player *, .vis-audio-player * { animation: none; transition: none; } }

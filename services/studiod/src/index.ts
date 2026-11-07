@@ -1,0 +1,10 @@
+// Local background process: Gateway (authentication, version negotiation, deduplication, subscriptions) + module assembly. The only process holding business state.
+export { hashToken, issueAgentToken } from './auth'
+export { createGateway, type Gateway, type GatewayDeps, type Peer, type ShutdownReason } from './gateway'
+export { listen } from './server'
+export { type AgentRuntimeFactory, type AgentRuntimes, createSpaceRegistry, openSpaceHost, type SpaceHost, type SpaceRegistry } from './space-host'
+export { IDLE_EXIT_MS, runDir, startStudiod, type Studiod, type StudiodOptions, StudiodRunningError } from './studiod'
+export { claudeRuntime } from './claude'
+export { codexRuntime } from './codex'
+export { deepseekRuntime } from './deepseek'
+export { createKeychainSecretStore, createMemorySecretStore, type SecretStore } from './secret-store'

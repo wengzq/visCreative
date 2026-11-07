@@ -1,0 +1,16 @@
+.vis-tl-overlays, .vis-tl-overlay-track { position: absolute; inset: 0; pointer-events: none; }
+.vis-tl-overlays { z-index: 1; }
+.vis-tl-overlay-slot { position: absolute; }
+.vis-tl-output-frame .vis-tl-overlay-slot > img, .vis-tl-output-frame .vis-tl-overlay-slot > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; visibility: inherit; pointer-events: none; }
+.vis-tl-overlay-hit { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 0; cursor: move; pointer-events: auto; touch-action: none; }
+.vis-tl-overlay-hit:hover { background: transparent; }
+.vis-tl-overlay-hit[aria-selected="true"] { border-color: var(--vis-focus); }
+.vis-tl-overlay-hit:disabled { cursor: default; }
+.vis-tl-overlay-handle { position: absolute; width: 9px; height: 9px; background: var(--vis-panel); border: 1px solid var(--vis-focus); display: none; }
+.vis-tl-overlay-hit[aria-selected="true"] .vis-tl-overlay-handle { display: block; }
+.vis-tl-overlay-handle.is-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.vis-tl-overlay-handle.is-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.vis-tl-overlay-handle.is-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.vis-tl-overlay-handle.is-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+.vis-tl-overlay-presets { width: 100%; margin: 8px 0; }
+.vis-tl-preview-limited { position: absolute; top: 8px; left: 8px; z-index: 4; padding: 4px 8px; border-radius: var(--vis-radius-sm); background: var(--vis-panel); color: var(--vis-text-dim); font-size: 11px; }

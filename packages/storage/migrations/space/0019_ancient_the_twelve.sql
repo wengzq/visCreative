@@ -1,0 +1,1 @@
+ALTER TABLE `nodes` ADD `export_of` text;

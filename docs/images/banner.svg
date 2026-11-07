@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-label="visCreative">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d0d10"/>
+      <stop offset="1" stop-color="#1a1a20"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.35" r="0.55">
+      <stop offset="0" stop-color="#7a3cff" stop-opacity="0.35"/>
+      <stop offset="0.5" stop-color="#18c8ff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#18c8ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#bfc6ff"/>
+    </linearGradient>
+    <linearGradient id="n1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a5b"/>
+      <stop offset="0.55" stop-color="#7a3cff"/>
+      <stop offset="1" stop-color="#18c8ff"/>
+    </linearGradient>
+    <linearGradient id="n2" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#3a1c71"/>
+      <stop offset="0.5" stop-color="#ff5f6d"/>
+      <stop offset="1" stop-color="#ffd27a"/>
+    </linearGradient>
+    <linearGradient id="n3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f2027"/>
+      <stop offset="0.6" stop-color="#2c7a7b"/>
+      <stop offset="1" stop-color="#f6d365"/>
+    </linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#ffffff" fill-opacity="0.07"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="320" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="320" rx="20" fill="url(#dots)"/>
+  <rect width="1280" height="320" rx="20" fill="url(#glow)"/>
+
+  <!-- 画布：文本 → 生图（版本条）→ 生视频 -->
+  <g fill="none" stroke="#9aa0ff" stroke-opacity="0.55" stroke-width="1.6">
+    <path d="M806 150 C 840 150, 840 120, 872 120" stroke-dasharray="5 5"/>
+    <path d="M1004 120 C 1040 120, 1040 196, 1076 196"/>
+  </g>
+  <g>
+    <rect x="690" y="98" width="116" height="104" rx="10" fill="#26262c" stroke="#3a3a44"/>
+    <rect x="704" y="116" width="72" height="6" rx="3" fill="#e6e6e6" fill-opacity="0.75"/>
+    <rect x="704" y="132" width="88" height="5" rx="2.5" fill="#e6e6e6" fill-opacity="0.35"/>
+    <rect x="704" y="146" width="80" height="5" rx="2.5" fill="#e6e6e6" fill-opacity="0.35"/>
+    <rect x="704" y="160" width="60" height="5" rx="2.5" fill="#e6e6e6" fill-opacity="0.35"/>
+
+    <rect x="900" y="38" width="22" height="22" rx="4" fill="url(#n2)"/>
+    <rect x="926" y="38" width="22" height="22" rx="4" fill="url(#n3)"/>
+    <rect x="952" y="38" width="22" height="22" rx="4" fill="url(#n1)" stroke="#ffffff" stroke-width="1.5"/>
+    <rect x="872" y="70" width="132" height="132" rx="12" fill="url(#n1)"/>
+    <rect x="872" y="70" width="132" height="132" rx="12" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="1.5"/>
+
+    <rect x="1076" y="150" width="150" height="92" rx="12" fill="url(#n3)"/>
+    <circle cx="1151" cy="196" r="15" fill="#000000" fill-opacity="0.45"/>
+    <path d="M1146 188 L1159 196 L1146 204 Z" fill="#ffffff"/>
+    <rect x="1088" y="230" width="126" height="3" rx="1.5" fill="#ffffff" fill-opacity="0.3"/>
+    <rect x="1088" y="230" width="52" height="3" rx="1.5" fill="#ffffff"/>
+  </g>
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#9a9aa6" font-size="11">
+    <text x="692" y="90">T  script</text>
+    <text x="874" y="222">image · 3/3</text>
+    <text x="1078" y="262">video</text>
+  </g>
+
+  <!-- 标题 -->
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="72" y="148" font-size="64" font-weight="700" fill="url(#title)" letter-spacing="-1">visCreative</text>
+    <text x="74" y="192" font-size="22" fill="#c9c9d4">A multi-agent creative space on an infinite canvas</text>
+    <text x="74" y="226" font-size="18" fill="#8d8d99">多 Agent 创作空间 · 一张画布，多位 Agent，生成结果自动回填</text>
+  </g>
+</svg>

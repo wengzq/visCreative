@@ -1,0 +1,18 @@
+{
+  "name": "@vis/workbench-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "任务管理：SpaceService、SessionService、待发队列、AgentRuntime 与 Agent 适配器（src/adapters/）。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/domain": "workspace:*",
+    "@vis/storage": "workspace:*"
+  }
+}

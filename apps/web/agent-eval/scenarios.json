@@ -1,0 +1,554 @@
+[
+  {
+    "id": "G1",
+    "title": "Ad copy",
+    "fixture": "none",
+    "prompts": [
+      "请为一款轻便保温杯写一份约30秒的中文广告文案，面向每天通勤的年轻人，语气自然，不编造保温时长等参数。把最终文案放到画布，完成后简短告诉我。"
+    ],
+    "checks": [
+      "one_text",
+      "no_report_node",
+      "copy_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "G2",
+    "title": "Web research",
+    "fixture": "none",
+    "prompts": [
+      "请上网查找城市屋顶花园对夏季降温有什么帮助，用你自己的联网工具查至少两个可靠来源，把简短中文总结和来源链接放到画布。请说明证据的局限。"
+    ],
+    "checks": [
+      "own_web_tool",
+      "sources",
+      "research_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "G3",
+    "title": "CSV chart video",
+    "fixture": "csv",
+    "prompts": [
+      "请读取项目根目录中的CSV文件 {{csvPath}}，把六个月的销售额做成一个3秒柱状图视频。数字和月份要准确，使用本地代码渲染，不用付费生成。将视频交付到画布，并抽帧检查。"
+    ],
+    "checks": [
+      "render_succeeded",
+      "frames_checked",
+      "chart_accuracy",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "G4",
+    "title": "Local image processing",
+    "fixture": "image",
+    "prompts": [
+      "画布上有一张参考图片 {{imageNodeId}}。请在工作目录里写一个本地脚本（Python或ffmpeg均可），把它水平翻转并裁成正方形，导入结果并放到画布。请实际运行脚本，简短说明完成情况。"
+    ],
+    "checks": [
+      "local_command",
+      "asset_import",
+      "image_delivered",
+      "local_workdir",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "G5",
+    "title": "Split character sheets",
+    "fixture": "none",
+    "prompts": [
+      "请为一部发生在未来海港的短片设计五位主要角色，每位包含身份、外观、动机、彼此关系和一句台词。任务可以拆给子代理并行完成，请在能力允许时使用子代理，最后统一风格，把五份角色设定和关系整合交付到画布，不需要生成图片。"
+    ],
+    "checks": [
+      "subagents",
+      "character_delivery",
+      "coherent_delivery",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "B1",
+    "title": "Six-shot breakdown",
+    "fixture": "none",
+    "prompts": [
+      "请把下面的六镜头短片整理为一个脚本节点，不需要生成素材：1清晨闹钟响，2主角冲泡咖啡，3拿起保温杯，4走过雨中街道，5登上公交车，6坐在窗边微笑。每镜4秒，写出景别、运镜和画面描述，明确主角和场景。"
+    ],
+    "checks": [
+      "first_script_replace",
+      "script_valid",
+      "script_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "B2",
+    "title": "Edit only shots 2 and 4",
+    "fixture": "script",
+    "prompts": [
+      "请修改脚本节点 {{scriptNodeId}}：只把第2镜改成主角冲泡红茶、第4镜改成走过阳光下的街道，并同步这两镜的画面提示词；其他镜头和资产全部保持原样。请直接改脚本。"
+    ],
+    "checks": [
+      "only_rows_2_4",
+      "row_revisions",
+      "shot_edit_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "S3",
+    "title": "Batch shot images",
+    "fixture": "script",
+    "dryRunSuffix": "script-batch",
+    "prompts": [
+      "请为脚本节点 {{scriptNodeId}} 的六个镜头批量生成首帧图，使用Mock的mock-image-1模型。请先规划批次，再启动，等我审批后再继续，不要单张提交绕过审批。"
+    ],
+    "checks": [
+      "batch_plan_start",
+      "batch_wait",
+      "no_single_submits",
+      "batch_completed",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Captioned crossfade export",
+    "fixture": "videos",
+    "prompts": [
+      "请按顺序把画布上的三个镜头视频 {{videoNodeIds}} 组装成剪辑节点，每镜加一句对应字幕，镜头间用200毫秒交叉淡化，最后导出视频到画布。使用现有视频，不需要生成新素材。"
+    ],
+    "checks": [
+      "timeline_valid",
+      "captions_transitions",
+      "export_succeeded",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Half-speed shot and captions",
+    "fixture": "timeline",
+    "prompts": [
+      "请修改剪辑节点 {{timelineNodeId}}，只把第2镜放慢到0.5倍速。让字幕继续跟着原来的镜头，保留每镜完整字幕和其他镜头的内容，不需要导出。"
+    ],
+    "checks": [
+      "half_speed",
+      "caption_follow",
+      "other_clips_preserved",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "Q1",
+    "title": "Daily quota stop",
+    "fixture": "quota",
+    "prompts": [
+      "请用Mock的mock-image-1模型依次生成三张海港风景图放到画布。若遇到每日额度用尽就停止，不要重试或更换模型。"
+    ],
+    "checks": [
+      "quota_stop",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "R1",
+    "title": "Child done report",
+    "fixture": "work",
+    "prompts": [
+      "请为一款通勤保温杯写三行中文标语作为文本节点交付到画布，完成后向父工作项报告done，附上交付节点引用，然后等待，不再创建额外工作。"
+    ],
+    "checks": [
+      "done_report_refs",
+      "idle_after_done",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "O1",
+    "title": "Logo across the whole film",
+    "fixture": "overlay",
+    "prompts": [
+      "请在剪辑节点 {{timelineNodeId}} 上，把图片节点 {{logoNodeId}} 作为 Logo 放在画面右上角，覆盖整条剪辑，宽度大约占画面的 12%，然后导出视频到画布。不要改动镜头和字幕，不需要生成新素材。"
+    ],
+    "checks": [
+      "logo_overlay",
+      "media_and_captions_preserved",
+      "export_succeeded",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "O2",
+    "title": "Faded sticker on shot 2",
+    "fixture": "overlay",
+    "prompts": [
+      "请在剪辑节点 {{timelineNodeId}} 的第2镜期间，把图片节点 {{stickerNodeId}} 作为贴纸放在画面中央偏下的位置，淡入0.5秒，只在第2镜出现。不要改动镜头和字幕，不需要导出。"
+    ],
+    "checks": [
+      "sticker_shot2",
+      "media_and_captions_preserved",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "O3",
+    "title": "Semi-transparent logo",
+    "fixture": "overlay-logo",
+    "prompts": [
+      "请把剪辑节点 {{timelineNodeId}} 里的 Logo 改成半透明（50% 不透明度），位置、大小、时间和其他内容都保持不变，不需要导出。"
+    ],
+    "checks": [
+      "logo_half_opacity",
+      "media_and_captions_preserved",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "O4",
+    "title": "Picture-in-picture during shot 1",
+    "fixture": "pip",
+    "prompts": [
+      "请在剪辑节点 {{timelineNodeId}} 上，在第1镜期间把第3镜的视频节点 {{shot3NodeId}} 以画中画放在画面右下角，宽度大约占画面的三分之一，不要画中画的声音，主轨保持不变，然后导出视频到画布。不需要生成新素材。"
+    ],
+    "checks": [
+      "pip_shot3",
+      "media_and_captions_preserved",
+      "export_succeeded",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "V1",
+    "title": "Four-panel blockout",
+    "fixture": "previz",
+    "dryRunSuffix": "previz-blockout",
+    "prompts": [
+      "帮我把这个镜头预演 {{previzNodeId}} 做成灰模小样，我想先看人物走位、构图和运镜。每格的备注和时长都写好了，做好放回画布，抽几帧看看有没有问题。"
+    ],
+    "checks": [
+      "previz_guide_read",
+      "previz_no_unrequested_extract",
+      "render_succeeded",
+      "previz_three_page",
+      "previz_duration",
+      "previz_fps",
+      "previz_video_inputs",
+      "previz_not_final_output",
+      "previz_frames_inspected",
+      "previz_blockout_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "V2",
+    "title": "Missing panel durations",
+    "fixture": "previz-missing-duration",
+    "prompts": [
+      "把这个镜头预演 {{previzNodeId}} 做成灰模小样，先看看人物走位和镜头运动。"
+    ],
+    "checks": [
+      "previz_question",
+      "previz_no_generation",
+      "previz_no_duration_guess",
+      "previz_duration_question_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "V3",
+    "title": "Previz means free rendering",
+    "fixture": "previz",
+    "dryRunSuffix": "previz-blockout",
+    "prompts": [
+      "帮我把这个分镜板 {{previzNodeId}} 做成一段预演，先看构图、人物走位和运镜，做好放回画布。"
+    ],
+    "checks": [
+      "previz_guide_read",
+      "previz_no_unrequested_extract",
+      "previz_render_only",
+      "render_succeeded",
+      "previz_blockout_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "V4",
+    "title": "Protect existing panel drawings",
+    "fixture": "previz",
+    "dryRunSuffix": "previz-refuse",
+    "prompts": [
+      "这个镜头预演 {{previzNodeId}} 的几格画得有点粗糙，帮我把画面弄得好看一点，构图和人物走位保持现在这样。"
+    ],
+    "checks": [
+      "previz_pictures_preserved",
+      "previz_improvement_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "V5",
+    "title": "Clarify unlinked generation",
+    "fixture": "previz-unlinked",
+    "prompts": [
+      "按这个镜头预演 {{previzNodeId}} 生成视频，脚本也在画布上：{{scriptNodeId}}。"
+    ],
+    "checks": [
+      "previz_question",
+      "previz_no_generation",
+      "previz_links_await_confirmation",
+      "previz_generation_question_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "V6",
+    "title": "Leave blockout frames to the user",
+    "fixture": "previz-blockout",
+    "prompts": [
+      "灰模小样 {{blockoutVideoNodeId}} 已经做好了。帮我把它每格开头的画面用到这个镜头预演 {{previzNodeId}}，作为后续生成的构图参考。"
+    ],
+    "checks": [
+      "previz_extract_left_to_user",
+      "previz_pictures_preserved",
+      "previz_extraction_handoff_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "W1",
+    "title": "Rewrite a user-written paragraph",
+    "fixture": "manuscript-chapter",
+    "prompts": [
+      "手稿 {{manuscriptNodeId}} 里“门前”这一节，帮我重写“林舟在旧书店门前停下”开头的那一段，让犹豫的感觉更细一点，保留第三人称和原来的语气，其他段落先别动。"
+    ],
+    "checks": [
+      "writing_guide_read",
+      "writing_proposal_succeeded",
+      "writing_manuscript_unchanged",
+      "writing_unique_anchors",
+      "writing_no_direct_write",
+      "writing_rewrite_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "W2",
+    "title": "Disambiguate a repeated sentence",
+    "fixture": "manuscript-repeat",
+    "prompts": [
+      "手稿 {{manuscriptNodeId}} 里“门外的雨还没停。”出现了两次。只把第二次，也就是“深夜”那一节里的这句，改成“门外的雨渐渐小了。”，第一次和其他文字都保留。"
+    ],
+    "checks": [
+      "writing_proposal_succeeded",
+      "writing_second_occurrence",
+      "writing_unique_anchors",
+      "writing_manuscript_unchanged",
+      "writing_attempts_recorded",
+      "writing_no_direct_write",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "W3",
+    "title": "Delete a user-written note",
+    "fixture": "manuscript-note",
+    "prompts": [
+      "这条备忘 {{manuscriptNodeId}} 已经用不上了，帮我删掉吧。"
+    ],
+    "checks": [
+      "writing_note_exists",
+      "writing_delete_route",
+      "writing_delete_pending",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "W4",
+    "title": "Draft and tighten Agent-owned prose",
+    "fixture": "none",
+    "prompts": [
+      "帮我写一小段中文场景：清晨的渡口，一个人等着迟迟没来的姐姐。两百字左右，克制一点，放到画布上。",
+      "刚才这段再收紧一点，删掉重复的描写，保留等姐姐的悬念，直接改你刚写的那段。"
+    ],
+    "checks": [
+      "writing_agent_draft",
+      "writing_agent_direct_edit",
+      "writing_no_blocking_refusal",
+      "writing_scene_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "W5",
+    "title": "Continue with earlier-episode continuity",
+    "fixture": "manuscript-series",
+    "prompts": [
+      "接着手稿 {{manuscriptNodeId}} 往下写一小段吧。这是《雾中来信》的第二章，第一章也在这个系列里，先看看前文，人物关系、身体情况和他们的约定要接得上，不要改前一章。"
+    ],
+    "checks": [
+      "writing_series_read",
+      "writing_continuation_exists",
+      "writing_other_project_unchanged",
+      "writing_manuscript_unchanged",
+      "writing_continuity_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "W6",
+    "title": "Adapt a chapter into sourced shots",
+    "fixture": "manuscript-shots",
+    "prompts": [
+      "把手稿 {{manuscriptNodeId}} 这一章拆成分镜，写到空脚本 {{scriptNodeId}} 里。按情节安排镜头，先不生成图片或视频，原文保留。"
+    ],
+    "checks": [
+      "writing_shots_exist",
+      "writing_shot_sources",
+      "writing_manuscript_unchanged",
+      "writing_adaptation_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "W7",
+    "title": "Extract settings without overwriting a manual namesake",
+    "fixture": "manuscript-settings",
+    "prompts": [
+      "从手稿 {{manuscriptNodeId}} 这一章里整理出人物和场景，放进项目的设定库，描述简洁一点，按原文来。库里已有的设定先留着，告诉我哪些已经有了。"
+    ],
+    "checks": [
+      "writing_new_settings",
+      "writing_existing_setting_unchanged",
+      "writing_existing_setting_mentioned",
+      "writing_manuscript_unchanged",
+      "writing_extraction_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "D1",
+    "title": "Offer directions for an open brief",
+    "fixture": "none",
+    "prompts": [
+      "我想拍一支三十秒左右的短片，讲一个下班的人在便利店门口等雨停。帮我想想可以怎么拍。"
+    ],
+    "checks": [
+      "directions_no_paid_generation",
+      "directions_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "K1",
+    "title": "Child review text stays working",
+    "fixture": "child-review",
+    "prompts": [
+      "帮我审一下画布上的短片梗概 {{reviewNodeId}}：人物的动作有没有动机，结尾有没有说得太满。写一份简短审阅笔记放到画布上，完成后向父工作区汇报，附上笔记链接。先别改梗概，也不用生成图片。"
+    ],
+    "checks": [
+      "child_text_working",
+      "child_report_links",
+      "child_no_parent_turn",
+      "final_reply_internals"
+    ],
+    "dryRunSuffix": "child-working-report"
+  },
+  {
+    "id": "C1",
+    "title": "Request cleanup and await the author",
+    "fixture": "finished-children",
+    "prompts": [
+      "这两个子工作区“动机审阅”和“结尾审阅”都做完了，我也看过了，帮我把它们清理掉，画布上的内容留着。"
+    ],
+    "checks": [
+      "cleanup_direct_children",
+      "cleanup_pending",
+      "cleanup_no_poll",
+      "cleanup_nothing_deleted",
+      "final_reply_internals"
+    ],
+    "dryRunSuffix": "工作代理检查：{\"scenario\":\"request-delete\",\"workItemIds\":{{childWorkItemIdsJson}}}"
+  },
+  {
+    "id": "C2",
+    "title": "Summarize without unsolicited cleanup",
+    "fixture": "finished-children",
+    "prompts": [
+      "帮我简短总结一下“动机审阅”和“结尾审阅”这两个子工作区现在的状态。"
+    ],
+    "checks": [
+      "cleanup_not_requested",
+      "cleanup_nothing_deleted",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "S1",
+    "title": "Draft an explicitly requested author skill",
+    "fixture": "none",
+    "prompts": [
+      "我做镜头时习惯先写清楚人物想要什么、又在躲什么，因为动作要有动机；再给两种景别和运镜的办法，说清各自会让观众更靠近还是更疏远人物，因为我想自己决定观看的距离；我选好后才细化，不要替我拍板。把这套做法存成我的技能吧，下个项目我还想这样用。"
+    ],
+    "checks": [
+      "skill_one_draft",
+      "skill_library_unchanged",
+      "skill_no_project_paths",
+      "skill_fidelity",
+      "skill_no_frontmatter",
+      "skill_frontmatter_retry",
+      "final_reply_internals"
+    ],
+    "dryRunSuffix": "author-skill-draft author-eval-method\nauthor-frontmatter-retry"
+  },
+  {
+    "id": "S2",
+    "title": "Help with a shot without unsolicited skill capture",
+    "fixture": "none",
+    "prompts": [
+      "我做镜头时习惯先写清楚人物想要什么、又在躲什么，因为动作要有动机；再给两种景别和运镜的办法，说清各自会让观众更靠近还是更疏远人物，因为我想自己决定观看的距离；我选好后才细化，不要替我拍板。现在帮我想一个镜头：姐姐在渡口等弟弟，怕他来，又怕他不来。"
+    ],
+    "checks": [
+      "skill_not_requested",
+      "skill_library_unchanged",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "T1",
+    "title": "Transparent motion graphic",
+    "fixture": "none",
+    "dryRunSuffix": "transparent-render",
+    "prompts": [
+      "我想在手机评测视频上叠一张透明底的数据卡。帮我做一段3秒的小动效，写“续航提升 42%”，卡片轻轻出现，数字清楚一点，四周留空，导出成带透明通道的WebM放到画布上。用免费的本地渲染就好，不用付费生成。"
+    ],
+    "checks": [
+      "transparent_render",
+      "no_shell_chrome",
+      "directions_no_paid_generation",
+      "transparent_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Transparent video on an overlay track",
+    "fixture": "transparent-timeline",
+    "dryRunSuffix": "transparent-overlay",
+    "prompts": [
+      "把这张已经做好的透明数据卡视频 {{transparentVideoNodeId}} 放进剪辑 {{timelineNodeId}}，叠在现有画面上，从开头出现，原视频保留，透明的地方要能看到底下的蓝色画面。做好后导出一份视频到画布，我想看看叠加的效果。不需要生成新素材。"
+    ],
+    "checks": [
+      "transparent_overlay",
+      "transparent_timeline_preserved",
+      "transparent_export",
+      "no_shell_chrome",
+      "directions_no_paid_generation",
+      "transparent_timeline_quality",
+      "final_reply_internals"
+    ]
+  }
+]

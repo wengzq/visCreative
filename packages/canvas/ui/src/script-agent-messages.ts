@@ -1,0 +1,33 @@
+import { defineMessages } from '@vis/ui-kit'
+
+export const scriptAgentMessages = defineMessages({
+  character: '人物', scene: '场景', prop: '道具',
+  addAsset: '添加资产', assetName: '资产名称', description: '描述', save: '保存', cancel: '取消', delete: '删除',
+  uses: (count: string) => `${count} 个镜头使用此资产；删除会移除这些引用`,
+  pick: '从画布选择图片', upload: '上传参考图', generate: '生成参考图', removeImage: '移除参考图',
+  missingImages: (count: string) => `${count} 个资产还没有参考图`,
+  reference: (name: string) => `${name}的参考图`,
+  referenceRequest: (name: string, nodeId: string) => `请为资产「${name}」编写参考图提示词，写入图片节点 ${nodeId} 的 prompt 槽位，不提交生成。`,
+  owner: (name: string) => `由 ${name} 负责`,
+  chooseOwner: '选择负责会话', change: '更换', current: '当前会话', newSession: '新建会话', agentKind: 'Agent 类型',
+  session: '会话', confirm: '确认', noOwner: '尚未选择负责会话',
+  breakdown: '拆解', prompts: '生成提示词', custom: '发送',
+  breakingDown: '拆解中', writingPrompts: '写提示词中', working: '处理中',
+  chooseFirst: '请先选择负责会话',
+  agentUnregistered: '负责会话的 Agent 未注册，只能查看历史记录。请选择其他会话。',
+}, {
+  character: 'Characters', scene: 'Scenes', prop: 'Props',
+  addAsset: 'Add asset', assetName: 'Asset name', description: 'Description', save: 'Save', cancel: 'Cancel', delete: 'Delete',
+  uses: (count: string) => `Used by ${count} shots; deleting removes these references`,
+  pick: 'Pick image from canvas', upload: 'Upload reference image', generate: 'Generate reference image', removeImage: 'Remove reference image',
+  missingImages: (count: string) => `${count} assets have no reference image`,
+  reference: (name: string) => `Reference image for ${name}`,
+  referenceRequest: (name: string, nodeId: string) => `Write the reference image prompt for asset "${name}" into the prompt slot of image node ${nodeId}; do not submit generation.`,
+  owner: (name: string) => `Owned by ${name}`,
+  chooseOwner: 'Choose owning session', change: 'Change', current: 'Current session', newSession: 'New session', agentKind: 'Agent kind',
+  session: 'Session', confirm: 'Confirm', noOwner: 'No owning session selected',
+  breakdown: 'Breakdown', prompts: 'Write prompts', custom: 'Send',
+  breakingDown: 'Breaking down', writingPrompts: 'Writing prompts', working: 'Working',
+  chooseFirst: 'Choose an owning session first',
+  agentUnregistered: 'The owning session’s Agent is no longer registered. Its history is read-only; choose another session.',
+})

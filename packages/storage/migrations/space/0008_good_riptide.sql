@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `work_delivery_id` text;

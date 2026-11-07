@@ -1,0 +1,1 @@
+ALTER TABLE `slot_revisions` ADD `scene_doc` text;

@@ -1,0 +1,16 @@
+{
+  "name": "@vis/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "核心对象与纯规则：快照解析、修订推进、回填资格检查；跨系统协作的端口接口。不做 IO。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*"
+  }
+}

@@ -1,0 +1,33 @@
+import { defineMessages } from '@vis/ui-kit'
+
+export const scriptMessages = defineMessages({
+  assembleTimeline: '组装成剪辑',
+  timelineTitle: (title: string) => `${title} · 剪辑`,
+  timelineCreated: '已组装成剪辑',
+  missingShots: (count: string) => `${count} 个镜头没有视频或首帧`,
+  limitedShots: (count: string) => `${count} 个镜头超出剪辑上限`,
+  noTimelineShots: '还没有镜头具备视频或首帧',
+  create: '新建脚本', patch: '编辑脚本', shot: '镜头', character: '人物', scene: '场景', prop: '道具',
+  shotTitle: (number: string) => `镜头 ${number}`,
+  videoTitle: (number: string) => `镜头 ${number} · 视频`,
+  breakdown: '拆解这份脚本，写入分镜表和资产。',
+  prompts: '为这份脚本编写提示词。',
+  custom: '按要求修改这份脚本。',
+  selectedShots: (ids: string) => `选中的镜头 ID：${ids}`,
+  reference: '准备资产参考图',
+}, {
+  assembleTimeline: 'Assemble timeline',
+  timelineTitle: (title: string) => `${title} · Timeline`,
+  timelineCreated: 'Timeline assembled',
+  missingShots: (count: string) => count === '1' ? '1 shot has no video or first frame' : `${count} shots have no video or first frame`,
+  limitedShots: (count: string) => count === '1' ? '1 shot exceeds the timeline limit' : `${count} shots exceed the timeline limit`,
+  noTimelineShots: 'No shot has a video or first frame yet',
+  create: 'Create script', patch: 'Edit script', shot: 'Shots', character: 'Characters', scene: 'Scenes', prop: 'Props',
+  shotTitle: (number: string) => `Shot ${number}`,
+  videoTitle: (number: string) => `Shot ${number} · Video`,
+  breakdown: 'Break down this script into storyboard shots and assets.',
+  prompts: 'Write prompts for this script.',
+  custom: 'Update this script as requested.',
+  selectedShots: (ids: string) => `Selected shot IDs: ${ids}`,
+  reference: 'Prepare asset reference image',
+})

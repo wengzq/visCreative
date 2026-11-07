@@ -1,0 +1,28 @@
+{
+  "name": "vis-creative",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "fonts:fetch": "node scripts/fetch-fonts.mjs",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "check:agents": "node scripts/check-agent-literals.mjs",
+    "check": "pnpm check:agents && pnpm check:boundaries && pnpm check:i18n && pnpm check:english && pnpm typecheck && pnpm test",
+    "build": "pnpm --filter @vis/cli --filter @vis/studiod --filter @vis/devcli --filter @vis/web build",
+    "dev:studiod": "pnpm build && node scripts/dev-studiod.mjs",
+    "dev:client": "pnpm --filter @vis/devcli build && node apps/devcli/dist/vis-dev.mjs",
+    "dev:web": "pnpm --filter @vis/web build && node apps/web/dist/vis-web.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "check:english": "node scripts/check-english.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.5"
+  }
+}

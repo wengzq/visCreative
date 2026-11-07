@@ -1,0 +1,18 @@
+{
+  "name": "@vis/assets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "素材导入、下载、catalog、版本与受控读取。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/domain": "workspace:*",
+    "@vis/storage": "workspace:*"
+  }
+}

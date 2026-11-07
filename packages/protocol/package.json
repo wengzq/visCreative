@@ -1,0 +1,16 @@
+{
+  "name": "@vis/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RPC 方法、事件、错误码与线上数据结构的 schema；studiod、CLI、UI 共用的唯一契约。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}

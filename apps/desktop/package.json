@@ -1,0 +1,19 @@
+{
+  "name": "@vis/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron 壳：拉起 studiod、管理窗口，渲染层挂载各 UI 包。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/ui-kit": "workspace:*",
+    "@vis/canvas-ui": "workspace:*",
+    "@vis/workbench-ui": "workspace:*"
+  }
+}

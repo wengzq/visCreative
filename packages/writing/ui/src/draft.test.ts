@@ -1,0 +1,93 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { WRITING_LIMITS, type NodeView } from '@vis/protocol'
+import { blockInsert, createWritingDraft } from './draft'
+import type { WritingHost } from './types'
+
+const node = (body = 'Start', revision = 1): NodeView => ({ nodeId: 'writing', kind: 'text', format: 'markdown', x: 0, y: 0, w: 320, h: 240, z: 1, layoutRevision: 1, slots: [{ slotId: 'main', slotKey: 'main', contentType: 'text', revision, content: { type: 'text', body } }] })
+const makeHost = (): WritingHost => ({ node: node(), commit: vi.fn(async () => 'ok' as const), history: async () => ({ versions: [], hasMore: false }), upload: async () => { throw new Error('Unused') }, onClose() {} })
+afterEach(() => vi.useRealTimers())
+it('debounces pauses and bounds continuous typing to one save per maximum wait', async () => {
+  vi.useFakeTimers()
+  const host = makeHost()
+  const controller = createWritingDraft(host)
+  for (let index = 0; index < 60; index++) { controller.getSnapshot().edit(`Text ${index}`); await vi.advanceTimersByTimeAsync(500) }
+  expect(host.commit).toHaveBeenCalledTimes(1)
+  expect(host.commit).toHaveBeenLastCalledWith('Text 59', 1)
+  controller.getSnapshot().edit('After pause')
+  await vi.advanceTimersByTimeAsync(WRITING_LIMITS.autosaveMs - 1)
+  expect(host.commit).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(host.commit).toHaveBeenLastCalledWith('After pause', 2)
+  controller.dispose()
+})
+it('preserves typing during an in-flight save and recognizes events before the reply', async () => {
+  const host = makeHost()
+  const controller = createWritingDraft(host)
+  let release!: () => void
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  host.commit = vi.fn(async (body, revision) => { controller.updateHost({ ...host, node: node(body, revision + 1) }); await waiting; return 'ok' as const })
+  controller.getSnapshot().edit('First')
+  const save = controller.getSnapshot().flush()
+  controller.getSnapshot().edit('Second')
+  release(); expect(await save).toBe(true)
+  expect(host.commit).toHaveBeenCalledTimes(2)
+  expect(host.commit).toHaveBeenLastCalledWith('Second', 2)
+  expect(controller.getSnapshot()).toMatchObject({ body: 'Second', state: 'saved', conflict: false })
+  controller.dispose()
+})
+it('preserves drafts on conflict and retries failed saves without losing the revision', async () => {
+  const host = makeHost()
+  const controller = createWritingDraft(host)
+  controller.getSnapshot().edit('Mine')
+  controller.updateHost({ ...host, node: node('Theirs', 2) })
+  expect(await controller.getSnapshot().flush()).toBe(false)
+  expect(host.commit).not.toHaveBeenCalled()
+  expect(controller.getSnapshot()).toMatchObject({ body: 'Mine', state: 'conflict', conflict: true })
+  controller.getSnapshot().loadTheirs()
+  expect(controller.getSnapshot()).toMatchObject({ body: 'Theirs', revision: 2, state: 'saved', conflict: false, generation: 1 })
+  host.commit = vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValueOnce('ok')
+  controller.updateHost({ ...host, node: node('Theirs', 2) })
+  controller.getSnapshot().edit('Retry')
+  await expect(controller.getSnapshot().flush()).rejects.toThrow('Offline')
+  expect(controller.getSnapshot().state).toBe('unsaved')
+  await controller.getSnapshot().flush()
+  expect(host.commit).toHaveBeenLastCalledWith('Retry', 2)
+  controller.dispose()
+})
+it('returns to saved status when local undo restores the saved body without writing a revision', async () => {
+  vi.useFakeTimers()
+  const host = makeHost()
+  const controller = createWritingDraft(host)
+  controller.getSnapshot().edit('Changed')
+  controller.getSnapshot().edit('Start')
+  await vi.advanceTimersByTimeAsync(WRITING_LIMITS.maxWaitMs)
+  expect(controller.getSnapshot().state).toBe('saved')
+  expect(host.commit).not.toHaveBeenCalled()
+  controller.dispose()
+})
+
+it('keeps inserted text on its own lines so headings stay headings', () => {
+  expect(blockInsert('prose', '', '# One')).toBe('\n\n# One')
+  expect(blockInsert('prose\n', '', '# One')).toBe('\n# One')
+  expect(blockInsert('prose\n\n', '', '# One')).toBe('# One')
+  expect(blockInsert('', 'next', '# One')).toBe('# One\n\n')
+  expect(blockInsert('', '\nnext', '# One')).toBe('# One\n')
+  expect(blockInsert('', '', '# One')).toBe('# One')
+})
+
+it('serializes acceptance through the normal save path and retries with the same review request ID', async () => {
+  const host = makeHost()
+  const controller = createWritingDraft(host)
+  controller.getSnapshot().edit('Local draft')
+  await controller.getSnapshot().flush()
+  const edits = [{ proposalId: 'proposal', editId: 'edit' }]
+  host.commit = vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValueOnce('ok')
+  await expect(controller.getSnapshot().accept('Accepted draft', edits)).rejects.toThrow('Offline')
+  expect(controller.getSnapshot()).toMatchObject({ body: 'Accepted draft', pendingReview: true, state: 'unsaved' })
+  const review = vi.mocked(host.commit).mock.calls[0]![2]
+  expect(review).toMatchObject({ requestId: expect.stringMatching(/^writing-review-/), edits })
+  await controller.getSnapshot().flush()
+  expect(host.commit).toHaveBeenNthCalledWith(2, 'Accepted draft', 2, review)
+  expect(controller.getSnapshot()).toMatchObject({ state: 'saved', pendingReview: false, revision: 3 })
+  controller.dispose()
+})

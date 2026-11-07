@@ -1,0 +1,8 @@
+.vis-tl-clip.is-text { background: color-mix(in srgb, var(--vis-frame-violet) 22%, var(--vis-bg)); border-color: var(--vis-frame-violet); }
+.vis-tl-track.is-text .vis-tl-track-header button { padding: 2px; border: 0; background: transparent; }
+.vis-tl-text-input { resize: vertical; min-height: 76px; width: 100%; font: inherit; }
+.vis-tl-text-hint { margin: 4px 0 12px; font-size: 11px; color: var(--vis-text-dim); }
+.vis-tl-text-hint.is-warning { color: var(--vis-warn); }
+.vis-tl-captions { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 3; }
+.vis-tl-caption { position: absolute; left: 50%; display: none; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; white-space: pre; line-height: 1.2; text-align: center; font-weight: 400; pointer-events: auto; cursor: pointer; }
+.vis-tl-caption[aria-selected="true"] { outline: 1px dashed var(--vis-accent); outline-offset: 4px; }

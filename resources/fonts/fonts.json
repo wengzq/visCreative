@@ -1,0 +1,48 @@
+[
+  {
+    "id": "noto-sans-sc",
+    "family": "Noto Sans SC",
+    "url": "https://raw.githubusercontent.com/google/fonts/c82d9f0e8f6d8ac15a945df9e66798768fc556a7/ofl/notosanssc/NotoSansSC-Regular.otf",
+    "licenseUrl": "https://raw.githubusercontent.com/google/fonts/c82d9f0e8f6d8ac15a945df9e66798768fc556a7/ofl/notosanssc/OFL.txt",
+    "file": "noto-sans-sc.otf",
+    "license": "OFL-1.1",
+    "licenseFile": "noto-sans-sc-OFL.txt",
+    "sha256": "04da2dac7dc3960fad1046d75b9a61ee30ecf3de8dd3b71a7860fbb99492ac21",
+    "licenseSha256": "5e0da210fb04058a8c0087985d2d456b931c2579811a49655721d3cf0c36b6d6"
+  },
+  {
+    "id": "smiley-sans",
+    "family": "Smiley Sans",
+    "file": "smiley-sans.ttf",
+    "url": "https://github.com/atelier-anchor/smiley-sans/releases/download/v2.0.1/smiley-sans-v2.0.1.zip",
+    "archiveEntry": "SmileySans-Oblique.ttf",
+    "archiveSha256": "299c0be6c960ae37361762eca76f7d0cd516615435bb96c0d4b98a1e70178a07",
+    "sha256": "b447d7e781f08bc95c4c9f23ba71ed2b8ebb639aa7184485c71c4ca5afcd25c4",
+    "license": "OFL-1.1",
+    "licenseUrl": "https://raw.githubusercontent.com/atelier-anchor/smiley-sans/67e3821f4b06cbd7155fa6fa69daff4b6f311b76/LICENSE",
+    "licenseFile": "smiley-sans-OFL.txt",
+    "licenseSha256": "9401f4050f1b66c26b6ccdc8b0e14a3c1cc37aac122eda84386f25854a9bec72"
+  },
+  {
+    "id": "lxgw-wenkai",
+    "family": "LXGW WenKai",
+    "url": "https://github.com/lxgw/LxgwWenKai/releases/download/v1.530/LXGWWenKai-Regular.ttf",
+    "licenseUrl": "https://raw.githubusercontent.com/lxgw/LxgwWenKai/4becfb4d5cf0c92cfdb60a6e9b504bda43315325/OFL.txt",
+    "file": "lxgw-wenkai.ttf",
+    "license": "OFL-1.1",
+    "licenseFile": "lxgw-wenkai-OFL.txt",
+    "sha256": "2d73eea94ad808999d90c0000c239a84a33b09d4bc6ab6c5b8bbf1eda8a7fc8b",
+    "licenseSha256": "1a25e35da1031c6c3436fde545bb9cb5aca954e9873afe510c834b8b79bd21a0"
+  },
+  {
+    "id": "zcool-kuaile",
+    "family": "ZCOOL KuaiLe",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf",
+    "licenseUrl": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/zcoolkuaile/OFL.txt",
+    "file": "zcool-kuaile.ttf",
+    "license": "OFL-1.1",
+    "licenseFile": "zcool-kuaile-OFL.txt",
+    "sha256": "812a6fc1fe54b6d73a419245c32dfeba8aa33104d5be90d1cf6af082007cb71d",
+    "licenseSha256": "538078469839b4a2e7ad22bef4ebe41681a4e53749bb2a072144024f1d6d703d"
+  }
+]

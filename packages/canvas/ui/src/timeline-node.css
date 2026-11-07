@@ -1,0 +1,20 @@
+.vis-node-timeline .vis-node-body { overflow: visible; }
+.vis-timeline-card { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+.vis-timeline-preview { position: relative; aspect-ratio: 16 / 9; width: 100%; min-height: 0; overflow: hidden; background: var(--vis-bg); border-radius: inherit; }
+.vis-timeline-preview > img, .vis-timeline-preview > video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.vis-timeline-preview .vis-video-player, .vis-timeline-preview .vis-audio-player { width: 100%; height: 100%; }
+.vis-timeline-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 18px; color: var(--vis-text-faint); text-align: center; font-size: 12px; box-sizing: border-box; }
+.vis-timeline-empty p { margin: 0; max-width: 240px; }
+.vis-timeline-mini { padding: 12px; flex: 1; min-height: 40px; background: var(--vis-panel); border-top: 1px solid var(--vis-panel-border); }
+.vis-timeline-lane { display: flex; align-items: center; gap: 8px; height: 12px; margin-bottom: 5px; color: var(--vis-text-faint); }
+.vis-timeline-blocks { position: relative; height: 100%; flex: 1; border-radius: var(--vis-radius-sm); background: var(--vis-bg); overflow: hidden; }
+.vis-timeline-clip { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; box-sizing: border-box; border-right: 1px solid var(--vis-panel); }
+.vis-timeline-mini footer { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 11px; color: var(--vis-text-dim); font-variant-numeric: tabular-nums; }
+.vis-timeline-outdated { position: absolute; top: 9px; right: 9px; border-radius: var(--vis-radius-sm); background: var(--vis-panel); color: var(--vis-warn); padding: 4px 7px; font-size: 11px; }
+.vis-timeline-history { display: flex; max-width: 640px; overflow-x: auto; gap: 5px; padding: 6px; border-radius: var(--vis-radius-sm); background: var(--vis-panel); border: 1px solid var(--vis-panel-border); }
+.vis-timeline-history button { display: grid; gap: 3px; flex-shrink: 0; padding: 7px 10px; border-radius: var(--vis-radius-sm); background: var(--vis-bg); color: var(--vis-text-dim); border: 1px solid var(--vis-panel-border); font-size: 11px; cursor: pointer; }
+.vis-timeline-history button[aria-pressed="true"], .vis-timeline-history button[aria-current="true"] { border-color: var(--vis-accent); color: var(--vis-text); }
+.vis-timeline-history small { color: var(--vis-text-faint); }
+.vis-timeline-history-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; padding: 8px; color: var(--vis-text-dim); font-size: 11px; }
+.vis-timeline-history-actions button { color: var(--vis-accent); background: var(--vis-bg); border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius-sm); cursor: pointer; }
+.vis-timeline-error { color: var(--vis-danger); font-size: 12px; padding: 8px; margin: 0; }
