@@ -26,9 +26,13 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
+          # package.json names pnpm, which setup-node v5 would then try to cache; these jobs use only Node built-ins.
+          package-manager-cache: false
       - name: Install build tools and enable corresponding runtime sources
         run: |
           sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+          # Fail now rather than after the build if the runner's apt layout changed and source packages stay disabled.
+          grep -q '^Types: deb deb-src' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y mingw-w64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix gcc-13-source build-essential pkg-config nasm meson ninja-build cmake curl xz-utils
       - name: Build pinned LGPL media bundle
@@ -59,6 +63,8 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
+          # package.json names pnpm, which setup-node v5 would then try to cache; these jobs use only Node built-ins.
+          package-manager-cache: false
       - name: Download unverified build
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0 (not used by ci.yml)
         with:
