@@ -25,3 +25,6 @@
 .is-compact .vis-video-progress { position: absolute; bottom: 0; left: 0; right: 0; pointer-events: auto; }
 
 .vis-video-controls button[aria-pressed="true"] { color: var(--vis-accent); }
+/* Canvas nodes crop to fill their card; in fullscreen the player shows the whole frame at its own aspect ratio */
+.vis-video-player:fullscreen { background: #000; }
+.vis-node .vis-video-player:fullscreen video, .vis-node .vis-video-player:fullscreen .vis-video-poster { object-fit: contain; }

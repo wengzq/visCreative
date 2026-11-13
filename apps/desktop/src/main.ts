@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain, session, shell, type OpenDialogOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, type OpenDialogOptions } from 'electron'
 import { PROTOCOL_VERSION } from '@vis/protocol'
 import { mergePath, readLoginShellPath } from '../../../runtime/login-shell-path'
 import { studiodEndpoint } from '../../../runtime/studiod-endpoint'
@@ -29,6 +29,8 @@ const layout = appLayout({
 })
 
 app.setName('visCreative')
+// The web UI has only a dark theme; without this Windows draws a light title bar above it when the OS uses light mode.
+nativeTheme.themeSource = 'dark'
 // Chromium's profile lives beside studiod's data instead of sharing its directory; the single-instance lock follows it,
 // so there is one app per data directory.
 app.setPath('userData', join(layout.dataDir, 'shell'))
@@ -105,10 +107,14 @@ function createWindow() {
     minHeight: 600,
     show: false,
     title: 'visCreative',
+    // Matches --vis-bg in ui-kit's theme.css so a resize or slow first paint never flashes white
+    backgroundColor: '#141414',
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false, spellcheck: false, preload: join(here, 'preload.cjs') },
   })
   mainWindow = win
+  // The web page titles itself generically for browser tabs; the app window, taskbar and Alt+Tab keep the product name
+  win.on('page-title-updated', event => event.preventDefault())
   win.once('ready-to-show', () => win.show())
   win.on('closed', () => {
     mainWindow = undefined

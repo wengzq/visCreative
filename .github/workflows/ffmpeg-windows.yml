@@ -1,0 +1,91 @@
+name: Windows LGPL FFmpeg
+
+on:
+  workflow_dispatch:
+  # Trial builds on the archive need a branch trigger before this workflow reaches its default branch.
+  push:
+    branches: ['ffmpeg-build/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+      - name: Install build tools and enable corresponding runtime sources
+        run: |
+          sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mingw-w64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix gcc-13-source build-essential pkg-config nasm meson ninja-build cmake curl xz-utils
+      - name: Build pinned LGPL media bundle
+        run: node scripts/build-ffmpeg-windows.mjs
+        # The runner context is only available inside steps, not in a job-level env block.
+        env:
+          VIS_FFMPEG_CACHE_DIR: ${{ runner.temp }}/ffmpeg-cache
+          VIS_FFMPEG_OUT_DIR: ${{ runner.temp }}/ffmpeg-out
+          VIS_FFMPEG_JOBS: '4'
+      - name: Upload complete build for Windows verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ffmpeg-win32-x64-unverified
+          path: ${{ runner.temp }}/ffmpeg-out/win32-x64/
+          if-no-files-found: error
+          retention-days: 90
+
+  verify:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+      - name: Download unverified build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0 (not used by ci.yml)
+        with:
+          name: ffmpeg-win32-x64-unverified
+          path: ${{ runner.temp }}/ffmpeg-out/win32-x64
+      - name: Verify licence, sources, PE closure, media and relocation
+        shell: pwsh
+        run: node scripts/ffmpeg/verify-windows.mjs "$env:RUNNER_TEMP/ffmpeg-out/win32-x64"
+      - name: Create runtime ZIP, corresponding source TAR and checksums
+        shell: pwsh
+        run: |
+          $bundle = "$env:RUNNER_TEMP/ffmpeg-out/win32-x64"
+          $release = "$env:RUNNER_TEMP/ffmpeg-release"
+          New-Item -ItemType Directory -Force $release | Out-Null
+          $runtime = Get-ChildItem -LiteralPath $bundle | Where-Object Name -ne 'source'
+          Compress-Archive -LiteralPath $runtime.FullName -DestinationPath "$release/ffmpeg-win32-x64.zip" -CompressionLevel Optimal
+          tar -cf "$release/ffmpeg-source-win32-x64.tar" -C $bundle source
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive creation failed' }
+          $lines = @('ffmpeg-win32-x64.zip', 'ffmpeg-source-win32-x64.tar') | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath "$release/$_" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $_"
+          }
+          [IO.File]::WriteAllText("$release/SHA256SUMS", ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+      - name: Upload verified release files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ffmpeg-win32-x64-release
+          path: ${{ runner.temp }}/ffmpeg-release/
+          if-no-files-found: error
+          retention-days: 90

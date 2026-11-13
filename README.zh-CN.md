@@ -284,7 +284,7 @@ macOS 上 Codex 与 dsh 使用外层沙箱：允许工作区写入和联网，�
 
 严格内置媒体验收可设置 `VIS_PACKAGED_REQUIRE_BUNDLED_MEDIA=1`：要求内置 ffmpeg、许可证及书面源码提供说明，不允许将源码归档装入应用，不允许 libx264，并确认测试 `PATH` 中找不到 ffmpeg。使用仅包含系统目录的 `PATH`，并设 `SHELL=/usr/bin/false` 阻止导入登录 shell 的 PATH，通过 Node 的绝对路径启动测试。arm64 的 LGPL ffmpeg 9.0.2 已通过此验收，mock 视频和本地渲染均选择 VideoToolbox。
 
-可用 `pnpm build:ffmpeg:mac --arch arm64` 从锁定版本的源码构建 macOS LGPL 媒体工具包（Intel 使用 `--arch x64`）；构建工具、输出与缓存设置、许可证及验证方法见 [RFC 0046 步骤 c2](docs/rfc/0046-desktop-app.md#as-built-step-c2-2026-11-13)。
+可用 `pnpm build:ffmpeg:mac --arch arm64` 从锁定版本的源码构建 macOS LGPL 媒体工具包（Intel 使用 `--arch x64`）；构建工具、输出与缓存设置、许可证及验证方法见 [RFC 0046 步骤 c2](docs/rfc/0046-desktop-app.md#as-built-step-c2-2026-11-13)。 Windows x64 uses the same ten pinned components plus MIT NVENC/AMF headers, the oneVPL dispatcher and Zlib-licensed zlib for required PNG/APNG support, built by `node scripts/build-ffmpeg-windows.mjs` on Ubuntu 24.04 with mingw-w64/MSVCRT. The Windows FFmpeg workflow builds and verifies the DLL bundle on Windows, then produces a runtime ZIP, a separate exact-source TAR and SHA256SUMS without publishing; it supports manual dispatch and archive trial pushes to `ffmpeg-build/**`. Run `node scripts/ffmpeg/verify-windows.mjs <out>/win32-x64` for licence, import-closure, media and relocation checks; the Media Foundation trial is skipped when unavailable. The cross-build still needs its first Actions acceptance; see [Windows FFmpeg](docs/rfc/0046-desktop-app.md#as-built-windows-ffmpeg-2026-11-13).
 
 ### 本机渲染与自备库
 

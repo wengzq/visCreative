@@ -1,0 +1,38 @@
+[
+  {
+    "id": "nv-codec-headers",
+    "version": "13.1.15.0",
+    "url": "https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/n13.1.15.0.tar.gz",
+    "archive": "nv-codec-headers-13.1.15.0.tar.gz",
+    "license": "MIT",
+    "licenseFiles": ["include/ffnvcodec/nvEncodeAPI.h", "include/ffnvcodec/dynlink_cuda.h", "include/ffnvcodec/dynlink_cuviddec.h", "include/ffnvcodec/dynlink_nvcuvid.h", "include/ffnvcodec/dynlink_loader.h"],
+    "sha256": "2255bc74d038b95aa4be30f5f66322c2176acbdb90ada1851db6993536fbeaf7"
+  },
+  {
+    "id": "amf",
+    "version": "1.5.3",
+    "url": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF/archive/refs/tags/v1.5.3.tar.gz",
+    "archive": "amf-1.5.3.tar.gz",
+    "license": "MIT",
+    "licenseFiles": ["LICENSE.txt"],
+    "sha256": "eb7d7d14c239117478f229cf174dc359fa2ba1e0817a7cb16277cc5251709f0f"
+  },
+  {
+    "id": "libvpl",
+    "version": "2.17.0",
+    "url": "https://github.com/intel/libvpl/archive/refs/tags/v2.17.0.tar.gz",
+    "archive": "libvpl-2.17.0.tar.gz",
+    "license": "MIT",
+    "licenseFiles": ["LICENSE"],
+    "sha256": "4de3e2faf1e8307fb282e4a43f443191810f6a6b0a484fffa7995ba1c814c6ec"
+  },
+  {
+    "id": "zlib",
+    "version": "1.4",
+    "url": "https://zlib.net/fossils/zlib-1.4.tar.gz",
+    "archive": "zlib-1.4.tar.gz",
+    "license": "Zlib",
+    "licenseFiles": ["LICENSE"],
+    "sha256": "02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584"
+  }
+]

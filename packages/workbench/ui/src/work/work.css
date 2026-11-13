@@ -70,7 +70,7 @@
 .vis-work-waiting { margin-top: 7px; color: var(--vis-warn); font-size: 11px; }
 .vis-work-waiting-link { display: block; width: 100%; padding: 0; border: 0; background: transparent; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .vis-work-thumbnails { display: flex; gap: 5px; margin-top: 9px; overflow: hidden; }
-.vis-work-thumbnails > img, .vis-work-thumbnails > video { flex: 1; min-width: 0; width: 50%; height: 84px; object-fit: cover; border-radius: var(--vis-radius-sm); background: var(--vis-bg); }
+.vis-work-thumbnails > img, .vis-work-thumbnails > video { flex: 1; min-width: 0; width: 50%; height: 84px; object-fit: contain; border-radius: var(--vis-radius-sm); background: var(--vis-bg); }
 .vis-work-review-hint, .vis-work-feedback { margin-top: 7px; font-size: 11px; color: var(--vis-text-dim); }
 .vis-work-feedback { color: var(--vis-text-faint); }
 .vis-work-card-footer { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 8px; color: var(--vis-text-faint); font-size: 10px; }

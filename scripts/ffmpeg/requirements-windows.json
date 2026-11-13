@@ -1,0 +1,6 @@
+{
+  "encoders": {
+    "remove": ["h264_videotoolbox", "aac_at"],
+    "add": ["h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"]
+  }
+}

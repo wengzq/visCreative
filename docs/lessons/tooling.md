@@ -244,3 +244,10 @@
 - **Cause:** a process created directly by the Electron main process after `ready` inherits handles of that process, including its output pipes, whatever `stdio` and `detached` say. The same spawn before `ready`, or from plain Node, does not behave this way.
 - **Instead:** on Windows start a process that must outlive the app through the shell: PowerShell `Start-Process` with the script on stdin and the paths passed as base64 (`windowsStartScript` in `apps/desktop/src/studiod-process.ts`). The process then has no output handles from the app, so it writes its own log (`VIS_STUDIOD_LOG`), and the launcher's exit code says only whether the launch worked. POSIX keeps the direct detached spawn.
 - **Found in:** [RFC 0046 step b](../rfc/0046-desktop-app.md#as-built-step-b-2026-11-12), `apps/desktop/e2e/smoke.e2e.ts`.
+
+## A cross-compiler runtime's sources follow its Built-Using field
+
+- **Symptom:** the Windows FFmpeg source offer could include the runner's newest GCC sources instead of the ones the linked mingw-w64 runtime (libgcc, libstdc++, winpthread) was actually built from.
+- **Cause:** Ubuntu's `gcc-mingw-w64` packages can stay built from an older `gcc-13` source version than the one `apt` currently offers.
+- **Instead:** record the exact installed package versions and their `Built-Using` field, fetch that exact GCC source and distribution patches (from the primary source archive when `apt` no longer indexes the version), and list them with their runtime exception and archive hashes. See `scripts/build-ffmpeg-windows.mjs`.
+- **Found in:** [RFC 0046, Windows FFmpeg](../rfc/0046-desktop-app.md).
