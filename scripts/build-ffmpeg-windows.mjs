@@ -59,7 +59,8 @@ for (const key of Object.keys(env)) {
 // Whole-archive also resolves pthread references introduced later by the compiler's static libstdc++.
 const runtimeFlags = `-static-libgcc -static-libstdc++ -Wl,--whole-archive,/usr/${triple}/lib/libwinpthread.a,--no-whole-archive`
 Object.assign(env, {
-  CC: cc, CXX: cxx, LD: cc, CROSS: `${triple}-`, AR: `${triple}-ar`, RANLIB: `${triple}-ranlib`, RC: `${triple}-windres`, STRIP: `${triple}-strip`,
+  // No global LD: libtool asks LD which linker it is, and the compiler driver makes it fall back to MSVC lib.exe archiving.
+  CC: cc, CXX: cxx, CROSS: `${triple}-`, AR: `${triple}-ar`, RANLIB: `${triple}-ranlib`, RC: `${triple}-windres`, STRIP: `${triple}-strip`,
   CFLAGS: '-O2', CXXFLAGS: '-O2', LDFLAGS: runtimeFlags,
   PKG_CONFIG: 'pkg-config', PKG_CONFIG_PATH: '', PKG_CONFIG_LIBDIR: `${join(prefix, 'lib/pkgconfig')}:${join(prefix, 'share/pkgconfig')}`,
   PKG_CONFIG_SYSROOT_DIR: '', CMAKE_PREFIX_PATH: prefix,
@@ -75,10 +76,11 @@ await writeFile(crossFile, mesonText)
 await writeFile(cmakeFile, cmakeText)
 const commands = []
 let cwd = work
-function build(command, parameters) {
-  commands.push({ source: basename(cwd), command, args: parameters })
-  if (dry) console.log(JSON.stringify(redactPaths({ cwd, command, args: parameters }, prefix, work)))
-  else return run(command, parameters, { cwd, env, stdio: 'inherit' })
+function build(command, parameters, extraEnv = {}) {
+  const extra = Object.keys(extraEnv).length ? { env: extraEnv } : {}
+  commands.push({ source: basename(cwd), command, args: parameters, ...extra })
+  if (dry) console.log(JSON.stringify(redactPaths({ cwd, command, args: parameters, ...extra }, prefix, work)))
+  else return run(command, parameters, { cwd, env: { ...env, ...extraEnv }, stdio: 'inherit' })
 }
 if (dry) {
   console.log('Cross-build environment:', JSON.stringify(redactPaths(Object.fromEntries(['CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'PKG_CONFIG_LIBDIR'].map(key => [key, env[key]])), prefix, work)))
@@ -122,9 +124,10 @@ for (const source of manifest) {
       break
     case 'libvpx':
       // Upstream does not support shared libraries on win64. BSD libvpx can be embedded in shared avcodec.
-      build('./configure', [`--prefix=${prefix}`, '--target=x86_64-win64-gcc', '--enable-static', '--disable-shared', '--disable-examples', '--disable-tools', '--disable-docs', '--disable-unit-tests', '--disable-webm-io', '--as=nasm'])
-      build('make', [`-j${jobs}`])
-      build('make', ['install'])
+      build('./configure', [`--prefix=${prefix}`, '--target=x86_64-win64-gcc', '--enable-static', '--disable-shared', '--disable-examples', '--disable-tools', '--disable-docs', '--disable-unit-tests', '--disable-webm-io', '--as=nasm'], { LD: cc })
+      // libvpx links through the compiler driver; keep it on the posix-threads compiler rather than its ${CROSS}gcc default.
+      build('make', [`-j${jobs}`], { LD: cc })
+      build('make', ['install'], { LD: cc })
       break
     case 'opus':
       cmake(['-DOPUS_BUILD_TESTING=OFF', '-DOPUS_BUILD_PROGRAMS=OFF', '-DOPUS_DRED=OFF', '-DOPUS_OSCE=OFF', '-DOPUS_DEEP_PLC=OFF'])
@@ -275,7 +278,7 @@ await writeFile(join(staging, 'BUILDINFO.json'), JSON.stringify(redactPaths({
   sources: [...manifest, ...toolchainSources.map(({ licenseDirectory, ...source }) => source)],
   configureFlags, commands, compiler: run(cc, ['--version']).split('\n')[0], toolchain, imports,
   crossFiles: { meson: mesonText, cmake: cmakeText },
-  buildEnvironment: Object.fromEntries(['CC', 'CXX', 'LD', 'CROSS', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'PKG_CONFIG_LIBDIR'].map(key => [key, env[key]])),
+  buildEnvironment: Object.fromEntries(['CC', 'CXX', 'CROSS', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'PKG_CONFIG_LIBDIR'].map(key => [key, env[key]])),
 }, prefix, work), null, 2) + '\n')
 await rm(output, { recursive: true, force: true })
 await rename(staging, output)
