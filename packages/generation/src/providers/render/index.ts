@@ -141,7 +141,11 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
     void libraryFailure.catch(() => {})
     const orLibraryFailure = <T>(work: Promise<T>) => Promise.race([work, libraryFailure])
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
-    const closeBrowser = () => { void browser?.close().catch(() => {}) }
+    let browserClosing: Promise<void> | undefined
+    const closeBrowser = () => {
+      if (browser && !browserClosing) browserClosing = browser.close().catch(() => {})
+      return browserClosing
+    }
     signal.addEventListener('abort', closeBrowser, { once: true })
     try {
       signal.throwIfAborted()
@@ -196,7 +200,7 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
         await orLibraryFailure(page.evaluate(`window.vis.seek(${params.timeS ?? 0})`))
         if (errors.length) throw new RenderError('Scene frame rendering failed')
         await writeFile(part, await captureFrame(() => page.screenshot({ type: 'png' })))
-        await browser.close().catch(() => {})
+        await closeBrowser()
         browser = undefined
         await finish({ width: params.width, height: params.height })
         return
@@ -219,6 +223,8 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
           ? ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-crf', '18', '-b:v', '0', '-auto-alt-ref', '0']
           : [...(videoEncoder!.filter ? ['-vf', videoEncoder!.filter] : []), '-c:v', videoEncoder!.name, ...encoderArgs, '-movflags', '+faststart']), part,
       ], { stdio: ['pipe', 'ignore', 'pipe'] })
+      // A pipe error can reject encoded before the process releases its output file on Windows.
+      const encoderClosed = new Promise<void>(resolve => { encoder.once('close', () => resolve()) })
       const killEncoder = () => { encoder.kill('SIGKILL') }
       signal.addEventListener('abort', killEncoder, { once: true })
       let stderr = ''
@@ -226,7 +232,7 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
       const encoded = new Promise<void>((resolve, reject) => {
         encoder.stdin.once('error', reject)
         encoder.once('error', error => reject((error as { code?: string }).code === 'ENOENT' ? new RenderError(`Cannot find ${ffmpeg}; install ffmpeg first`, 'render_unavailable') : error))
-        encoder.once('exit', code => code === 0 ? resolve() : reject(new RenderError(`ffmpeg encoding failed: ${stderr.trim()}`, 'render_unavailable')))
+        encoder.once('close', code => code === 0 ? resolve() : reject(new RenderError(`ffmpeg encoding failed: ${stderr.trim()}`, 'render_unavailable')))
       })
       encoded.catch(() => {})
       try {
@@ -244,22 +250,32 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
         }
       } catch (error) {
         encoder.kill('SIGKILL')
-        await encoded.catch(() => {})
+        await encoderClosed
         signal.removeEventListener('abort', killEncoder)
         throw error
       } finally {
         encoder.stdin.end()
       }
-      try { await encoded } finally { signal.removeEventListener('abort', killEncoder) }
+      try { await encoded } finally {
+        await encoderClosed
+        signal.removeEventListener('abort', killEncoder)
+      }
       // The video is finished: a failed close must not discard it, and only a late library request can still invalidate it.
-      await browser.close().catch(() => {})
+      await closeBrowser()
       browser = undefined
       if (missingLibrary !== undefined) throw new RenderError('')
       signal.throwIfAborted()
       const meta: Meta = { width: params.width, height: params.height, durationMs: Math.round((frames / params.fps) * 1000), fps: params.fps, transparent: params.transparent, hasAlpha: params.transparent }
       await finish(meta)
     } catch (error) {
-      await rm(part, { force: true })
+      await closeBrowser()
+      // Windows can retain a transient file lock after process teardown. rm retries only in recursive mode.
+      try {
+        await rm(part, { force: true, ...(process.platform === 'win32' ? { recursive: true, maxRetries: 5, retryDelay: 100 } : {}) })
+      } catch (cleanupError) {
+        // Cleanup must not reject the serial queue and strand every subsequent render.
+        error = cleanupError
+      }
       // An environment failure stays itself: installing the library would not fix it.
       const libraryError = missingLibrary !== undefined && !(error instanceof RenderError && error.code === 'render_unavailable')
       const failure = !libraryError ? error
@@ -275,7 +291,7 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
       } })
     } finally {
       signal.removeEventListener('abort', closeBrowser)
-      await browser?.close().catch(() => {})
+      await closeBrowser()
     }
   }
 

@@ -1,5 +1,19 @@
 # Tooling lessons
 
+## Scene readiness polls must include WebGL initialization
+
+- **Symptom:** the first Escape review case fails on Windows before sending any key, while later review cases pass.
+- **Cause:** the fixture waits for Add view to become enabled, which requires a ready WebGL viewport and an asynchronous scene build. Vitest's default one-second poll expires during the first renderer initialization under CI load; Playwright's page timeout does not extend that poll.
+- **Instead:** give only the mount readiness poll an explicit `10_000` ms budget, as with the previz persistence wait. Keep the enabled condition and all Escape assertions intact.
+- **Found in:** [scene review browser fixture](../../apps/web/src/client/scene-proposal-review-render.test.ts), Windows CI, 2026-11-13.
+
+## Separate notifications need separate delivery waits
+
+- **Symptom:** silent work deletion reaches another project's inbox, but the immediately following slot-notification assertion fails on Windows.
+- **Cause:** the gateway sends inbox and slot updates as two NDJSON messages. A named pipe can deliver them in separate data callbacks; observing the first message does not establish that the second has arrived. A request response on another connection provides no such ordering either.
+- **Instead:** wait for both notification methods before asserting them. Preserve token invalidation, handshake refusal and cross-project delivery assertions; do not change gateway permissions or combine unrelated event contracts to accommodate transport chunking.
+- **Found in:** [work deletion gateway regression](../../services/studiod/src/gateway.test.ts), Windows CI, 2026-11-13.
+
 ## Browser persistence polls have their own timeout
 
 - **Symptom:** the previz image-picker import passes alone but its persisted underlay is still null when the full browser suite's poll expires under load.

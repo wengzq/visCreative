@@ -164,6 +164,7 @@ describe('render provider', () => {
       await expect(provider.cancel!('stuck')).resolves.toEqual({ cancelled: true })
       expect(await provider.getTask('stuck')).toEqual({ state: 'cancelled' })
       expect(existsSync(join(dir, 'stuck', 'out.mp4'))).toBe(false)
+      expect(existsSync(join(dir, 'stuck', 'out.part.mp4'))).toBe(false)
       await provider.submit(request(ANIME_PAGE), { idempotencyKey: 'next' })
       expect((await settle(provider, 'next')).state).toBe('succeeded')
     }, 30_000)

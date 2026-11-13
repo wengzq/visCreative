@@ -411,7 +411,7 @@ pnpm --filter @vis/web readme-shots  # 中英文 README 截图（需先构建，
 
 端到端测试会启动真实的后台和网页宿主，配合脚本化的假 Agent 与本地假生成服务器运行；不调用任何付费接口；macOS 沙箱回归只创建测试专用服务的假钥匙串条目并在 finally 删除，不读取生产 Key。
 
-[GitHub Actions CI](.github/workflows/ci.yml) 使用 Node 24，每个 PR 和推送到 `main` 都在 Linux 上执行检查、构建和一轮完整浏览器 e2e。为节约私有仓库分钟数，Windows/macOS 只在推送到 `main` 和手动触发时检查、构建；手动触发也包含 Linux e2e。CI 下载字幕字体、配置 ffmpeg、报告 ASS 滤镜缺失导致的跳过，并上传失败日志和截图，不需要服务商密钥或真实 Agent。Linux 没有隔离沙箱，所以原生命令审批用例由共用的平台判断明确跳过；注册表和附件测试仍会运行。CI 使用两个浏览器测试进程，默认每个测试限时 40 秒；本地仍为 20 秒，各断言的等待时间不变。临时 Fontconfig 配置让浏览器使用已下载的中文字体。这不代表产品已完整支持 Linux；平台覆盖和预期跳过项见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+[GitHub Actions CI](.github/workflows/ci.yml) 使用 Node 24，每个 PR 和推送到 `main` 都在 Linux 上执行检查、构建和一轮完整浏览器 e2e。推送到 `main` 时还会在 Windows 和 macOS 检查和构建。手动触发支持 `os=all|ubuntu|windows|macos`（默认 `all`），只有选择 Ubuntu 时才包含 Linux e2e。公开仓库使用免费 runner；归档仓库的工作流已停用，不再使用。CI 下载字幕字体、配置 ffmpeg、报告 ASS 滤镜缺失导致的跳过，并上传失败日志和截图，不需要服务商密钥或真实 Agent。Linux 没有隔离沙箱，所以原生命令审批用例由共用的平台判断明确跳过；注册表和附件测试仍会运行。CI 使用一个浏览器测试进程，默认每个测试限时 40 秒；本地仍为 20 秒，各断言的等待时间不变。临时 Fontconfig 配置让浏览器使用已下载的中文字体。这不代表产品已完整支持 Linux；平台覆盖和预期跳过项见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 安全模型
 
@@ -489,7 +489,7 @@ RFC 0010 升级保留历史事件与请求记录：旧游标重取当前快照�
 - [x] RFC 0018 界面中英切换：默认跟随浏览器语言，在「设置 › 通用」切换（换浏览器也保留），后台错误与 Skill 问题按原因码本地化并保留英文兜底，失败通知保留结构化原因，旧结果诊断显式映射为界面文案，`pnpm check:i18n` 拦截写死的中文界面文案
 - [x] RFC 0019 界面打磨第一批：主按钮和选中统一用靛蓝主色，项目名只出现一次，隐藏调试信息，画布文本节点渲染 Markdown，会话输入区改成一张卡片配圆形发送 / 停止按钮，Agent 回复带名称，空会话有引导
 - [x] RFC 0020 界面打磨第二批：对话框统一遮罩和关闭按钮，收件箱、今日用量等浮层不压暗页面；文字箭头和关闭符号换成 SVG 图标；设置改为分组导航；会话列表和看板卡片只留一层框；写入图片或视频时由后端把节点高度调整到素材比例
-- [x] RFC 0022 Windows 支持：共用平台 lockfile、跨平台构建与测试工具、studiod 命名管道、Windows 凭据管理器、不经 shell 启动 Codex / dsh、识别 junction 的自动审批边界、选目录与在资源管理器中显示、Chrome / Edge 查找，以及事先提醒 Windows 上 Agent 没有隔离沙箱 后续修复已统一 Skill ZIP 限额、为副本原子替换增加有界重试、等待 Claude/Codex 进程真正退出，并限制长文大纲 DOM；macOS 回归已覆盖，Windows 仍须按[已知问题](docs/known-issues.md)复测。
+- [x] RFC 0022 Windows 支持：共用平台 lockfile、跨平台构建与测试工具、studiod 命名管道、Windows 凭据管理器、不经 shell 启动 Codex / dsh、识别 junction 的自动审批边界、选目录与在资源管理器中显示、Chrome / Edge 查找，以及事先提醒 Windows 上 Agent 没有隔离沙箱 后续修复已统一 Skill ZIP 限额、为副本原子替换增加有界重试、等待 Claude/Codex 进程真正退出，并限制长文大纲 DOM；macOS 回归已覆盖，Windows 仍须按[已知问题](docs/known-issues.md)复测。 渲染取消会先等待编码器与 Chrome 关闭，再清理部分输出；Windows 短暂文件锁采用有界重试，清理失败也不会阻塞后续渲染。
 - [x] RFC 0021 节点组件（第四期 a）：图片、视频、音频节点的顶部工具条由操作目录驱动；不依赖服务商的 ffmpeg 本地处理以幂等后台任务执行并可撤销（裁剪、宫格切分、截取、抽帧、分离音频、自定义与智能切分、变速）；生成类操作只在服务商模型声明时出现；可编辑节点标题；视频控件收为一行、音频波形可拖动定位；输入面板支持带编号的参考引用。审查修复统一仅含素材的媒体引用编号，停止会话或回收时取消媒体任务，按发起轮次校验写回，瞬时推送进度，并兼容图片方向与微小时长差异。生成面板和剧本提示词中的 `@` 可搜索已连接的参考素材，以及「画布上」分组里兼容的未连接素材（包括隐藏的工作节点）。选择画布素材会先连接，再插入编号标签；删除标签不会断开连接。画布结果按层级从上到下最多显示 50 个匹配项，超出时提示缩小搜索范围，达到模型参考数量上限时禁用相应候选项。
 - [x] RFC 0023 脚本节点第一步（4b-1）：脚本节点装一张可编辑的分镜表（按行冲突、撤销、导出）；人物、场景、道具作为共享资产并可挂参考图；由负责会话拆解剧本、撰写首帧 / 尾帧 / 视频提示词（标记过期与手改）；从镜头建单个生成节点
 - [x] RFC 0023 第二步（4b-2）：镜头之间的首尾帧衔接（连续镜头参考上一镜的帧图，可选严格模式抽取上一镜视频的最后一帧）；按分镜批量生成帧图和视频，由服务端执行，重启续跑、不重复提交、额度用完时暂停；用户发起需确认，Agent 发起需审批后才执行
@@ -534,7 +534,7 @@ RFC 0010 升级保留历史事件与请求记录：旧游标重取当前快照�
 - [ ] 已知问题：Windows 上的测试稳定性和一些 UI 小问题，清单见 [docs/known-issues.md](docs/known-issues.md)
 - [ ] 负载下的性能：Windows 上机器负载高时，单测和浏览器测试会超时（页面加载超过 5 秒、每个测试文件各自启动 studiod 和 Chrome）；浏览器 e2e 已改为同时跑 4 个文件，准备阶段的超时消失、总时长不变；下一步测量启动、首屏加载和单测并行度，并确认应用本身是否也会变慢
 - [ ] 「释放」：空闲时关闭项目（RFC 0011 推迟）
-- [ ] RFC 0046 [桌面应用](docs/rfc/0046-desktop-app.md)（步骤 a、b、c1、c2 已完成：运行前提、源码外壳、临时签名的 arm64 DMG 打包和独立的打包验收测试，以及随包附带的、从源码构建的 macOS LGPL ffmpeg 工具包；首个适用于 Apple 芯片的预览版 [0.1.0-preview.1](https://github.com/aliuda/visCreative/releases/tag/v0.1.0-preview.1) 已于 2026-11-13 作为 GitHub 预发布版发布）：基于 Electron 的 macOS（Apple 芯片与 Intel）和 Windows 应用，自行启动 studiod，并在主进程内运行现有网页宿主，界面包不改；内置 LGPL 版 ffmpeg 和字幕字体，以书面说明提供单独托管的源码，在用户 PATH 之后向 Agent 提供内置 ffmpeg 后备，并从登录 shell 读取 PATH，从访达启动时也能找到 Agent 命令行。步骤：studiod 运行前提、外壳、打包、未签名预览版（Windows 自动更新，macOS 提示有新版本），最后是签名并公证的正式版
+- [ ] RFC 0046 [桌面应用](docs/rfc/0046-desktop-app.md)（步骤 a、b、c1、c2 已完成：运行前提、源码外壳、临时签名的 arm64 DMG 打包和独立的打包验收测试，以及随包附带的、从源码构建的 macOS LGPL ffmpeg 工具包；适用于 Apple 芯片的预览版以 GitHub 预发布版发布，最新为 2026-11-13 的 [0.1.0-preview.2](https://github.com/aliuda/visCreative/releases/tag/v0.1.0-preview.2)）：基于 Electron 的 macOS（Apple 芯片与 Intel）和 Windows 应用，自行启动 studiod，并在主进程内运行现有网页宿主，界面包不改；内置 LGPL 版 ffmpeg 和字幕字体，以书面说明提供单独托管的源码，在用户 PATH 之后向 Agent 提供内置 ffmpeg 后备，并从登录 shell 读取 PATH，从访达启动时也能找到 Agent 命令行。步骤：studiod 运行前提、外壳、打包、未签名预览版（Windows 自动更新，macOS 提示有新版本），最后是签名并公证的正式版
 
 ## 致谢
 
@@ -544,4 +544,4 @@ visCreative 的大部分开发是在 [Orca](https://github.com/stablyai/orca)（
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 wengzq
+[MIT](LICENSE) © 2026 aliuda

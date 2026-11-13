@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      os:
+        description: Runner to verify
+        type: choice
+        options: [all, ubuntu, windows, macos]
+        default: all
 
 permissions:
   contents: read
@@ -16,12 +22,13 @@ concurrency:
 jobs:
   verify:
     name: Check and build (${{ matrix.os }})
-    # While the repository is private, reserve the more expensive runners: Windows for main and manual runs, macOS for manual runs.
+    # The public repository uses free runners; the archive workflow is disabled and unused.
+    # Main covers all three runners; pull requests use Ubuntu and manual runs can select one runner.
     # windows-2022, because node-gyp cannot use the Visual Studio 18 on windows-2025 to build better-sqlite3.
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || github.event_name == 'push' && '["ubuntu-24.04", "windows-2022"]' || '["ubuntu-24.04", "windows-2022", "macos-15"]') }}
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || github.event_name == 'push' && '["ubuntu-24.04", "windows-2022", "macos-15"]' || inputs.os == 'ubuntu' && '["ubuntu-24.04"]' || inputs.os == 'windows' && '["windows-2022"]' || inputs.os == 'macos' && '["macos-15"]' || '["ubuntu-24.04", "windows-2022", "macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:

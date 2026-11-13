@@ -1751,6 +1751,8 @@ describe('Work item gateway', () => {
     other.notifications.length = 0
     await c.call('work.delete', { requestId: rid(), workItemId: quiet.item.workItemId })
     await until(() => other.notifications.some(note => note.method === 'events.workInboxChanged'))
+    // Named pipes can deliver these separate notifications in different data chunks.
+    await until(() => other.notifications.some(note => note.method === 'events.workSlotsChanged'))
     expect(other.notifications.some(note => note.method === 'events.workSlotsChanged')).toBe(true)
     await expect(c.call('work.get', { workItemId: quiet.item.workItemId })).rejects.toMatchObject({ code: 'not_found' })
   })

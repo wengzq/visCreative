@@ -8,4 +8,5 @@ Each entry gives the **symptom**, the **cause** and **what to do instead** in a 
 | --- | --- |
 | [ui.md](ui.md) | Web UI, React components, browser behavior |
 | [agents.md](agents.md) | Agent adapters, ACP, tool and permission handling |
+| [generation.md](generation.md) | Generation providers, rendering and encoder lifecycle |
 | [tooling.md](tooling.md) | Build, test and shell environment |

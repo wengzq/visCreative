@@ -114,6 +114,8 @@ studiod 的 `prepareAgentCli(dataDir, cliBinDir, sourceEnv?)` 返回 `{ cliBinDi
 
 - Chrome 默认路径补上 Windows：`%ProgramFiles%\Google\Chrome\Application\chrome.exe`、`%ProgramFiles(x86)%\...`、`%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`，再加上 Edge（`msedge.exe`，同样是 Chromium）。
 
+Render cancellation teardown (2026-11-13): wait for the encoder's `close` event independently of stdin errors, and await Chrome closure before deleting partial output. Windows retries transient EBUSY/EPERM removal failures up to five times with a 100 ms linear backoff. A persistent cleanup failure must not reject the serial queue or prevent the next job from running. The cancellation regression delays both process closures and verifies the queue continues even if cleanup fails.
+
 ### 8. 测试与 e2e
 
 - 测试里的 `/tmp` 改成 `os.tmpdir()`，`/bin/sh` 和 shebang 脚本改成 `process.execPath` + `.mjs`。

@@ -17,7 +17,7 @@ const rendered = () => page.evaluate(() => (window as any).rendered as { bench: 
 const stats = () => page.evaluate(() => (window as any).stats as { flushes: number; commits: number; disposedOutlines: number; registrations: number; requests: unknown[]; resolves: number })
 async function mount(mode = 'pending') {
   await page.evaluate(mode => (window as any).mount(mode), mode)
-  if (mode !== 'cache') await expect.poll(() => button('Add view').isEnabled()).toBe(true)
+  if (mode !== 'cache') await expect.poll(() => button('Add view').isEnabled(), { timeout: 10_000 }).toBe(true)
 }
 
 describe.skipIf(!existsSync(chromePath()))('Scene proposal review interactions', () => {
