@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { formatFinding, identityFindings, parseWords, personalTerms, scanText } from './privacy-rules.mjs'
+import { formatFinding, identityFindings, parseWords, personalTerms, PUBLIC_AGENT_EMAILS, scanText } from './privacy-rules.mjs'
 
 // Samples are assembled at runtime so this file never holds a literal that looks private.
 const at = '@'
@@ -59,6 +59,13 @@ describe('personal terms', () => {
 it('requires noreply identities for commits that reach the public repository', () => {
   expect(identityFindings([{ role: 'author', email: `123+me${at}users.noreply.github.com` }, { role: 'committer', email: `noreply${at}github.com` }])).toEqual([])
   expect(identityFindings([{ role: 'author', email: `jane${at}corp-mail.com` }])).toEqual([{ rule: 'author identity is not a noreply address', source: 'public rule' }])
+})
+
+it('allows every snapshot agent email in both text and public commit identities', () => {
+  for (const email of PUBLIC_AGENT_EMAILS) {
+    expect(rules(`Co-Authored-By: Agent <${email}>`)).toEqual([])
+    expect(identityFindings([{ role: 'author', email }])).toEqual([])
+  }
 })
 
 describe('check-privacy command', () => {

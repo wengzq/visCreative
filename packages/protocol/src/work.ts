@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { CanvasNodeKind, Id, RequestId, Revision } from './common'
-import { AgentKind, ApprovalStatus } from './session'
+import { AgentKind, ApprovalStatus, SessionSummary, session } from './session'
 
 // Contracts for work items, dispatch and message recall; see docs/rfc/0009.
 
@@ -62,6 +62,7 @@ export const WorkSessionView = z.object({
   silentSince: z.int().nullable().default(null),
   sessionId: Id,
   agentKind: AgentKind,
+  agentConfig: SessionSummary.shape.agentConfig,
   title: z.string(),
   activeTurnId: Id.nullable(),
   // One-line summary of current activity, e.g. "Generating video - 68%" or "Waiting for your reply"; null if absent.
@@ -212,10 +213,23 @@ export const work = {
       title: z.string().trim().min(1).max(60),
       brief: z.string().min(1).max(20_000),
       agentKind: AgentKind,
+      agentConfig: z.object({
+        model: z.string().min(1).nullable().default(null),
+        effort: z.string().min(1).nullable().default(null),
+        serviceTier: z.string().min(1).nullable().default(null),
+      }).optional().transform(config => config && Object.values(config).some(value => value !== null) ? config : undefined).optional(),
       activate: z.boolean().optional(),
       reviewBy: ReviewBy.optional(),
     }),
     result: Queued,
+  },
+  agentOptions: {
+    params: z.object({ agentKind: AgentKind }),
+    result: session.agentOptions.result,
+  },
+  setAgentConfig: {
+    params: session.setAgentConfig.params.omit({ sessionId: true }).extend({ workItemId: Id }),
+    result: SessionSummary,
   },
   // agentKind is required to create a session when the work item has none.
   activate: { params: z.object({ ...Transition, agentKind: AgentKind.optional() }), result: Queued },

@@ -70,7 +70,7 @@ function secondSession(item: WorkItemView) {
 }
 
 async function child(brief = 'Do the assigned work') {
-  const item = work.dispatch({ requestId: rid(), parentId: parent.workItemId, title: 'Child', brief, agentKind: 'codex' }).item
+  const item = (await work.dispatch({ requestId: rid(), parentId: parent.workItemId, title: 'Child', brief, agentKind: 'codex' }, () => undefined)).item
   await sessions.idle()
   return item
 }
@@ -297,7 +297,8 @@ describe('Unreported completed child turns', () => {
 
   it('does not read event sequence numbers to order messages in the same delivery or render a tied warning', async () => {
     frozen = true
-    const item = work.dispatch({ requestId: rid(), parentId: parent.workItemId, title: 'Batched child', brief: 'First input', agentKind: 'codex' }).item
+    const item = (await work.dispatch({ requestId: rid(), parentId: parent.workItemId, title: 'Batched child', brief: 'First input', agentKind: 'codex', activate: false }, () => undefined)).item
+    work.activate({ requestId: rid(), workItemId: item.workItemId })
     work.reply({ requestId: rid(), workItemId: item.workItemId, body: 'Second input' })
     work.reply({ requestId: rid(), workItemId: item.workItemId, body: 'Third input' })
     await sessions.idle()
@@ -457,7 +458,7 @@ describe('Unreported completed child turns', () => {
   })
 
   it('does not notify for an author conversation without a delivered dispatch, reply or feedback', async () => {
-    const item = work.dispatch({ requestId: rid(), parentId: parent.workItemId, title: 'Conversation', brief: '', agentKind: 'codex' }).item
+    const item = (await work.dispatch({ requestId: rid(), parentId: parent.workItemId, title: 'Conversation', brief: '', agentKind: 'codex' }, () => undefined)).item
     sessions.sendMessage({ requestId: rid(), sessionId: actor(item).sessionId, text: 'A conversation with the author', refs: [] })
     await sessions.idle()
     await end(lastTurn(item))

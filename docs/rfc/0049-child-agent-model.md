@@ -40,7 +40,7 @@ Update each Agent's developer instructions (`prompt.ts`) with one short paragrap
 
 ## UI
 
-No new controls. The child session's existing model picker shows the value the parent set. The work item drawer's session row shows the model label next to the Agent kind when it is not the default, through `messages.ts` in both languages.
+No new controls. The child session's existing model picker shows the value the parent set. The work item drawer's session row shows the model label next to the Agent kind when its configuration is not the default (including effort-only and service-tier-only settings), through `messages.ts` in both languages.
 
 ## Tests
 
@@ -52,3 +52,15 @@ No new controls. The child session's existing model picker shows the value the p
 ## Rollout
 
 One step. The new `agentConfig` fields on the contract default to null, so older clients and stored results keep working.
+
+## Implementation notes (2026-11-13)
+
+The session and work-item paths share one validator and the existing ten-minute per-kind catalog cache. Catalog reads happen before writes. The work service requires a caller resolver for dispatch and child configuration: it resolves the caller before the probe, then unconditionally resolves it again inside the write transaction and uses that fresh actor for permission and relationship checks. The gateway supplies the resolver without eagerly evaluating it. The UI-only session.setAgentConfig path has no active-turn requirement. A changed main session returns `busy` so the caller can retry against the new session. Request replays validate the stored fingerprint before reading catalogs or resolving the current main session, preserving later author changes.
+
+Only root workspaces receive the child-configuration guidance, through shared Codex/DeepSeek/ACP instructions or the Claude developer prompt. Cards and drawers use one shared label helper: the Agent kind and per-kind index stay separate from the model, effort and service-tier display. Any non-null setting shows configuration, including effort-only or tier-only settings with the default model label. Session-button accessible names retain only the Agent kind and index. A shared per-kind client cache deduplicates catalog reads; the drawer renders before those reads finish and updates labels afterwards, falling back to the exact id or localized default-model copy when unavailable. The existing model picker shows the saved settings. No new controls or storage migrations are needed.
+
+## Review corrections (2026-11-13)
+
+Dispatch normalizes an omitted config, an empty object and an all-null config to the same omitted value before fingerprinting. Authenticated successful replay has a dedicated lookup path before target-session/relationship or recall/delete guards; fingerprint conflicts still fail and caller authentication still applies to retries. Known VisErrors from catalog reads retain their original reason and details. If the catalog has no default model, an effort-only or tier-only request names that field and asks for an explicit model, listing the valid model ids.
+
+The client catalog cache retains successful reads for ten minutes and failed reads for thirty seconds, sharing pending requests across card/drawer mounts and review reloads. Catalog failures do not delay review data or actions. Regression tests cover both replay orders, pending recall/delete, fresh actor resolution for both writes, root-only instructions, labels and accessible names, and a drawer opening while its shared catalog response is held.

@@ -1,4 +1,4 @@
-import type { DispatchInput } from '@vis/workbench-core'
+import { CHILD_AGENT_CONFIG_INSTRUCTIONS, type DispatchInput } from '@vis/workbench-core'
 
 /** Appended to the Claude Code preset system prompt. Skills teach the creative workflow; this only covers the environment and hard rules */
 export const SYSTEM_APPEND = `
@@ -70,7 +70,7 @@ export function systemAppend(work?: DispatchInput['workContext']): string {
 <工作区协作>
 按用户要求、所属工作区的 brief、后续回复与审阅意见创作。画布和资产属于项目，可以共同读写；修改内容时遵循 expectedRevision。
 ${work.parentId === null
-    ? '当前是根工作区，可以用 vis work dispatch 派发一层子工作项。子工作区看不到聊天记录，brief 必须完整写明目标、上下文、工作范围、交付物与验收条件，将参考节点 ID 写进 brief。根工作区的结果与问题直接告诉用户，不调用 vis work report。'
+    ? `${CHILD_AGENT_CONFIG_INSTRUCTIONS}\n当前是根工作区，可以用 vis work dispatch 派发一层子工作项。子工作区看不到聊天记录，brief 必须完整写明目标、上下文、工作范围、交付物与验收条件，将参考节点 ID 写进 brief。根工作区的结果与问题直接告诉用户，不调用 vis work report。`
     : '当前工作区有父项，不再派发子工作项。需要决定、遇到阻塞或需要升级时调用 vis work report，kind 分别用 question / blocked / escalation，写清现状、已尝试的方法和需要的决定；报告送给上级工作区，随后结束本回合，等待回复自动唤醒，不轮询、不运行等待脚本。完成后调用 vis work report，kind: done，body 说明结果与验证，refs 附上交付的 nodeIds / assetVersionIds；报告成功后保持空闲并结束本回合，等待审阅结果。'}
 ${work.hasChildren
     ? '子工作项的报告会通过持久工作消息自动唤醒你，不要轮询 vis work get / vis work list，不要运行等待脚本。可对直接子项激活、回收、回复与审阅。处理 question / blocked / escalation 前先用 vis work get 检查消息是否已有 resolvedBy；用户可能已回复。vis work reply 返回 already_resolved 时先阅读所附的首次回复，避免重复决定；确有必要时不带 replyTo 追加说明。收到 done 后检查产物，只能在该子工作项 reviewBy 为 parent 时调用 vis work review；reviewBy 为 user 时交给用户审阅。'

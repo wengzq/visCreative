@@ -5,6 +5,83 @@ import { chromium } from 'playwright-core'
 import { expect, it } from 'vitest'
 import { chromePath } from './platform'
 
+it.skipIf(!existsSync(chromePath()))('Keeps relation handles when content updates before measured dimensions return', async () => {
+  const bundle = await build({
+    stdin: {
+      resolveDir: resolve(import.meta.dirname, '..'), loader: 'tsx',
+      contents: `
+        import { useLayoutEffect } from 'react'
+        import { createRoot } from 'react-dom/client'
+        import { flushSync } from 'react-dom'
+        import { applyNodeChanges, Handle, Position, ReactFlow, ReactFlowProvider, useStoreApi } from '@xyflow/react'
+        import '@xyflow/react/dist/style.css'
+        import { toFlowNode } from '../../packages/canvas/ui/src/flow-nodes'
+        import { inputEdges } from '../../packages/canvas/ui/src/graph'
+        const root = createRoot(document.getElementById('canvas'))
+        const views = ['source', 'result'].map((nodeId, i) => ({
+          nodeId, kind: 'text', x: i * 400, y: i * 40, w: 320, h: 240, z: i, layoutRevision: 1,
+          slots: [{ slotId: nodeId, slotKey: 'main', revision: 1, content: { type: 'text', body: nodeId } }],
+          ...(i ? { inputs: ['source'] } : {}),
+        }))
+        let nodes = views.map(view => toFlowNode(view, undefined, false, undefined))
+        let store
+        const held = []
+        const onNodesChange = changes => held.push(...changes.filter(change => change.type === 'dimensions'))
+        function Probe() {
+          const api = useStoreApi()
+          useLayoutEffect(() => { store = api }, [api])
+          return null
+        }
+        function NodeBody() {
+          return <><Handle id="out-right" type="source" position={Position.Right} />
+            <Handle id="in-left" type="target" position={Position.Left} /></>
+        }
+        const nodeTypes = { text: NodeBody }
+        const render = () => flushSync(() => root.render(<ReactFlowProvider>
+          <ReactFlow nodes={nodes} edges={inputEdges(views)} nodeTypes={nodeTypes} onNodesChange={onNodesChange}>
+            <Probe />
+          </ReactFlow>
+        </ReactFlowProvider>))
+        render()
+        window.run = () => {
+          // Force the first measurement, then reconcile content before acknowledging its dimensions.
+          store.getState().updateNodeInternals(new Map(nodes.map(node => [node.id, {
+            id: node.id, nodeElement: document.querySelector('[data-id="' + node.id + '"]'), force: true,
+          }])))
+          const bounds = () => nodes.map(node => Boolean(store.getState().nodeLookup.get(node.id).internals.handleBounds))
+          const before = bounds()
+          const pendingDimensions = held.length
+          nodes = nodes.map(node => toFlowNode({ ...node.data.view, title: 'Delivered' }, undefined, false, undefined, node))
+          render()
+          const afterContent = bounds()
+          nodes = applyNodeChanges(held, nodes)
+          render()
+          return { before, pendingDimensions, afterContent, afterAcknowledgement: bounds() }
+        }
+      `,
+    },
+    outfile: 'canvas.js', bundle: true, write: false, format: 'iife', jsx: 'automatic',
+    define: { 'process.env.NODE_ENV': '"development"' },
+  })
+  const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.setContent('<div id="canvas" style="width:1200px;height:900px"></div>')
+    await page.addStyleTag({ content: bundle.outputFiles.find(file => file.path.endsWith('.css'))!.text })
+    await page.addScriptTag({ content: bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text })
+    await expect.poll(() => page.locator('.react-flow__node').count()).toBe(2)
+    const result = await page.evaluate(() => (window as any).run())
+    expect(result.before).toEqual([true, true])
+    expect(result.pendingDimensions).toBeGreaterThan(0)
+    expect(result.afterContent).toEqual([true, true])
+    expect(result.afterAcknowledgement).toEqual([true, true])
+    await expect.poll(() => page.locator('.react-flow__edge').count()).toBe(1)
+    expect(errors).toEqual([])
+  } finally { await browser.close() }
+}, 15_000)
+
 it.skipIf(!existsSync(chromePath()))('Keeps canvas callbacks stable and rejects bindings from discarded renders', async () => {
   const bundle = await build({
     stdin: {

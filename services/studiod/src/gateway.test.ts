@@ -24,11 +24,13 @@ let studiod: Studiod
 let dispatched: Dispatched[]
 let spaceId: string
 let media: MediaTools
+let catalogReads: number
+let catalogGate: Promise<void> | undefined
 
 const models: AgentModelOption[] = [{ id: 'model-a', label: '模型 A', isDefault: true, efforts: [{ id: 'high', label: '高' }], defaultEffort: 'high', serviceTiers: [] }]
 
 const fakeRuntime: AgentRuntimeFactory = ({ spaceId, db, report, stream, requestApproval }) => ({
-  async agentOptions() { return models },
+  async agentOptions() { catalogReads++; await catalogGate; return models },
   async ensureReady() {},
   async dispatchTurn(input) {
     const { token, tokenHash } = issueAgentToken(spaceId)
@@ -50,6 +52,8 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'vis-studiod-'))
   vi.stubEnv('VIS_PROJECTS_DIR', join(dir, 'projects'))
   dispatched = []
+  catalogReads = 0
+  catalogGate = undefined
   media = createFfmpegMedia()
   studiod = await startStudiod({
     dataDir: dir,
@@ -1238,6 +1242,75 @@ describe('Agent', () => {
     await until(() => dispatched.length === 1)
     return { ui: c, nodeId, sessionId, turn: dispatched[0]! }
   }
+
+  it('dispatches configured children through the shared catalog cache and restricts configuration to direct children', async () => {
+    const { ui: c, turn } = await startTurn()
+    const a = await agent(turn.token)
+    const root = (await a.call('work.get', {})).item
+    const config = { model: 'model-a', effort: 'high', serviceTier: 'default' }
+    expect(await a.call('work.agentOptions', { agentKind: 'codex' })).toEqual({ models })
+    expect(await c.call('session.agentOptions', { sessionId: turn.sessionId })).toEqual({ models })
+    expect(catalogReads).toBe(1)
+    await expect(a.call('work.agentOptions', { agentKind: 'claude' })).rejects.toMatchObject({ code: 'unavailable', rpc: { data: { reason: 'session.agent_models_unsupported' } } })
+    await expect(a.call('work.agentOptions', { agentKind: 'missing-agent' })).rejects.toMatchObject({ code: 'unavailable', rpc: { data: { reason: 'session.agent_unconfigured' } } })
+    const request = { requestId: rid(), title: 'Configured child', brief: 'Explore', agentKind: 'codex', agentConfig: config }
+    const created = await a.call('work.dispatch', request)
+    expect(created.item.sessions[0].agentConfig).toEqual(config)
+    await until(() => dispatched.some(input => input.sessionId === created.item.sessions[0].sessionId))
+    const firstTurn = dispatched.find(input => input.sessionId === created.item.sessions[0].sessionId)!
+    expect(firstTurn.agentConfig).toEqual(config)
+    expect(await a.call('work.dispatch', request)).toEqual(created)
+    expect((await a.call('work.get', { workItemId: created.item.workItemId })).item.sessions[0].agentConfig).toEqual(config)
+    const next = { requestId: rid(), workItemId: created.item.workItemId, model: null, effort: 'high', serviceTier: null }
+    const updated = await a.call('work.setAgentConfig', next)
+    expect(updated.agentConfig).toEqual({ model: null, effort: 'high', serviceTier: null })
+    expect(await a.call('work.setAgentConfig', next)).toEqual(updated)
+    await until(() => c.notifications.some(event => event.params.type === 'session.updated'))
+    expect(c.notifications).toEqual(expect.arrayContaining([expect.objectContaining({ params: expect.objectContaining({ type: 'session.updated', payload: updated }) })]))
+    expect(catalogReads).toBe(1)
+    await expect(a.call('work.setAgentConfig', { ...next, requestId: rid(), workItemId: root.workItemId })).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(c.call('work.setAgentConfig', { ...next, requestId: rid() })).rejects.toMatchObject({ code: 'forbidden' })
+    const childAgent = await agent(firstTurn.token)
+    const sibling = await a.call('work.dispatch', { requestId: rid(), title: 'Sibling', brief: 'Explore', agentKind: 'codex', activate: false })
+    await expect(childAgent.call('work.setAgentConfig', { ...next, requestId: rid(), workItemId: sibling.item.workItemId })).rejects.toMatchObject({ code: 'forbidden' })
+    const db = studiod.spaces.get(spaceId)!.db
+    const grandchild = await a.call('work.dispatch', { requestId: rid(), title: 'Nested fixture', brief: 'Explore', agentKind: 'codex', activate: false })
+    db.update(s.workItems).set({ parentId: created.item.workItemId }).where(eq(s.workItems.id, grandchild.item.workItemId)).run()
+    await expect(a.call('work.setAgentConfig', { ...next, requestId: rid(), workItemId: grandchild.item.workItemId })).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(a.call('work.dispatch', { ...request, requestId: rid(), agentConfig: { ...config, model: 'missing' } })).rejects.toMatchObject({ code: 'invalid_params', message: expect.stringContaining('model-a') })
+    await expect(a.call('work.dispatch', { ...request, requestId: rid(), agentConfig: { ...config, effort: 'low' } })).rejects.toMatchObject({ code: 'invalid_params', message: expect.stringContaining('high') })
+    const count = db.select().from(s.workItems).all().length
+    await expect(a.call('work.dispatch', { ...request, requestId: rid(), agentKind: 'claude' })).rejects.toMatchObject({ code: 'unavailable' })
+    expect(db.select().from(s.workItems).all()).toHaveLength(count)
+    // The author can override the parent at any time, and replaying an older request leaves that edit intact.
+    const author = await c.call('session.setAgentConfig', { requestId: rid(), sessionId: updated.sessionId, model: null, effort: null, serviceTier: null })
+    await a.call('work.setAgentConfig', next)
+    expect((await a.call('work.get', { workItemId: created.item.workItemId })).item.sessions[0].agentConfig).toEqual(author.agentConfig)
+    childAgent.close()
+    a.close()
+    c.close()
+  })
+
+  it.each(['work.dispatch', 'work.setAgentConfig'])('rechecks the active Agent turn in %s after waiting for a model catalog', async method => {
+    const { ui: c, turn } = await startTurn()
+    const a = await agent(turn.token)
+    const parent = (await a.call('work.get', {})).item
+    const child = method === 'work.setAgentConfig' ? (await c.call('work.dispatch', { requestId: rid(), parentId: parent.workItemId, title: 'Existing child', brief: 'Explore', agentKind: 'codex', activate: false })).item : null
+    let release!: () => void
+    catalogGate = new Promise<void>(resolve => { release = resolve })
+    const pending = method === 'work.dispatch'
+      ? a.call(method, { requestId: rid(), title: 'Ended turn child', brief: 'Explore', agentKind: 'codex', agentConfig: { model: 'model-a', effort: 'high' } })
+      : a.call(method, { requestId: rid(), workItemId: child.workItemId, model: 'model-a', effort: 'high', serviceTier: null })
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'forbidden' })
+    await until(() => catalogReads === 1)
+    turn.end()
+    release()
+    await rejected
+    expect((await c.call('work.list', {})).items.some((item: { title: string }) => item.title === 'Ended turn child')).toBe(false)
+    if (child) expect((await c.call('work.get', { workItemId: child.workItemId })).item.sessions[0].agentConfig.model).toBeNull()
+    a.close()
+    c.close()
+  })
 
   it('guide.get returns the guide index and a requested guide for an Agent', async () => {
     const { ui: c, turn } = await startTurn()

@@ -30,7 +30,7 @@ export function WorkBoard(p: WorkBoardProps) {
   const t = useMessages(workMessages)
   const format = useFormat()
   const statuses = statusLabels(locale)
-  const [scope, setScope] = useState<'space' | 'all'>('space')
+  const [scope, setScope] = useState<'space' | 'all'>('all')
   useEffect(() => { p.onScopeChange?.(scope) }, [scope, p.onScopeChange])
   const [projects, setProjects] = useState<string[]>([])
   const [older, setOlder] = useState(false)
@@ -77,7 +77,11 @@ export function WorkBoard(p: WorkBoardProps) {
       setTarget(null)
     }
   }}>
-    <header className="vis-work-board-heading"><div><h1>{t.board}</h1></div><div className="vis-work-board-controls"><div role="tablist" aria-label={t.boardScope}>{(['space', 'all'] as const).map(value => <button key={value} role="tab" aria-selected={scope === value} onClick={() => setScope(value)}>{value === 'space' ? t.currentProject : t.allProjects}</button>)}</div><button className={p.slots.used >= p.slots.limit ? 'is-full' : ''} onClick={p.onSlots}><RunningIcon active={p.slots.used > 0} />{t.globalRunning(format.number(p.slots.used), format.number(p.slots.limit))}</button></div></header>
+    <header className="vis-work-board-heading">
+      <h1>{t.board}</h1>
+      <div role="tablist" aria-label={t.boardScope}>{(['all', 'space'] as const).map(value => <button key={value} role="tab" aria-selected={scope === value} onClick={() => setScope(value)}>{value === 'space' ? t.currentProject : t.allProjects}</button>)}</div>
+      <button className={`vis-work-board-slots${p.slots.used >= p.slots.limit ? ' is-full' : ''}`} onClick={p.onSlots}><RunningIcon active={p.slots.used > 0} />{t.globalRunning(format.number(p.slots.used), format.number(p.slots.limit))}</button>
+    </header>
     {scope === 'all' ? <div className="vis-work-project-filters" aria-label={t.projectFilter}><button aria-pressed={!projects.length} onClick={() => setProjects([])}>{t.all}</button>{p.projects.map(project => <button key={project.spaceId} aria-pressed={projects.includes(project.spaceId)} onClick={() => setProjects(current => current.includes(project.spaceId) ? current.filter(id => id !== project.spaceId) : [...current, project.spaceId])}>{project.name}</button>)}</div> : null}
     {groups.pinned.length || dragging?.active ? <div className={`vis-work-pins${!groups.pinned.length ? ' is-drop-target' : ''}${target === 'pinned' ? ' is-over' : ''}`} data-work-drop="pinned" aria-label={t.pinned}><span>{groups.pinned.length ? t.pinned : t.pinHint}</span>{groups.pinned.map(item => <div key={`${item.spaceId}:${item.workItemId}`} className="vis-work-pin"><button onClick={() => p.onSelect?.(item)}>{getWorkActivity(item) !== 'idle' ? <span className={`vis-work-activity is-${getWorkActivity(item)}`} /> : null}{item.title} <small>{statuses[item.status]}</small></button><IconButton label={t.unpinTitle(item.title)} onClick={() => p.onAction(item, 'pin')}><CloseIcon /></IconButton></div>)}</div> : null}
     {!visible.length ? <p className="vis-work-board-empty">{t.boardEmpty}</p> : null}

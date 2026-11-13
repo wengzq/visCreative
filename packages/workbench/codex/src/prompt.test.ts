@@ -127,3 +127,17 @@ it('the timeline guide retains document limits, pinned edits, local export and l
   for (const text of ['timelineFrom', '{ nodeId, durationMs }', '500–30000', 'durationSec', 'video', 'first', 'timeline.set', 'expectedRevision', 'assetVersionId', 'startMs', 'inMs', 'outMs', 'fadeInMs', 'fadeOutMs', '0–2', '1 video track', '4 audio tracks', '200 clips', '30 minutes', '10 seconds', 'timeline.export', 'params: {}', 'exportOf', 'Frame', 'canvas_get', 'canvas_apply', 'media_process', 'media_get', 'vis media wait', 'speed', '0.25–4', 'transitionIn', 'crossfade', 'dip', 'textTracks', 'font.list', 'assetVersionId }', 'pnpm fonts:fetch', 'captions follow the original shot', 'rather than inventing fields', 'does not submit generation jobs', 'picture-in-picture', 'Rotation, cropping', 'media.captions_unavailable', 'overlay: { x, y, width, opacity }', '2 overlay tracks', 'complete only after processing and inspecting it']) expect(timeline).toContain(text)
   for (const text of ['trim', 'speed', 'audio', 'asset_import_file']) expect(media).toContain(text)
 })
+
+
+it('teaches exact child configuration only on author or author-written workflow direction', () => {
+  const work = { workItemId: 'root', parentId: null, hasChildren: true }
+  const instructions = developerInstructions(work)
+  for (const text of ['only when the author asked', 'skill or workflow the author wrote', 'otherwise omit agentConfig', 'work.agentOptions', 'work.dispatch', 'work.setAgentConfig', 'work.get', 'ambiguous or not listed', 'Do not pick a model on your own initiative']) expect(instructions).toContain(text)
+})
+
+
+it('does not teach child sessions to configure or dispatch children', () => {
+  const child = { workItemId: 'child', parentId: 'root', hasChildren: false }
+  const instructions = developerInstructions(child)
+  for (const text of ['work.agentOptions', 'work.dispatch', 'work.setAgentConfig']) expect(instructions).not.toContain(text)
+})

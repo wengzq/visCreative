@@ -72,7 +72,7 @@ describe('capabilities', () => {
       'session.setTitle',
       'generation.submit', 'generation.cancel', 'generation.recheck', 'generation.get', 'providers.list', 'canvas.apply', 'canvas.get', 'asset.get', 'asset.importFile', 'asset.extractFrames', 'media.process', 'media.get', 'script.batch.plan', 'script.batch.start', 'script.batch.get', 'script.batch.list', 'script.batch.cancel', 'media.analyze', 'font.list',
       // The gateway additionally checks work item API permissions by workspace relationships.
-      'work.list', 'work.get', 'work.dispatch', 'work.activate', 'work.recall', 'work.requestDelete', 'work.report', 'work.reply', 'work.review',
+      'work.list', 'work.get', 'work.dispatch', 'work.agentOptions', 'work.setAgentConfig', 'work.activate', 'work.recall', 'work.requestDelete', 'work.report', 'work.reply', 'work.review',
       'skill.proposeDraft', 'capabilities.list', 'capabilities.describe', 'guide.get', 'slot.history',
       'entity.list', 'entity.get', 'entity.create', 'entity.update', 'entity.propose', 'entity.proposalList',
       'series.entityList', 'entity.link',
@@ -172,6 +172,20 @@ describe('capabilities', () => {
     const result = describeCapability('work.dispatch', 'agent')!.result
     expect(result).not.toHaveProperty('properties.role')
     expect(result).not.toHaveProperty('properties.notice')
+  })
+
+  it('child configuration capabilities require author direction and keep self configuration UI-only', () => {
+    for (const method of ['work.dispatch', 'work.agentOptions', 'work.setAgentConfig'] as const) {
+      const capability = describeCapability(method, 'agent')!
+      expect(capability.description).toContain('only when the author asked')
+      expect(capability.description).toContain('skill or workflow the author wrote')
+      expect(capability.description).toContain('otherwise omit agentConfig')
+    }
+    expect(describeCapability('work.agentOptions', 'ui')).toBeDefined()
+    expect(describeCapability('work.setAgentConfig', 'ui')).toBeUndefined()
+    expect(describeCapability('session.setAgentConfig', 'agent')).toBeUndefined()
+    expect(describeCapability('work.dispatch', 'agent')?.params).toHaveProperty('properties.agentConfig.properties.model')
+    expect(describeCapability('work.get', 'agent')?.result).toHaveProperty('properties.item.properties.sessions.items.properties.agentConfig')
   })
 
   it('capability descriptions use registered descriptions directly and expose parameter and result JSON Schemas', () => {

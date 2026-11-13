@@ -203,7 +203,7 @@ export function openSpaceHost(spaceId: string, dir: string, opts: SpaceHostOptio
     acquireWorkSlot: id => opts.workSlots?.reserve(spaceId, id) ?? true,
     releaseWorkSlot: id => opts.workSlots?.release(spaceId, id),
   })
-  const work = createWorkService({ db, spaceId, rootPath, sessions, generation, now,
+  const work = createWorkService({ db, spaceId, rootPath, sessions, generation, runtime, now,
     assertAgent: kind => assertAgent(opts.runtimes, kind),
     cancelSessionMedia: cancelSessionWork,
     slots: opts.workSlots ?? { reserve: () => true, release: () => {} },

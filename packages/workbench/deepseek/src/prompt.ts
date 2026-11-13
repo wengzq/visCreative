@@ -1,6 +1,6 @@
 import { agentInstructions as sharedInstructions, turnPrompt, type DispatchInput } from '@vis/workbench-core'
 
-/** Shared creative-space instructions, appended through the dsh persona suffix. */
+/** Shared creative-space and child configuration guidance, appended through the dsh persona suffix. */
 export function agentInstructions(expanded: boolean, work?: DispatchInput['workContext'], isolation: 'sandbox' | 'none' = 'sandbox'): string {
   const shared = sharedInstructions({ environment: { access: expanded ? 'expanded' : 'readOnly', isolation }, work })
   // dsh-specific: jobs live in the per-turn dsh process, which exits when the turn ends.

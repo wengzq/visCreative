@@ -15,7 +15,7 @@ function item(workItemId: string, patch: Partial<WorkItemView> = {}): WorkItemVi
 }
 
 function session(sessionId: string, patch: Partial<WorkSessionView> = {}): WorkSessionView {
-  return { sessionId, agentKind: 'codex', title: sessionId, silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false, ...patch }
+  return { sessionId, agentKind: 'codex', agentConfig: { model: null, effort: null, serviceTier: null }, title: sessionId, silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false, ...patch }
 }
 
 describe('Session panel', () => {

@@ -8,6 +8,7 @@ import {
 } from '@vis/storage'
 import { type AgentEvent, type AgentRuntimePort, type ApprovalRequest, DispatchError, type RequestApproval } from './runtime-port'
 import { resolveSnapshot } from './snapshot'
+import { readAgentOptions, validateAgentConfig } from './agent-config'
 import { canAutoApprove } from './auto-approval'
 import { appendNotice, readTranscript, upsertItem } from './transcript'
 
@@ -631,13 +632,7 @@ export function createSessionService(deps: {
 
     async agentOptions(params) {
       const session = readSessionSummary(db, params.sessionId)
-      if (!runtime.agentOptions) throw VisError.of('unavailable', 'session.models_unsupported', {}, 'The Agent does not support reading the model list')
-      try {
-        return { models: await runtime.agentOptions(session.agentKind, {}) }
-      } catch (error) {
-        const detail = errorMessage(error)
-        throw VisError.of('unavailable', 'session.models_unavailable', { detail }, `Cannot read the model list: ${detail}`)
-      }
+      return { models: await readAgentOptions(runtime, session.agentKind) }
     },
 
     async setAgentConfig(params) {
@@ -647,22 +642,7 @@ export function createSessionService(deps: {
         return runIdempotent<SessionSummary>(db, request, () => { throw new Error('Idempotency record has disappeared') }, now)
       }
       const session = readSessionSummary(db, params.sessionId)
-      if (params.model !== null || params.effort !== null || params.serviceTier !== null) {
-        if (!runtime.agentOptions) throw VisError.of('unavailable', 'session.models_unsupported', {}, 'The Agent does not support reading the model list')
-        let models
-        try {
-          models = await runtime.agentOptions(session.agentKind, params.model === null ? {} : { model: params.model })
-        } catch (error) {
-          const detail = errorMessage(error)
-          throw VisError.of('unavailable', 'session.models_unavailable', { detail }, `Cannot read the model list: ${detail}`)
-        }
-        const model = models.find(option => params.model === null ? option.isDefault : option.id === params.model)
-        // 'default' is Codex's standard speed, accepted by all models; other tiers must be declared by the model
-        const tierOk = params.serviceTier === null || params.serviceTier === 'default' || model?.serviceTiers.some(tier => tier.id === params.serviceTier)
-        if (!model || (params.effort !== null && !model.efforts.some(effort => effort.id === params.effort)) || !tierOk) {
-          throw VisError.of('invalid_params', 'session.invalid_agent_config', {}, 'Model, reasoning effort, or speed is not among the Agent options')
-        }
-      }
+      await validateAgentConfig(runtime, session.agentKind, params)
       return runIdempotent(db, request, t => {
         const current = readSessionSummary(t, params.sessionId)
         if (current.agentConfig.model !== params.model || current.agentConfig.effort !== params.effort || current.agentConfig.serviceTier !== params.serviceTier) {

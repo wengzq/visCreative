@@ -1,11 +1,17 @@
-.vis-work-board { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 30px 28px; overflow: hidden; background: var(--vis-bg); color: var(--vis-text); }
-.vis-work-board-heading, .vis-work-board-controls, .vis-work-column > header, .vis-work-pins, .vis-work-pin, .vis-work-project-filters { display: flex; align-items: center; gap: 12px; }
-.vis-work-board-heading { flex: none; justify-content: space-between; }
+.vis-work-board { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 30px 28px; overflow: hidden; background: var(--vis-bg); color: var(--vis-text); container-type: inline-size; }
+.vis-work-column > header, .vis-work-pins, .vis-work-pin, .vis-work-project-filters { display: flex; align-items: center; gap: 12px; }
+.vis-work-board-heading { flex: none; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
+.vis-work-board-slots { justify-self: end; display: flex; align-items: center; gap: 6px; }
 .vis-work-board h1 { font-size: 23px; margin: 0; letter-spacing: -.6px; }
 .vis-work-board [role=tablist] { display: flex; padding: 3px; border: 1px solid var(--vis-panel-border); border-radius: var(--vis-radius-sm); }
 .vis-work-board [role=tab] { border: 0; background: transparent; color: var(--vis-text-dim); }
 .vis-work-board [role=tab][aria-selected=true], .vis-work-project-filters [aria-pressed=true] { background: var(--vis-accent-soft); color: var(--vis-text); }
 .vis-work-board .is-full { color: var(--vis-warn); }
+@container (max-width: 700px) {
+  .vis-work-board-heading { grid-template-columns: minmax(0, 1fr) auto; }
+  .vis-work-board-heading > [role=tablist] { grid-column: 1 / -1; grid-row: 2; justify-self: center; flex-wrap: wrap; justify-content: center; }
+  .vis-work-board-slots { grid-column: 2; grid-row: 1; }
+}
 .vis-work-project-filters { margin-top: 18px; flex-wrap: wrap; }
 .vis-work-pins { flex: none; max-height: 160px; overflow-y: auto; flex-wrap: wrap; margin: 20px 0; }
 .vis-work-pins.is-drop-target { padding: 10px; }
@@ -52,6 +58,7 @@
 .vis-work-agent { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; padding: 2px 0; border: 0; background: transparent; text-align: left; font-size: 10px; color: var(--vis-text-dim); }
 .vis-work-agent > svg, .vis-work-agent-name { flex: none; }
 .vis-work-agent:hover { color: var(--vis-text); }
+.vis-work-agent-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vis-work-doing { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vis-work-agent time { flex: none; margin-left: auto; color: var(--vis-text-faint); white-space: nowrap; }
 .vis-work-fold { display: flex; align-items: center; gap: 5px; padding: 4px 0; border: 0; background: transparent; color: var(--vis-text-dim); font-size: 11px; }
@@ -202,8 +209,6 @@ dialog.vis-work-review { width: min(480px, 100vw); height: 100dvh; max-height: 1
 
 .vis-work-children-toggle { width: 100%; margin: 0 0 12px; color: var(--vis-text-dim); }
 .vis-work-drag-preview { position: fixed; z-index: 100; pointer-events: none; max-width: 240px; padding: 10px 14px; border: 1px solid var(--vis-accent); border-radius: var(--vis-radius-sm); background: var(--vis-node); color: var(--vis-text); box-shadow: var(--vis-shadow); }
-
-.vis-work-board-controls > button { display: flex; align-items: center; gap: 6px; }
 
 .vis-work-failure { color: var(--vis-danger); font-size: 12px; margin-block: 6px; overflow-wrap: anywhere; }
 

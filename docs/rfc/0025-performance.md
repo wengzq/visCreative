@@ -69,6 +69,12 @@ P1 只做测量，结论：
 
 两个 worker 都把 P1 的测量脚本复制到自己 worktree 的 `artifacts/perf/` 下，报告里写清改动前后的数字。最终数字由协调者在空闲的机器上用普通终端复测。合并前按惯例跑 code-review medium，再跑 check、build 和两轮完整 e2e。
 
+## First-measurement handle retention (2026-11-13)
+
+Generation updates exposed a gap before the first React Flow dimensions callback reaches controlled node state. A node could already have measured handles internally while its controlled copy still omitted `measured`. An intervening content or decoration update then made React Flow clear the handle cache as a reinitialization; acknowledging dimensions afterward left a measured node without handles or an edge path. The browser already had the delivered asset, provenance and source edge. Viewport culling is disabled, and neither a canvas reread nor an animation was pending. Increasing an edge wait to ten seconds did not repair the missing handles.
+
+`toFlowNode` now initializes an empty measurement record on creation and preserves it through content, decoration, selection and layout updates. React Flow remains responsible for filling its width and height. Handles stay unconditional. A deterministic browser regression holds dimension callbacks, reconciles a content update, then acknowledges the dimensions; cached handles and the exact relation-edge count must survive. The generation and manual-render e2e assertions retain their original waits.
+
 ## 实现时的补充（C1）
 
 - `toFlowNode` 原先丢弃 `measured`，使 React Flow 清除连线端点缓存并重新注册 ResizeObserver；300 节点诊断中约 17 秒出现 23,702 次观察注册，尺寸始终未变。现在复用未变节点并保留测量结果，选择和拖动只替换变化的节点。

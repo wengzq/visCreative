@@ -62,6 +62,8 @@
 ### 4.1 结构
 
 - 标题区：「工作看板」，下方是项目名。右侧是范围切换「当前项目 | 全部项目」，再往右是 `运行中 5/6 · 全局`。
+
+  **Amendment (maintainer decision, 2026-11-13):** The heading has three regions: the board title on the left, All projects | Current project centered in the board, and the global running-slots button on the right. All projects is selected on every board opening; scope is not persisted. Equal outer grid columns keep the switch centered independently of the title and button widths; narrow boards move the switch to a centered second row. The project-filter row remains available only in All projects.
 - **全部项目**时，范围切换下方出现项目筛选 chip（全部 / 各项目），可多选。卡片使用紧凑模式：带项目名标签，不显示缩略图和父级行。
 - 「已固定」行：横向排列小卡片（圆点 + 标题 + 状态标签 + ×）。没有固定项时显示虚线框「拖到这里固定，不改变状态」。
 - 四列：待办、进行中、待审阅、已完成。列头是圆点、列名和数量。只有待办列有「+」。

@@ -50,6 +50,8 @@ SQL 与协议的 `sessions.work_item_id` / `SessionSummary.workItemId` 暂留 nu
 | 审阅人 | 默认用户；工作项可设为由父工作区审阅 |
 | 多个项目 | 一个项目一块画布不变。运行名额全局；收件箱始终跨项目；看板默认当前项目，可切「全部项目」 |
 
+**Amendment (maintainer decision, 2026-11-13):** The board now defaults to All projects, with All projects before Current project in the scope switch. Scope is not persisted.
+
 ## 数据模型（space.db）
 
 ### work_items

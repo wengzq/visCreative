@@ -42,6 +42,12 @@ function workTool(tool, args = {}) {
 }
 
 async function workScenario(turnId, text, script) {
+  if (script.scenario === 'child-config') {
+    await workTool('work_agent_options', { agentKind: 'codex' })
+    const { item } = await workTool('work_dispatch', { title: script.title, brief: '工作代理检查：{"scenario":"hold"}', agentKind: 'codex', agentConfig: script.agentConfig })
+    const detail = await workTool('work_get', { workItemId: item.workItemId })
+    return replyNow(turnId, JSON.stringify(detail.item.sessions[0].agentConfig))
+  }
   if (script.scenario === 'generation-provenance') {
     const { nodes } = await workTool('canvas_get')
     const reference = nodes.find(node => node.nodeId === script.referenceId)

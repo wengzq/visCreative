@@ -7,7 +7,7 @@ import { pickDirectory } from './desktop-bridge'
 import { localizedProvider } from './providerLabels'
 import { CanvasView, GenerationSettingsContext, latestTimelineExport, previzMessages, timelineSummary } from '@vis/canvas-ui'
 import type { AgentKind, ApprovalDecision, MethodResult, NodeView, SceneChangeRef, SceneProposal, TranscriptItem } from '@vis/protocol'
-import { AgentsContext, EMPTY_AGENTS, agentLabel, type MentionNode, type RefChip, type RefPreview, type SkillOption, type WorkspaceInput, SessionPanel, ProjectSwitcher, SkillManager, type SkillManagerActions, useAttachments } from '@vis/workbench-ui'
+import { AgentModelsContext, createAgentModelCatalog, AgentsContext, EMPTY_AGENTS, agentLabel, type MentionNode, type RefChip, type RefPreview, type SkillOption, type WorkspaceInput, SessionPanel, ProjectSwitcher, SkillManager, type SkillManagerActions, useAttachments } from '@vis/workbench-ui'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type Notice } from './actions'
 import { useCanvasCallbacks } from './canvas-callbacks'
@@ -109,6 +109,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
     subscribe: (listener: () => void) => conn.rpc.onSkillsChanged?.(listener) ?? (() => {}),
     review: (draftId: string) => { setSettingsDraft(draftId); setSettingsSection('mySkills'); setSettingsOpen(true) },
   }), [conn])
+  const agentModels = useMemo(() => createAgentModelCatalog(kind => conn.rpc.call<MethodResult<'work.agentOptions'>>('work.agentOptions', { agentKind: kind }).then(result => result.models)), [conn])
   const [usageOpen, setUsageOpen] = useState(false)
   const [usage, setUsage] = useState<GenerationUsageData | null>(null)
   const [usageError, setUsageError] = useState('')
@@ -541,7 +542,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
   }
 
   return (
-    <AgentsContext.Provider value={view.agents}><div className="app">
+    <AgentsContext.Provider value={view.agents}><AgentModelsContext.Provider value={agentModels}><div className="app">
       <header className="app-header">
         <ProjectSwitcher
           projects={view.projects}
@@ -688,7 +689,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
           </div>
         ))}
       </div>
-    </div></AgentsContext.Provider>
+    </div></AgentModelsContext.Provider></AgentsContext.Provider>
   )
 }
 

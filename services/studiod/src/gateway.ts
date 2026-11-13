@@ -320,7 +320,9 @@ export function createGateway(deps: GatewayDeps): Gateway {
     'work.list': (p, ctx) => ctx.host.work.list(p, workActor(ctx)),
     'work.get': (p, ctx) => ctx.host.work.get(p, workActor(ctx)),
     'work.create': (p, { host }) => host.work.create(p),
-    'work.dispatch': (p, ctx) => ctx.host.work.dispatch(p, workActor(ctx)),
+    'work.dispatch': (p, ctx) => ctx.host.work.dispatch(p, () => workActor(ctx)),
+    'work.agentOptions': (p, ctx) => ctx.host.work.agentOptions(p),
+    'work.setAgentConfig': (p, ctx) => ctx.host.work.setAgentConfig(p, () => workActor(ctx)),
     'work.activate': (p, ctx) => ctx.host.work.activate(p, workActor(ctx)),
     'work.deletePlan': (p, { host }) => host.work.deletePlan(p),
     'work.requestDelete': (p, ctx) => {

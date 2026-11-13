@@ -79,7 +79,7 @@ it('shares localized labels for silent, unreported and failed work messages in t
 describe('Board drag state machine', () => {
   it('Allow dragging between any two columns without blocking or requiring a reason', () => {
     for (const status of BOARD_STATUSES) {
-      const work = item('work-a', { status, sessions: [{ sessionId: 's', agentKind: 'codex', title: 'Agent', silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false }] })
+      const work = item('work-a', { status, sessions: [{ sessionId: 's', agentKind: 'codex', agentConfig: { model: null, effort: null, serviceTier: null }, title: 'Agent', silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false }] })
       expect(getDropAction(work, 'pinned')).toEqual({ action: 'pin' })
       for (const target of BOARD_STATUSES) expect(getDropAction(work, target)).toEqual(target === status ? { action: 'none' } : { action: 'move', status: target })
     }
@@ -94,7 +94,7 @@ describe('Board drag state machine', () => {
   })
 
   it('When leaving in-progress, warn only if a turn or generation is running', () => {
-    const session = { sessionId: 's', agentKind: 'codex' as const, title: 'Agent', silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false }
+    const session = { sessionId: 's', agentKind: 'codex' as const, agentConfig: { model: null, effort: null, serviceTier: null }, title: 'Agent', silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false }
     const idle = item('镜头', { status: 'in_progress', sessions: [session] })
     expect(runningNotice(idle, 'done')).toBeNull()
     expect(runningNotice({ ...idle, sessions: [{ ...session, activeTurnId: 'turn' }] }, 'todo')).toContain('还在运行')
@@ -135,7 +135,7 @@ describe('Workspace move destinations', () => {
   it('Archived workspaces and those with children cannot move, regardless of status or running turns', () => {
     const parent = item('parent')
     for (const status of BOARD_STATUSES) {
-      const work = item('work', { status, sessions: [{ sessionId: 's', agentKind: 'codex', title: 'Agent', silentSince: null, activeTurnId: 'turn', doing: null, lastActivityAt: null, archived: false }] })
+      const work = item('work', { status, sessions: [{ sessionId: 's', agentKind: 'codex', agentConfig: { model: null, effort: null, serviceTier: null }, title: 'Agent', silentSince: null, activeTurnId: 'turn', doing: null, lastActivityAt: null, archived: false }] })
       expect(canReparentWorkItem(work, parent)).toBe(true)
       expect(canReparentWorkItem({ ...work, childIds: ['child'] }, parent)).toBe(false)
       expect(canReparentWorkItem({ ...work, parentId: 'old', childIds: ['child'] }, null)).toBe(false)

@@ -414,6 +414,74 @@ describe.skipIf(!ready)('RFC 0010 session panel', () => {
     expect(prompts.some(prompt => prompt.includes('撤回草稿 A') || prompt.includes('撤回草稿 B'))).toBe(false)
   })
 
+  it('RFC 0049: a root Agent dispatches a configured child whose first turn and model picker agree with work.get', async () => {
+    const parent = await createTemporaryWork('Child model selection')
+    const config = { model: 'gpt-fast', effort: 'low', serviceTier: 'default' }
+    await card(parent.title).click()
+    await composer().fill(`工作代理检查：${JSON.stringify({ scenario: 'child-config', title: 'Configured child model', agentConfig: config })}`)
+    await page.getByRole('button', { name: '发送', exact: true }).click()
+    await expect.poll(async () => (await work(parent.workItemId)).childIds.length, { timeout: 10_000 }).toBe(1)
+    const childId = (await work(parent.workItemId)).childIds[0]!
+    const child = await work(childId)
+    expect(child.sessions[0]!.agentConfig).toEqual(config)
+    const records = (workDir: string) => {
+      const path = join(workDir, '.vis-e2e-agent.jsonl')
+      return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : []
+    }
+    await expect.poll(() => records(parent.workDir).find(entry => entry.tool === 'work_get')?.output.item.sessions[0].agentConfig).toEqual(config)
+    expect(records(parent.workDir).find(entry => entry.tool === 'work_agent_options')?.output.models.map((model: { id: string }) => model.id)).toEqual(['gpt-test', 'gpt-fast'])
+    await expect.poll(() => records(child.workDir).find(entry => entry.method === 'turn/start')).toMatchObject({ model: 'gpt-fast', effort: 'low', serviceTierForTurn: 'default' })
+    await back()
+    await card(child.title).click()
+    const settings = page.getByRole('button', { name: /^模型与思考强度：/ })
+    await settings.click()
+    await expect.poll(() => page.getByRole('combobox', { name: '模型', exact: true }).inputValue()).toBe('gpt-fast')
+    expect(await page.getByRole('combobox', { name: '思考强度', exact: true }).inputValue()).toBe('low')
+    expect(await page.getByRole('combobox', { name: '速度', exact: true }).inputValue()).toBe('default')
+    await expect.poll(() => settings.textContent()).toContain('GPT Fast')
+    await page.keyboard.press('Escape')
+    await page.screenshot({ path: '/tmp/vis-0049-child-model.png' })
+    await admin.call('work.submitReview', { requestId: rid(), spaceId, workItemId: childId })
+    const reviewPage = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
+    reviewPage.setDefaultTimeout(5000)
+    let catalogRequests = 0
+    let releaseCatalog: (() => void) | undefined
+    try {
+      await reviewPage.routeWebSocket(/.*/, socket => {
+        const server = socket.connectToServer()
+        const held = new Set<number>()
+        socket.onMessage(message => {
+          const request = JSON.parse(String(message))
+          if (request.method === 'work.agentOptions') { held.add(request.id); catalogRequests++ }
+          server.send(message)
+        })
+        server.onMessage(message => {
+          const response = JSON.parse(String(message))
+          if (held.has(response.id)) { releaseCatalog = () => socket.send(message); return }
+          socket.send(message)
+        })
+      })
+      await reviewPage.goto(webUrl)
+      await reviewPage.getByRole('button', { name: '开始创作', exact: true }).waitFor()
+      await reviewPage.getByRole('tab', { name: '看板', exact: true }).click()
+      const childCard = reviewPage.getByRole('region', { name: '工作看板', exact: true }).getByRole('listitem', { name: /^Configured child model，/ })
+      await childCard.hover()
+      await childCard.getByRole('button', { name: '审阅', exact: true }).click()
+      const drawer = reviewPage.getByRole('dialog', { name: child.title, exact: true })
+      await drawer.getByText('Codex · gpt-fast · low · 标准速度', { exact: true }).waitFor()
+      await expect.poll(() => drawer.getByRole('button', { name: '通过', exact: true }).isEnabled()).toBe(true)
+      await expect.poll(() => Boolean(releaseCatalog)).toBe(true)
+      expect(catalogRequests).toBe(1)
+      releaseCatalog!()
+      await drawer.getByText('Codex · GPT Fast · low · 标准速度', { exact: true }).waitFor()
+      await reviewPage.screenshot({ path: '/tmp/vis-0049-review-model.png' })
+      await drawer.press('Escape')
+      expect(await childCard.getByRole('button', { name: '打开 Codex 会话', exact: true }).count()).toBe(1)
+      expect(await childCard.locator('.vis-work-agent-model').textContent()).toBe(' · GPT Fast · low · 标准速度')
+      expect(catalogRequests).toBe(1)
+    } finally { await reviewPage.close() }
+  })
+
   it('RFC 0014: passes model and effort, resets on model changes, and applies on the next turn', async () => {
     const item = await createWork('会话模型设置')
     await card('会话模型设置').click()

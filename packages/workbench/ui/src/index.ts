@@ -20,6 +20,7 @@ export { SkillManager, type SkillManagerActions } from './SkillManager'
 
 export { ProjectSwitcher, type ProjectSwitcherProps } from './ProjectSwitcher'
 export { AgentsContext, useAgents, agentLabel, EMPTY_AGENTS } from './agents'
+export { AgentModelsContext, createAgentModelCatalog } from './agentModels'
 export type { SeriesProjectHost, ProjectSeriesInput } from './series-model'
 
 export { SkillCopyBadges } from './SkillCopyBadges'

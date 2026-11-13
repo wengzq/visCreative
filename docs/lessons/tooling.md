@@ -1,5 +1,19 @@
 # Tooling lessons
 
+## Browser persistence polls have their own timeout
+
+- **Symptom:** the previz image-picker import passes alone but its persisted underlay is still null when the full browser suite's poll expires under load.
+- **Cause:** choosing a file starts asynchronous upload and persistence work. Vitest's `expect.poll` defaults to one second independently of Playwright's page timeout; concurrent browser jobs can consume that budget before the underlay is saved.
+- **Instead:** poll the same persisted underlay with an explicit `10_000` ms timeout, matching nearby slow UI waits, and retain the exact not-null assertion. Do not replace the readiness condition with a sleep or extend unrelated assertions.
+- **Found in:** [previz image import acceptance](../../apps/web/e2e/previz.e2e.ts), 2026-11-13.
+
+## Public snapshots cannot recover their archive source from ancestry
+
+- **Symptom:** squashing a release drops the archive's agent co-author trailers, and the next release cannot determine which archive commits are new from `public/main`.
+- **Cause:** public snapshots intentionally share no ancestry with archive commits. Recovering attribution by scanning the entire archive repeats old credits and risks exposing personal co-authors.
+- **Instead:** keep the previous source in the archive's local `refs/vis/public-snapshot`, seed it explicitly for an existing publication, and advance it only after a successful push. Scan the exclusive-to-inclusive source range, copy only the shared agent email allowlist, and privacy-check the completed message before printing credits. A dry run or `--since` override never changes the record.
+- **Found in:** [RFC 0042 agent credit](../rfc/0042-open-source-practices.md#agent-credit-and-the-local-range-record-2026-11-13), `scripts/release-public.test.ts`.
+
 ## Media paths for the daemon do not reach Agent shell tools
 
 - **Symptom:** packaged media jobs succeed but an Agent shell reports ffmpeg missing on a machine without a separate installation.

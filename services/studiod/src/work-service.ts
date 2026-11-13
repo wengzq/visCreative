@@ -4,16 +4,21 @@ import { isAbsolute, join } from 'node:path'
 import { newId, VisError } from '@vis/domain'
 import { readNodes } from '@vis/canvas-core'
 import type { GenerationService } from '@vis/generation'
-import type { CanvasNodeKind, MethodParams, MethodResult, NodeView, WorkChange, WorkItemView, WorkMessageFrom, WorkMessageView, WorkFailure } from '@vis/protocol'
+import { METHODS } from '@vis/protocol'
+import type { CanvasNodeKind, MethodParams, MethodResult, NodeView, SessionSummary, WorkChange, WorkItemView, WorkMessageFrom, WorkMessageView, WorkFailure } from '@vis/protocol'
 import { and, appendEvent, asc, currentSeq, desc, eq, gt, inArray, isLegacyWorkspaceRequest, isNotNull, isNull, lt, ne, runIdempotent, spaceSchema as s, sql, type SpaceDb, type SpaceTx } from '@vis/storage'
-import { readSessionSummary, type SessionService } from '@vis/workbench-core'
+import { readAgentOptions, readSessionSummary, validateAgentConfig, type AgentRuntimePort, type SessionService } from '@vis/workbench-core'
 
 export type WorkServiceActor = { sessionId: string; workItemId: string }
+type WorkActorSource = () => WorkServiceActor | undefined
 export type WorkSlots = { reserve(spaceId: string, workItemId: string): boolean; release(spaceId: string, workItemId: string): void }
-type WorkMethod = 'list' | 'get' | 'create' | 'dispatch' | 'reparent' | 'activate' | 'move' | 'reopen' | 'submitReview' | 'report' | 'reply' | 'review' | 'update' | 'markRead' | 'changes' | 'deletePlan'
+type WorkMethod = 'list' | 'get' | 'create' | 'reparent' | 'activate' | 'move' | 'reopen' | 'submitReview' | 'report' | 'reply' | 'review' | 'update' | 'markRead' | 'changes' | 'deletePlan'
 export type WorkService = {
   [M in WorkMethod]: (params: MethodParams<`work.${M}`>, actor?: WorkServiceActor) => MethodResult<`work.${M}`>
 } & {
+  dispatch(params: MethodParams<'work.dispatch'>, getActor: WorkActorSource): Promise<MethodResult<'work.dispatch'>>
+  agentOptions(params: MethodParams<'work.agentOptions'>): Promise<MethodResult<'work.agentOptions'>>
+  setAgentConfig(params: MethodParams<'work.setAgentConfig'>, getActor: WorkActorSource): Promise<MethodResult<'work.setAgentConfig'>>
   delete(params: MethodParams<'work.delete'>, actor?: WorkServiceActor): Promise<MethodResult<'work.delete'>>
   /** Stage approved deletions in the approval transaction before any asynchronous stops. */
   prepareDelete(params: MethodParams<'work.delete'>): void
@@ -73,6 +78,7 @@ export function createWorkService(deps: {
   db: SpaceDb; spaceId: string; rootPath: string
   sessions: Pick<SessionService, 'stop'> & Partial<Pick<SessionService, 'notifyWorkActivated'>>; generation: Pick<GenerationService, 'cancel'>; slots: WorkSlots; now?: () => number
   assertAgent?: (kind: string) => void
+  runtime?: Pick<AgentRuntimePort, 'agentOptions'>
   cancelSessionMedia?: (sessionId: string) => void | Promise<void>
 }): WorkService {
   const { db, spaceId, rootPath, sessions, generation, slots } = deps
@@ -188,7 +194,8 @@ export function createWorkService(deps: {
       const lastActivityAt = Math.max(session.createdAt, activity?.updatedAt ?? 0, ...turns.map(turn => turn.endedAt ?? turn.startedAt ?? 0), ...jobs.map(job => job.updatedAt))
       const tool = active ? t.select().from(s.transcriptEntries).where(and(eq(s.transcriptEntries.sessionId, session.id), eq(s.transcriptEntries.turnId, active.id), eq(s.transcriptEntries.kind, 'tool_call'))).orderBy(desc(s.transcriptEntries.updatedAt)).get()?.payload as { name?: unknown } | undefined : undefined
       const doing = job ? `正在生成${{ image: '图片', video: '视频', audio: '音频' }[job.kind]}` : unresolved.length ? '等待回复' : active ? active.status === 'waiting_user' ? '等待审批' : typeof tool?.name === 'string' ? `正在调用 ${tool.name}` : '正在处理' : null
-      return { silentSince: readSessionSummary(t, session.id).silentSince, sessionId: session.id, agentKind: session.agentKind, title: session.title, activeTurnId: active?.id ?? null, doing, lastActivityAt, archived: session.archivedAt !== null }
+      const summary = readSessionSummary(t, session.id)
+      return { silentSince: summary.silentSince, agentConfig: summary.agentConfig, sessionId: session.id, agentKind: session.agentKind, title: session.title, activeTurnId: active?.id ?? null, doing, lastActivityAt, archived: session.archivedAt !== null }
     })
     const latestTurns = linked.map(session => t.select({ id: s.turns.id, status: s.turns.status, deliveryId: s.messages.workDeliveryId }).from(s.turns)
       .innerJoin(s.messages, eq(s.messages.id, s.turns.messageId)).where(eq(s.turns.sessionId, session.id))
@@ -295,14 +302,21 @@ export function createWorkService(deps: {
     return actor ? { kind: 'session', sessionId: actor.sessionId } : { kind: 'user' }
   }
 
-  function mutate<P extends { requestId: string }, T>(method: string, params: P, actor: WorkServiceActor | undefined, fn: (t: SpaceTx, reserved: string[], released: string[]) => T): T {
+  function replay<T>(method: string, params: { requestId: string }, actor: WorkServiceActor | undefined): { result: T } | null {
+    if (!db.select().from(s.idempotencyKeys).where(eq(s.idempotencyKeys.requestId, params.requestId)).get()) return null
+    return { result: runIdempotent<T>(db, { requestId: params.requestId, method: `work.${method}`, params: { ...params, actor } }, () => { throw new Error('Idempotency record has disappeared') }, now) }
+  }
+
+  function mutate<P extends { requestId: string }, T>(method: string, params: P, actor: WorkServiceActor | undefined, fn: (t: SpaceTx, reserved: string[], released: string[], actor: WorkServiceActor | undefined) => T, getActor: WorkActorSource = () => actor): T {
     const reserved: string[] = [], released: string[] = []
     let result: T
     try {
       result = runIdempotent(db, { requestId: params.requestId, method: `work.${method}`, params: { ...params, actor } }, t => {
+        const currentActor = getActor()
+        checkActor(currentActor)
         const ids = params as P & { workItemId?: string; parentId?: string }
-        for (const id of new Set([ids.workItemId, ids.parentId, actor?.workItemId].filter((id): id is string => !!id))) recalling(t, id)
-        return fn(t, reserved, released)
+        for (const id of new Set([ids.workItemId, ids.parentId, currentActor?.workItemId].filter((id): id is string => !!id))) recalling(t, id)
+        return fn(t, reserved, released, currentActor)
       }, now)
     } catch (error) {
       for (const id of reserved) slots.release(spaceId, id)
@@ -427,7 +441,7 @@ export function createWorkService(deps: {
     return { key, wakeParent: notices < 2, detail: JSON.stringify({ unfinishedJobs, reply }), unfinishedJobs, reply }
   }
 
-  function linkedSession(t: SpaceTx, item: WorkRow, agentKind?: WorkRow['agentKind']) {
+  function linkedSession(t: SpaceTx, item: WorkRow, agentKind?: WorkRow['agentKind'], agentConfig: SessionSummary['agentConfig'] = { model: null, effort: null, serviceTier: null }) {
     let session = mainSession(t, item.id) ?? t.select().from(s.sessions).where(eq(s.sessions.workItemId, item.id)).orderBy(asc(s.sessions.createdAt), asc(s.sessions.id)).get()
     if (session) {
       deps.assertAgent?.(session.agentKind)
@@ -437,8 +451,8 @@ export function createWorkService(deps: {
     const kind = agentKind ?? item.agentKind
     if (!kind) throw VisError.of('invalid_params', 'work.agent_kind_required', {}, 'Agent kind is required for initial activation')
     deps.assertAgent?.(kind)
-    session = t.insert(s.sessions).values({ id: newId('session', now()), workItemId: item.id, agentKind: kind, title: item.title, titleSource: 'user', workDir: item.workDir, createdAt: now() }).returning().get()
-    appendEvent(t, { type: 'session.created', entityType: 'session', entityId: session.id, payload: { sessionId: session.id, agentKind: session.agentKind, title: session.title, titleSource: session.titleSource, workDir: session.workDir, workItemId: item.id, queuePaused: false, approvalMode: session.approvalMode, silentSince: null, activeTurnId: null, pendingApprovals: 0, agentConfig: { model: null, effort: null, serviceTier: null }, createdAt: session.createdAt } }, now())
+    session = t.insert(s.sessions).values({ id: newId('session', now()), workItemId: item.id, agentKind: kind, title: item.title, titleSource: 'user', workDir: item.workDir, agentModel: agentConfig.model, reasoningEffort: agentConfig.effort, serviceTier: agentConfig.serviceTier, createdAt: now() }).returning().get()
+    appendEvent(t, { type: 'session.created', entityType: 'session', entityId: session.id, payload: readSessionSummary(t, session.id) }, now())
     return session.id
   }
 
@@ -665,21 +679,63 @@ export function createWorkService(deps: {
         return params.chat ? start(t, item, reserved, params.chat.agentKind) : { item: emit(t, item.id), queued: false }
       })
     },
-    dispatch(params, actor) {
+    async agentOptions(params) {
+      return { models: await readAgentOptions(deps.runtime ?? {}, params.agentKind) }
+    },
+    async setAgentConfig(params, getActor) {
+      const actor = getActor()
+      const previous = replay<MethodResult<'work.setAgentConfig'>>('setAgentConfig', params, actor)
+      if (previous) return previous.result
+      if (!actor) throw VisError.of('forbidden', 'work.agent_required', {}, 'Only a parent Agent can configure a child session')
       checkActor(actor)
-      return mutate('dispatch', params, actor, (t, reserved) => {
-        const parentId = actor?.workItemId ?? params.parentId
-        if (!parentId || (actor && params.parentId !== undefined && params.parentId !== parentId)) throw VisError.of('forbidden', 'work.dispatch_parent_required', {}, 'Dispatch must be under the current work item')
+      const target = (t: SpaceTx, caller: WorkServiceActor | undefined) => {
+        if (!caller) throw VisError.of('forbidden', 'work.agent_required', {}, 'Only a parent Agent can configure a child session')
+        checkActor(caller)
+        ownChild(row(t, params.workItemId), caller)
+        const session = mainSession(t, params.workItemId)
+        if (!session) throw VisError.of('not_found', 'work.main_session_missing', {}, 'The work item has no unarchived session')
+        return session
+      }
+      const session = target(db, actor)
+      await validateAgentConfig(deps.runtime ?? {}, session.agentKind, params)
+      return mutate('setAgentConfig', params, actor, (t, _reserved, _released, currentActor) => {
+        if (target(t, currentActor).id !== session.id) throw VisError.of('busy', 'work.main_session_changed', {}, 'The main session changed; retry the request')
+        const current = readSessionSummary(t, session.id)
+        if (current.agentConfig.model !== params.model || current.agentConfig.effort !== params.effort || current.agentConfig.serviceTier !== params.serviceTier) {
+          t.update(s.sessions).set({ agentModel: params.model, reasoningEffort: params.effort, serviceTier: params.serviceTier }).where(eq(s.sessions.id, session.id)).run()
+          appendEvent(t, { type: 'session.updated', entityType: 'session', entityId: session.id, payload: readSessionSummary(t, session.id) }, now())
+          t.update(s.workItems).set({ revision: row(t, params.workItemId).revision + 1 }).where(eq(s.workItems.id, params.workItemId)).run()
+          emit(t, params.workItemId)
+        }
+        return readSessionSummary(t, session.id)
+      }, getActor)
+    },
+    async dispatch(params, getActor) {
+      params = { ...params, agentConfig: METHODS['work.dispatch'].params.shape.agentConfig.parse(params.agentConfig) }
+      const actor = getActor()
+      const previous = replay<MethodResult<'work.dispatch'>>('dispatch', params, actor)
+      if (previous) return previous.result
+      checkActor(actor)
+      const dispatchParent = (t: SpaceTx, caller: WorkServiceActor | undefined) => {
+        checkActor(caller)
+        const parentId = caller?.workItemId ?? params.parentId
+        if (!parentId || (caller && params.parentId !== undefined && params.parentId !== parentId)) throw VisError.of('forbidden', 'work.dispatch_parent_required', {}, 'Dispatch must be under the current work item')
         const parent = row(t, parentId)
         if (parent.parentId !== null) throw VisError.of('forbidden', 'work.dispatch_root_required', {}, 'Child workspaces cannot dispatch again; report to the parent')
         if (parent.status === 'done' || parent.status === 'in_review') transition(parent, ['todo', 'in_progress'])
-        const item = createItem(t, params, actor, parent)
-        linkedSession(t, item, params.agentKind)
+        return parent
+      }
+      dispatchParent(db, actor)
+      if (params.agentConfig) await validateAgentConfig(deps.runtime ?? {}, params.agentKind, params.agentConfig)
+      return mutate('dispatch', params, actor, (t, reserved, _released, currentActor) => {
+        const parent = dispatchParent(t, currentActor)
+        const item = createItem(t, params, currentActor, parent)
+        linkedSession(t, item, params.agentKind, params.agentConfig)
         t.update(s.workItems).set({ revision: parent.revision + 1 }).where(eq(s.workItems.id, parent.id)).run()
         emit(t, parent.id)
         const result = params.activate === false ? { item: emit(t, item.id), queued: false } : start(t, item, reserved, params.agentKind)
         return result
-      })
+      }, getActor)
     },
     reparent(params, actor) {
       checkActor(actor, true)

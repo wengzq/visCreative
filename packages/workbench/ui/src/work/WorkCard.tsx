@@ -1,4 +1,4 @@
-import { agentLabel, useAgents } from '../agents'
+import { useAgents } from '../agents'
 import { ChevronDownIcon, useFormat, useLocale, useMessages } from '@vis/ui-kit'
 import { workMessages } from '../messages'
 import { AgentIcon } from '../AgentIcon'
@@ -7,12 +7,15 @@ import type { WorkItemView, WorkSessionView, WorkStatus } from '@vis/protocol'
 import { useEffect, useRef, useState } from 'react'
 import { actionLabels, getQuickActions, getWorkActivity, relativeTime, statusLabels, sessionDoing, workFailureText } from './model'
 import { WorkCardMenu, type WorkCardMenuHandle } from './WorkCardMenu'
+import { useAgentModels } from '../agentModels'
+import { workSessionLabel, type AgentModels } from './sessionLabels'
 import './work.css'
 
 export type WorkCardAction = 'locate' | 'board' | 'activate' | 'recall' | 'submitReview' | 'approve' | 'reject' | 'reopen' | 'review' | 'pin' | 'rename' | 'reviewByUser' | 'reviewByParent' | 'directory' | 'copyDirectory' | 'session' | 'inbox' | 'delete'
 export type WorkCardThumbnail = { src: string; kind: 'image' | 'video'; alt?: string }
 export type WorkCardProps = {
   item: WorkItemView
+  agentModels?: AgentModels
   variant?: 'tree' | 'board' | 'compact'
   selected?: boolean
   compact?: boolean
@@ -34,6 +37,8 @@ export function WorkCard(p: WorkCardProps) {
   const { item } = p
   const { locale } = useLocale()
   const agents = useAgents()
+  const catalogModels = useAgentModels(item.sessions)
+  const models = p.agentModels ?? catalogModels
   const t = useMessages(workMessages)
   const format = useFormat()
   const statuses = statusLabels(locale)
@@ -50,10 +55,7 @@ export function WorkCard(p: WorkCardProps) {
   const now = useClock(silentSince !== null)
   const queued = item.waitingSlotSince !== null
   const waiting = queued ? p.queuePosition ? t.waitingSlotPosition(format.number(p.queuePosition)) : t.waitingSlot : item.waitingOn ? t.waitingReplyExcerpt(item.waitingOn.excerpt) : ''
-  const agentName = (session: WorkSessionView) => {
-    const index = item.sessions.filter(agent => agent.agentKind === session.agentKind).findIndex(agent => agent.sessionId === session.sessionId)
-    return `${agentLabel(agents, session.agentKind)}${index > 0 ? ` ${format.number(index + 1)}` : ''}`
-  }
+  const sessionLabel = (session: WorkSessionView) => workSessionLabel(session, item.sessions, agents, locale, models)
   const action = (value: WorkCardAction) => p.onAction?.(item, value)
   useEffect(() => { setSessionsOpen(false) }, [item.workItemId])
   return <article ref={card} role="listitem" tabIndex={0} className={`vis-work-card is-${board ? 'board' : 'tree'}${p.selected ? ' is-selected' : ''}${compact ? ' is-compact' : ''}`} aria-label={t.cardLabel(item.title, statuses[item.status], waiting)} onClick={() => p.onSelect?.(item)} onKeyDown={event => {
@@ -80,8 +82,8 @@ export function WorkCard(p: WorkCardProps) {
       : <div className="vis-work-failure" role="status">{workFailureText(item.failure, locale)}</div> : null}
     {queued ? <div className="vis-work-waiting">{waiting}</div> : null}
     {item.sessions.length > 1 ? <button type="button" className="vis-work-fold" aria-expanded={sessionsOpen} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setSessionsOpen(!sessionsOpen) }}>{t.agents(format.number(item.sessions.length))} <span className={sessionsOpen ? 'is-open' : ''}><ChevronDownIcon /></span></button> : null}
-    {item.sessions.length <= 1 || sessionsOpen ? <div className="vis-work-agents">{item.sessions.map(session => <button key={session.sessionId} type="button" className="vis-work-agent" aria-label={t.openAgentSession(agentName(session))} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); if (p.onSession) p.onSession(item, session); else action('session') }}>
-      <AgentIcon kind={session.agentKind} /><span className="vis-work-agent-name">{agentName(session)}</span><span className="vis-work-doing" title={sessionDoing(session.doing, locale) ?? undefined}>{sessionDoing(session.doing, locale) || (session.archived ? t.archived : t.idle)}</span><time dateTime={session.lastActivityAt === null ? undefined : new Date(session.lastActivityAt).toISOString()}>{relativeTime(session.lastActivityAt, undefined, locale)}</time>
+    {item.sessions.length <= 1 || sessionsOpen ? <div className="vis-work-agents">{item.sessions.map(session => <button key={session.sessionId} type="button" className="vis-work-agent" aria-label={t.openAgentSession(sessionLabel(session).agentName)} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); if (p.onSession) p.onSession(item, session); else action('session') }}>
+      <AgentIcon kind={session.agentKind} /><span className="vis-work-agent-name">{sessionLabel(session).agentName}</span>{sessionLabel(session).configLabel ? <span className="vis-work-agent-model" title={sessionLabel(session).configLabel}>{t.agentModelSuffix(sessionLabel(session).configLabel)}</span> : null}<span className="vis-work-doing" title={sessionDoing(session.doing, locale) ?? undefined}>{sessionDoing(session.doing, locale) || (session.archived ? t.archived : t.idle)}</span><time dateTime={session.lastActivityAt === null ? undefined : new Date(session.lastActivityAt).toISOString()}>{relativeTime(session.lastActivityAt, undefined, locale)}</time>
     </button>)}</div> : null}
     {board && !compact && p.thumbnails?.length ? <div className="vis-work-thumbnails">{p.thumbnails.slice(0, 2).map((thumbnail, index) => thumbnail.kind === 'video' ? <video key={`${thumbnail.src}:${index}`} src={thumbnail.src} preload="metadata" muted playsInline aria-label={thumbnail.alt || t.videoArtifact} /> : <img key={`${thumbnail.src}:${index}`} src={thumbnail.src} alt={thumbnail.alt || t.imageArtifact} loading="lazy" />)}</div> : null}
     {board && item.waitingOn ? <button type="button" className="vis-work-waiting vis-work-waiting-link" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); action('inbox') }}>{t.waitingReplyExcerpt(item.waitingOn.excerpt)}</button> : null}

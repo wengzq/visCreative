@@ -12,13 +12,17 @@
   <img alt="React 19" src="https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white">
   <img alt="SQLite" src="https://img.shields.io/badge/SQLite-%E4%BA%8B%E5%AE%9E%E6%9D%A5%E6%BA%90-0f80cc?logo=sqlite&logoColor=white">
   <img alt="pnpm" src="https://img.shields.io/badge/pnpm-10-f69220?logo=pnpm&logoColor=white">
-  <img alt="测试" src="https://img.shields.io/badge/%E6%B5%8B%E8%AF%95-793%20%E5%8D%95%E6%B5%8B%20%C2%B7%2076%20e2e-2ea44f">
+  <img alt="测试" src="https://img.shields.io/badge/%E6%B5%8B%E8%AF%95-4100%2B%20%E5%8D%95%E6%B5%8B%20%C2%B7%20392%20e2e-2ea44f">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
 <p align="center">
   审美归你，Agent 带来所有工具。<br>
   一张共享画布，Agent 通过正式接口和你一起写作、绘制、渲染和剪辑。一切都有版本、可溯源，而什么算好由你决定。
+</p>
+
+<p align="center">
+  <a href="https://everythingviscreative.com"><b>everythingviscreative.com</b></a> · <a href="#试用桌面预览版">桌面预览版</a> · <a href="#快速开始">快速开始</a>
 </p>
 
 ---
@@ -224,6 +228,8 @@ flowchart LR
 
 输入框工具行可按会话选择模型与思考强度，可选项来自 Agent；选择「默认」沿用 Agent 默认。切换模型时不支持的强度会恢复默认，运行中修改从下一回合生效。
 
+当你明确指定，或你编写的技能、工作流要求时，Agent 也可以设置直接子项的模型、思考强度和速度档位（RFC 0049）：先用 `work.agentOptions` 读取准确选项，再向 `work.dispatch` 传 `agentConfig`，或用 `work.setAgentConfig` 修改已有子项的主会话，最后通过 `work.get` 确认。省略设置时使用子项 Agent 的默认值；Agent 仍不能修改自己的会话设置。
+
 几条贯穿始终的原则：
 
 - **唯一的能力注册表。** `packages/protocol` 声明每个方法的参数、调用方（`ui`、`agent`）和说明；命令行、MCP 服务和 `capabilities.describe` 都由它生成。
@@ -231,9 +237,15 @@ flowchart LR
 - **昂贵的事绝不意外重复。** 生成服务超时、又无法确认对方是否已接单时，任务进入 `unknown`，不会自动重新提交。
 - **严格的模块边界。** 界面包只依赖协议；画布核心与任务管理核心互不依赖，经端口协作。`pnpm check` 中的 `scripts/check-boundaries.mjs` 负责校验。
 
+## 试用桌面预览版
+
+适用于 **Apple 芯片 Mac** 的桌面应用预览版在 [Releases](https://github.com/wengzq/visCreative/releases) 页面；项目介绍见 [everythingviscreative.com](https://everythingviscreative.com)。下载 `.dmg`，把 visCreative 拖到“应用程序”后打开。预览版尚未公证，macOS 会拦截第一次启动：在 **系统设置 › 隐私与安全性** 里点 **仍要打开**。
+
+应用不需要 Node.js、pnpm 或 ffmpeg：它自己启动后台服务，并内置 LGPL 版 ffmpeg（源码随每个版本一起提供）。要用的 Agent 命令行仍需自行安装并登录；本机渲染需要 Google Chrome。数据保存在 `~/Library/Application Support/visCreative`。Intel Mac 和 Windows 版本稍后提供；预览版暂不自动更新，下载新的 DMG 替换即可。
+
 ## 快速开始
 
-**环境要求：** Node.js 24+、pnpm 10（通过 Corepack）、`PATH` 上有 `ffmpeg`/`ffprobe`（7 或更高版本）、Google Chrome（本机渲染与 e2e 测试需要）。要和 Agent 对话，需要已安装并登录 [Codex](https://github.com/openai/codex) 和/或 DeepSeek Harness（`dsh`）；visCreative 只负责启动它们，不打开它们的凭据文件。通过 `npx @deepseek-ai/dsh web` 安装的 DeepSeek 也能自动找到，无需全局安装；先自行运行一次完成安装和登录，visCreative 不会自动下载 dsh。
+**环境要求：** Node.js 24+、pnpm 10（通过 Corepack；Node 25 起不再自带 Corepack，需先运行 `npm install -g corepack`）、`PATH` 上有 `ffmpeg`/`ffprobe`（7 或更高版本）、Google Chrome（本机渲染与 e2e 测试需要）。要和 Agent 对话，需要已安装并登录 [Codex](https://github.com/openai/codex) 和/或 DeepSeek Harness（`dsh`）；visCreative 只负责启动它们，不打开它们的凭据文件。通过 `npx @deepseek-ai/dsh web` 安装的 DeepSeek 也能自动找到，无需全局安装；先自行运行一次完成安装和登录，visCreative 不会自动下载 dsh。
 
 Windows 11 x64 工具链需要先安装 Python 3 和带「使用 C++ 的桌面开发」工作负载的 Visual Studio 构建工具：better-sqlite3 13.x 在本机编译。同时安装 ffmpeg，完成后重新打开终端以刷新 `PATH`：
 
@@ -245,7 +257,7 @@ winget install Gyan.FFmpeg
 共用 lockfile 覆盖 macOS、Linux、Windows 的 x64/arm64 平台包，不代表所有架构都已支持运行。已支持 Windows 11 x64（RFC 0022）：studiod 使用命名管道，密钥存进凭据管理器，Codex 和 dsh 不经 shell 启动，Agent 使用运行时生成的 `vis.cmd`。Windows 上还需要安装 Visual Studio 构建工具（C++ 桌面开发，用于编译 better-sqlite3）、ffmpeg（`winget install Gyan.FFmpeg`），并打开开发者模式，让符号链接相关的安全测试能创建链接。本机渲染和浏览器 e2e 可通过 `VIS_CHROME_PATH` 指定浏览器；默认在 Windows 查找 Chrome 或 Edge，macOS 保留原有 Chrome 路径。
 
 ```sh
-corepack enable
+corepack enable   # Node 25+：先运行 npm install -g corepack
 pnpm install
 pnpm fonts:fetch   # 下载内置字幕字体（OFL），按 SHA-256 校验，不进仓库
 
@@ -482,7 +494,7 @@ RFC 0010 升级保留历史事件与请求记录：旧游标重取当前快照�
 - [x] RFC 0023 脚本节点第一步（4b-1）：脚本节点装一张可编辑的分镜表（按行冲突、撤销、导出）；人物、场景、道具作为共享资产并可挂参考图；由负责会话拆解剧本、撰写首帧 / 尾帧 / 视频提示词（标记过期与手改）；从镜头建单个生成节点
 - [x] RFC 0023 第二步（4b-2）：镜头之间的首尾帧衔接（连续镜头参考上一镜的帧图，可选严格模式抽取上一镜视频的最后一帧）；按分镜批量生成帧图和视频，由服务端执行，重启续跑、不重复提交、额度用完时暂停；用户发起需确认，Agent 发起需审批后才执行
 - [x] RFC 0026 Agent 说明：Codex 和 DeepSeek 共用一份简短的英文说明（346 词，Codex 常驻说明缩小 66%），让 Agent 放手使用自己的能力，并讲清费用和并发修改的规则及原因；分镜、剪辑、代码渲染、本地媒体、生成和画布节点的细则改成按需阅读的专项说明（`guide` 工具、`vis guide [主题]`），分镜或剪辑写错时报错会指向对应说明；Agent 看到的工具说明改为英文；DeepSeek 在隔离沙箱内开放子 Agent、工作流和后台任务；Agent 不再能读取 Claude Code 的凭据；新增可选的真实 Agent 评测（`pnpm --filter @vis/web agent-eval`，只用 Mock 和代码渲染）对比改动前后的表现
-- [x] RFC 0025 性能修复第一版：1000 个节点的画布一秒内打开、平移约 70 FPS（保留 React Flow 测量结果、节点按需选择状态、Markdown 只解析一次、缩小时显示纯文本、历史按槽位订阅）；studiod 空闲时每分钟约 0.2 秒 CPU，原来约 3 秒（每次轮询先做便宜检查、推送出错有隔离和退避、批量生成只在待审批或运行中时轮询；因额度暂停的批次只在点继续时唤醒）
+- [x] RFC 0025 性能修复第一版：1000 个节点的画布一秒内打开、平移约 70 FPS（保留 React Flow 测量结果、节点按需选择状态、Markdown 只解析一次、缩小时显示纯文本、历史按槽位订阅）；studiod 空闲时每分钟约 0.2 秒 CPU，原来约 3 秒（每次轮询先做便宜检查、推送出错有隔离和退避、批量生成只在待审批或运行中时轮询；因额度暂停的批次只在点继续时唤醒）。首次尺寸回调返回前也保留测量记录，避免生成更新清掉连线端点缓存、导致来源连线消失。
 - [x] 界面打磨（2026-11-05）：缓存 ffmpeg 版本检查，7 以下版本导出时显示中英文原因；画布工具条避开固定控件；分镜设定勾选、参考图操作、单一负责会话行与素材库/生成服务设置更清晰。RFC 0009 界面、0015、0024 状态区分已实现内容与待补的真机和真实 Agent 验收。
 - [x] RFC 0024 剪辑节点 a 步：剪辑节点带 1 条视频轨和最多 4 条音频轨，可新建空剪辑，也可以把选中的镜头按阅读顺序建成剪辑；Agent 通过整份文档写入（服务端校验）排粗剪：拼接镜头、加配乐并裁剪、淡入淡出；用 ffmpeg 导出为普通视频 / 音频节点（能直接拼接就不重编码，自动检测硬件 H.264 编码器），导出固定提交时的版本并用 exportOf 连回剪辑；画布卡片显示最新导出、迷你时间线和「未导出的修改」标记
 - [x] RFC 0024 剪辑节点 b 步：从剪辑卡片打开全屏编辑器（「打开剪辑」或双击），包含素材库、预览播放器（两个视频元素交替，用 AudioContext 时钟和 Web Audio 做淡入淡出与轨道音量）、检查器和时间线：移动、裁剪、波纹、切分、复制、吸附、缩放、多选和快捷键；修改在后台带版本号保存，支持本次编辑的撤销，Agent 改了文档时显示冲突横幅；波形和缩略图条由服务端生成，按项目缓存，与本地媒体任务共用槽位
@@ -511,21 +523,22 @@ RFC 0010 升级保留历史事件与请求记录：旧游标重取当前快照�
 - [x] RFC 0039 [生成来源与重新生成](docs/rfc/0039-generation-provenance-and-regenerate.md)（已实现）：生成出来的新节点保留提示词、参考图和设置；提示词面板显示模型真正使用的提示词（服务商返回改写版本时显示改写后的，否则显示发送的提示词），并可把某一版的设置恢复到草稿；节点工具栏新增「重新生成」，用相同设置生成新版本；参数名称和说明由各模型自己的参数定义提供中英文，新增模型无需修改画布界面
 - [x] RFC 0040 [生成类操作先确认再提交](docs/rfc/0040-confirmed-generation-operations.md)（已实现）：工具栏上的放大、扩图、重拍等生成类操作不再一点就提交，而是打开提示词面板；作者从已配置且支持该操作的模型中选择，调整该操作自己的参数，操作支持时填写提示词，确认后才提交；每个模型按操作声明参数和提示词规则，新增操作无需修改画布界面
 - [x] RFC 0041 [ACP Agent：MiniMax Code 与 CodeBuddy](docs/rfc/0041-acp-agents.md)（已完成）：通用 ACP 运行时与 DeepSeek 等行为迁移已完成；MiniMax Code（`mcode acp`）和 CodeBuddy（`codebuddy --acp`，WorkBuddy 的底层引擎）已实现，采用保守的只读降级策略，维护者已于 2026-11-10 在真实会话中验收两者；CodeBuddy 审批分类以已识别的原生工具身份为准。重启后的默认模型探测先完成，再恢复回合的会话。ACP 回合连续十分钟没有活动时会提示失败并停止进程，等待审批期间暂停计时。豆包因缺少结构化协议和交互式审批、工具运行在沙箱之外而暂缓。
-- [ ] RFC 0042 [开源实践](docs/rfc/0042-open-source-practices.md)（已实现；首次发布和公开仓库等待维护者操作）：在 `pnpm check` 和可选 git 钩子中加入隐私检查，命中时只报类型和位置、不打印内容，个人词表只保存在本机；把 `main` 的快照以 noreply 身份、经检查后用脚本发布到公开仓库；提供 issue 与 PR 模板、代码负责人和安全策略；在 `docs/lessons/` 按主题记录踩坑；有第二位贡献者后再启用先开 issue 的流程
+- [ ] RFC 0042 [开源实践](docs/rfc/0042-open-source-practices.md)（已实现；仓库已于 2026-11-13 公开；有第二位贡献者后再启用先开 issue 的流程）：在 `pnpm check` 和可选 git 钩子中加入隐私检查，命中时只报类型和位置、不打印内容，个人词表只保存在本机；把 `main` 的快照以 noreply 身份、经检查后用脚本发布到公开仓库；提供 issue 与 PR 模板、代码负责人和安全策略；在 `docs/lessons/` 按主题记录踩坑；有第二位贡献者后再启用先开 issue 的流程
 - [x] RFC 0043 [视频参考与媒体托管](docs/rfc/0043-video-references-and-media-hosting.md)（步骤 a–d；2026-11-11 使用托管参考的真实方舟任务通过）：独立可选的 TOS 媒体托管设置和仅 UI 可用的托管接口；Seedance 2.0/2.5 视频参考及 Seedance 2.5 模型注册；提示词面板按模型目录读取参考限制与托管状态，显示封面和时长、提交前数量与时长校验、媒体托管设置入口及计费 token 提示。参考编号按媒体类型分别计数，提交时将节点标记转换为 Seedance 2.0/2.5 文档中的引用名称。生成指南说明各模型的参考命名、首尾帧与参考素材互斥，以及真人面孔拒绝规则。§9 唯一一次真实 TOS/方舟验收仍需维护者批准。
 - [x] RFC 0037 [可交互 3D 场景节点](docs/rfc/0037-interactive-scene-nodes.md)：步骤 a 已完成，包含场景节点和编辑器，支持人偶、道具、导入的 `.glb` 模型，以及可保存为图片或发送到画格的机位。步骤 b 的姿势也已完成：可在视口或检查器里选择关节，在限位内旋转，套用站立、行走、坐姿、指向预设，并左右镜像。方向键和 PageUp/PageDown 可按当前工具、相对机位微调选中的物体或关节，每按一次是一步撤销。步骤 c 加入运动：每个场景一条时钟，可给物体变换、人偶关节、可见性和每个机位的相机打关键帧，每个关键帧单独选缓动（线性、缓入缓出或保持），时间轴条支持播放和逐帧，“渲染视频”在本地通过 `render/scene` 把当前机位渲染成以场景为输入的视频节点。步骤 d 让 Agent 可以创建场景，但只能改动自己创建且作者未动过的物体和机位；归属由网关标记，其他改动一律拒绝，场景指南覆盖人体、组合物体、运动和渲染单帧自查。Codex 评测已完成；Agent 是否真的查看了渲染结果无法从对话记录确认（已列为已知限制）。假 Codex 浏览器测试通过 MCP 覆盖受保护的写入和删除拒绝；MCP 会把网关的恢复提示传给 Agent
 - [x] RFC 0044 [场景修改建议](docs/rfc/0044-scene-change-proposals.md)（已实现）：场景里的物体、机位或时长受保护时，Agent 调用 `scene.propose` 提交修改建议，而不只是口头描述。作者可在对话里的卡片上接受或拒绝，也可在场景编辑器的“修改建议”区逐条决定，并在播放头位置预览建议后的场景（转动相机和拖动播放头不会退出预览）。接受属于作者自己的写入，在一个事务内完成，物体仍保持受保护；作者先改动了该物体，对应建议就会失效，同一物体的新建议会取代旧建议，场景卡片显示待处理数量。处理建议不会给 Agent 发消息
 - [x] RFC 0045 [模型文档链接](docs/rfc/0045-model-doc-links.md)（已实现）：每个内置生成模型都附上厂商官方的提示词指南和 API 参考链接，随模型出现在 `providers.list` 中；Agent 为某个模型写第一条提示词前先打开最新页面，作者的指示和技能仍优先于厂商建议。只放链接：仓库不复制厂商原文，也无需同步
 - [x] RFC 0047 [结果占位节点](docs/rfc/0047-result-placeholders.md)（已实现）：没有指定目标的生成结果在提交时就在画布上建好空节点，显示生成中，位置不再变；产物填入该节点，失败显示在它上面，取消时若仍为空则移除。回执里带节点 ID，Agent 可以立刻为它命名或连线
 - [x] RFC 0048 [Agent 自带能力](docs/rfc/0048-agent-native-capabilities.md)（已实现）：Agent 保留自己的能力，产品只守硬性边界（密钥、费用、网关权限、工作目录之外的写入、不渲染 HTML）。Codex 开启实时网页搜索并在会话里显示，自动审批放行 Agent 自带的只读网页搜索与读取，生成指南要求 Agent 真正读取模型文档，判定页面无法访问前必须写明网址和错误
+- [x] RFC 0049 [Child session model and effort](docs/rfc/0049-child-agent-model.md) (implemented): on author or author-written skill/workflow direction, Agents discover exact model, effort and service-tier ids, configure a new or existing direct child, and read back its settings; self configuration stays UI-only; indexed session labels include effort-only and speed-only settings, resolve catalogs without blocking review, and keep session-button accessible names stable
 - [ ] 已知问题：Windows 上的测试稳定性和一些 UI 小问题，清单见 [docs/known-issues.md](docs/known-issues.md)
 - [ ] 负载下的性能：Windows 上机器负载高时，单测和浏览器测试会超时（页面加载超过 5 秒、每个测试文件各自启动 studiod 和 Chrome）；浏览器 e2e 已改为同时跑 4 个文件，准备阶段的超时消失、总时长不变；下一步测量启动、首屏加载和单测并行度，并确认应用本身是否也会变慢
 - [ ] 「释放」：空闲时关闭项目（RFC 0011 推迟）
-- [ ] RFC 0046 [桌面应用](docs/rfc/0046-desktop-app.md)（步骤 a、b、c1、c2 已完成：运行前提、源码外壳、临时签名的 arm64 DMG 打包和独立的打包验收测试，以及随包附带的、从源码构建的 macOS LGPL ffmpeg 工具包）：基于 Electron 的 macOS（Apple 芯片与 Intel）和 Windows 应用，自行启动 studiod，并在主进程内运行现有网页宿主，界面包不改；内置 LGPL 版 ffmpeg 和字幕字体，以书面说明提供单独托管的源码，在用户 PATH 之后向 Agent 提供内置 ffmpeg 后备，并从登录 shell 读取 PATH，从访达启动时也能找到 Agent 命令行。步骤：studiod 运行前提、外壳、打包、未签名预览版（Windows 自动更新，macOS 提示有新版本），最后是签名并公证的正式版
+- [ ] RFC 0046 [桌面应用](docs/rfc/0046-desktop-app.md)（步骤 a、b、c1、c2 已完成：运行前提、源码外壳、临时签名的 arm64 DMG 打包和独立的打包验收测试，以及随包附带的、从源码构建的 macOS LGPL ffmpeg 工具包；首个适用于 Apple 芯片的预览版 [0.1.0-preview.1](https://github.com/wengzq/visCreative/releases/tag/v0.1.0-preview.1) 已于 2026-11-13 作为 GitHub 预发布版发布）：基于 Electron 的 macOS（Apple 芯片与 Intel）和 Windows 应用，自行启动 studiod，并在主进程内运行现有网页宿主，界面包不改；内置 LGPL 版 ffmpeg 和字幕字体，以书面说明提供单独托管的源码，在用户 PATH 之后向 Agent 提供内置 ffmpeg 后备，并从登录 shell 读取 PATH，从访达启动时也能找到 Agent 命令行。步骤：studiod 运行前提、外壳、打包、未签名预览版（Windows 自动更新，macOS 提示有新版本），最后是签名并公证的正式版
 
 ## 致谢
 
-visCreative 的大部分开发是在 [Orca](https://github.com/stablyai/orca)（[onorca.dev](https://www.onorca.dev/)）里完成的。Orca 是一个开源的多 Agent 并行开发环境：一个 Agent 负责设计与审阅，多个 Codex 执行者在各自的 worktree 里实现任务。每天这样协作的体验，直接影响了本项目的工作项设计：协调者派发给执行者，消息回流到收件箱，经过人的审阅才算完成。感谢 Orca 团队。
+visCreative 的大部分开发是在 [Orca](https://github.com/stablyai/orca)（[onorca.dev](https://www.onorca.dev/)）里完成的。Orca 是一个开源的多 Agent 并行开发环境：Claude Code 负责设计与审阅，多个 Codex 执行者在各自的 worktree 里实现任务。开发在私有仓库中进行，再以合并后的快照发布到本仓库；快照包含 Claude 或 Codex 参与编写的改动时，会用 `Co-Authored-By` 署名它们。每天这样协作的体验，直接影响了本项目的工作项设计：协调者派发给执行者，消息回流到收件箱，经过人的审阅才算完成。感谢 Orca 团队。
 
 画布基于 [React Flow](https://reactflow.dev)（MIT 许可）。界面里隐藏了它的署名角标，所以在这里致谢。
 

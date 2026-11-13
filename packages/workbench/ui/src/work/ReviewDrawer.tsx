@@ -1,7 +1,7 @@
 import { workFailureText, workMessageLabel } from './model'
 import { describeError, useFormat, useLocale, useMessages } from '@vis/ui-kit'
 import { workMessages } from '../messages'
-import type { WorkChange, WorkItemView, WorkMessageView } from '@vis/protocol'
+import type { AgentModelOption, WorkChange, WorkItemView, WorkMessageView, WorkSessionView } from '@vis/protocol'
 import { useEffect, useRef, useState } from 'react'
 import { AgentMarkdown } from '../AgentMarkdown'
 import type { RefPreview } from '../RefThumb'
@@ -9,6 +9,10 @@ import { ScriptSummary } from '../RefThumb'
 import { SessionIcon } from '../SessionIcon'
 import { relativeTime } from './model'
 import { WorkDialog } from './WorkDialog'
+import { useAgents } from '../agents'
+import { AgentIcon } from '../AgentIcon'
+import { useAgentModels } from '../agentModels'
+import { workSessionLabel } from './sessionLabels'
 
 /** The host supplements work.changes with titles and before/after revision previews from slot.history. */
 export interface ReviewChangePreview extends WorkChange {
@@ -20,6 +24,7 @@ export interface ReviewChangePreview extends WorkChange {
 /** The caller handles data loading and RPC; messages includes all loaded pages. */
 export interface ReviewDrawerProps {
   item: WorkItemView
+  agentModels?: Readonly<Record<string, readonly AgentModelOption[]>>
   spaceName?: string
   messages: readonly WorkMessageView[]
   /** This round's completion report; pass null for manual user review submission without a report, never substitute a historical report. */
@@ -41,6 +46,8 @@ export interface ReviewDrawerProps {
 export function ReviewDrawer(p: ReviewDrawerProps) {
   const { locale } = useLocale()
   const t = useMessages(workMessages)
+  const agents = useAgents()
+  const catalogModels = useAgentModels(p.item.sessions)
   const format = useFormat()
   const changeLabels = { created: t.created, updated: t.updated, deleted: t.deleted }
   const [rejecting, setRejecting] = useState(false)
@@ -56,6 +63,7 @@ export function ReviewDrawer(p: ReviewDrawerProps) {
   const messages = [...p.messages].sort((a, b) => a.createdAt - b.createdAt || a.messageId.localeCompare(b.messageId))
   const latestDone = p.completionReport
   const incomplete = p.incompleteChildren ?? []
+  const sessionLabel = (session: WorkSessionView) => workSessionLabel(session, p.item.sessions, agents, locale, p.agentModels ?? catalogModels).label
   // Unfinished child work items only trigger a notice; users can still approve directly
   const disabled = busy || !!p.loading || !!p.error || p.item.status !== 'in_review'
   const decide = async (decision: 'approve' | 'reject') => {
@@ -85,6 +93,7 @@ export function ReviewDrawer(p: ReviewDrawerProps) {
   </div>}>
     {p.loading ? <p className="vis-work-notice" role="status">{t.readingReview}</p> : null}
     {p.warning ? <p className="vis-work-notice" role="alert">{p.warning}</p> : null}
+    <div className="vis-work-agents">{p.item.sessions.map(session => <div className="vis-work-agent" key={session.sessionId}><AgentIcon kind={session.agentKind} /><span className="vis-work-agent-name">{sessionLabel(session)}</span></div>)}</div>
     <section><h3>{t.completionReport}</h3>{latestDone ? <div className="vis-work-markdown"><AgentMarkdown>{latestDone.body}</AgentMarkdown></div> : p.loading ? null : <p className="vis-work-notice">{t.noCompletionReport}</p>}</section>
     <section><h3>{t.artifactChanges}</h3>{p.changes.length ? p.changes.map((change, index) => <article className="vis-work-change" key={`${change.nodeId}/${change.slotId ?? ''}/${index}`}>
       <button className="vis-work-change-title" aria-label={t.locateNode(change.title)} onClick={() => p.onLocateNode({ spaceId: p.item.spaceId, nodeId: change.nodeId })}>{change.nodeKind === 'frame' ? <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 8h18" /></svg> : <SessionIcon kind={change.nodeKind} />}<strong>{change.title}</strong><span className="vis-work-badge">{changeLabels[change.change]}</span></button>

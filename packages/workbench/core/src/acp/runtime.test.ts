@@ -608,3 +608,27 @@ it('uses the profile default-effort rule before prompting', async () => {
   await runtime.dispatchTurn(input())
   expect(servers[0]!.requests('session/set_config_option')[0]!.params).toEqual({ sessionId: 'native-session', configId: 'thinkingEffort', value: 'balanced' })
 })
+
+
+it('applies an explicitly configured child model and effort before its first ACP prompt', async () => {
+  profile.config = { model: 'modelChoice', effort: 'thinkingEffort' }
+  let model = 'fast', effort = 'low'
+  const config = () => [
+    { id: 'modelChoice', type: 'select', currentValue: model, options: [{ value: 'fast', name: 'Fast' }, { value: 'careful', name: 'Careful' }] },
+    { id: 'thinkingEffort', type: 'select', currentValue: effort, options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }] },
+  ]
+  handlers['session/new'] = () => ({ sessionId: 'native-session', configOptions: config() })
+  handlers['session/set_config_option'] = ({ configId, value }) => {
+    if (configId === 'modelChoice') model = value
+    else effort = value
+    return { configOptions: config() }
+  }
+  await runtime.dispatchTurn({ ...input(), workContext: { workItemId: 'child', parentId: 'parent', hasChildren: false }, agentConfig: { model: 'careful', effort: 'high', serviceTier: null } })
+  const server = servers[0]!
+  expect(server.requests('session/set_config_option').map(request => request.params)).toEqual([
+    { sessionId: 'native-session', configId: 'modelChoice', value: 'careful' },
+    { sessionId: 'native-session', configId: 'thinkingEffort', value: 'high' },
+  ])
+  const methods = server.received.map(request => request.method)
+  expect(methods.lastIndexOf('session/set_config_option')).toBeLessThan(methods.indexOf('session/prompt'))
+})

@@ -33,7 +33,7 @@ export function useWorkUI({ conn, view, notify, openSession, closeSession, focus
   const [mainView, setMainView] = useState<'canvas' | 'board'>(() => {
     try { return localStorage.getItem('vis.main.view') === 'board' ? 'board' : 'canvas' } catch { return 'canvas' }
   })
-  const [scope, setScope] = useState<'space' | 'all'>('space')
+  const [scope, setScope] = useState<'space' | 'all'>('all')
   const [inboxFocus, setInboxFocus] = useState<string>()
   const [inboxOpen, setInboxOpen] = useState(false)
   const [inbox, setInbox] = useState<WorkInboxGroup[]>([])
@@ -62,6 +62,8 @@ export function useWorkUI({ conn, view, notify, openSession, closeSession, focus
 
   useEffect(() => {
     try { localStorage.setItem('vis.main.view', mainView) } catch { /* Preference storage unavailable */ }
+    // The board remounts with all projects; keep its first data read in the same scope.
+    if (mainView === 'canvas') setScope('all')
   }, [mainView])
   useEffect(() => {
     const key = (event: KeyboardEvent) => {

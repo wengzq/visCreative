@@ -91,6 +91,7 @@ AgentModelOption = {
 - 全局或按 Agent 种类的默认模型 / 强度。
 - Codex 的 personality 等其他参数。
 - 让 Agent 自己调整模型或强度。
+  Revised by [RFC 0049](0049-child-agent-model.md): Agents may configure direct child sessions on author direction; their own session stays UI-only.
 
 ## 验收
 

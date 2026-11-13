@@ -3,8 +3,10 @@
 
 /** Hosts that only ever appear as placeholders (RFC 2606, RFC 6761) or are published on purpose. */
 const PLACEHOLDER_EMAIL_DOMAINS = /(^|\.)(example\.(com|org|net)|example|test|invalid|localhost|users\.noreply\.github\.com)$/i
+/** The only agent addresses copied from archive co-author trailers into public snapshots. */
+export const PUBLIC_AGENT_EMAILS = new Set(['noreply@anthropic.com', 'noreply@openai.com'])
 /** Addresses published on purpose: attribution trailers and the SSH user every GitHub remote uses. */
-const PUBLIC_EMAILS = new Set(['noreply@anthropic.com', 'noreply@openai.com', 'noreply@github.com', 'git@github.com'])
+const PUBLIC_EMAILS = new Set([...PUBLIC_AGENT_EMAILS, 'noreply@github.com', 'git@github.com'])
 /** Home-directory names tests and docs use as placeholders. */
 const PLACEHOLDER_USERS = new Set(['creative', 'me', 'you', 'user', 'username', 'name', 'example', 'alice', 'bob', 'test', 'runner', 'someone', 'shared', 'public', 'guest', 'default'])
 

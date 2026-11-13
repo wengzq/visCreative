@@ -148,3 +148,17 @@ it('the dsh persona suffix contains no template braces in any mode', () => {
     expect(suffix).not.toContain('}}')
   }
 })
+
+
+it('teaches exact child configuration only on author or author-written workflow direction', () => {
+  const work = { workItemId: 'root', parentId: null, hasChildren: true }
+  const instructions = agentInstructions(false, work)
+  for (const text of ['only when the author asked', 'skill or workflow the author wrote', 'otherwise omit agentConfig', 'work.agentOptions', 'work.dispatch', 'work.setAgentConfig', 'work.get', 'ambiguous or not listed', 'Do not pick a model on your own initiative']) expect(instructions).toContain(text)
+})
+
+
+it('does not teach child sessions to configure or dispatch children', () => {
+  const child = { workItemId: 'child', parentId: 'root', hasChildren: false }
+  const instructions = agentInstructions(false, child)
+  for (const text of ['work.agentOptions', 'work.dispatch', 'work.setAgentConfig']) expect(instructions).not.toContain(text)
+})

@@ -29,11 +29,12 @@ export function moveFlowNodes(nodes: VisNode[], positions: ReadonlyMap<string, {
 
 export function toFlowNode(view: NodeView, layout: Layout | undefined, selected: boolean, deco: NodeDecoration | undefined, previous?: VisNode): VisNode {
   const l = layout ?? view
-  if (previous && previous.data.view === view && previous.data.deco === deco && previous.selected === selected
+  if (previous?.measured && previous.data.view === view && previous.data.deco === deco && previous.selected === selected
     && previous.position.x === l.x && previous.position.y === l.y && previous.width === l.w && previous.height === l.h) return previous
   return {
-    // Losing measured also clears React Flow's handle bounds and restarts its resize observation.
     ...previous,
+    // Keep a record even before the first dimensions callback, or intervening updates clear React Flow's cached handles.
+    measured: previous?.measured ?? {},
     id: view.nodeId,
     type: view.kind,
     position: previous?.position.x === l.x && previous.position.y === l.y ? previous.position : { x: l.x, y: l.y },

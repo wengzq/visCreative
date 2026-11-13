@@ -266,7 +266,17 @@ const CORE_METHODS = {
     callers: both,
     command: ['work', 'dispatch'],
     summary: 'Dispatch a child work item',
-    description: 'Any session in a root work item can dispatch a child work item and agent session. Child reports are delivered automatically and wake a new turn, so polling is unnecessary. Child agents cannot see the parent’s chat history; include goals, reference node IDs, deliverables and acceptance criteria in brief. activate: true activates immediately. When global execution slots are full, queued: true leaves the item in todo awaiting a slot; do not retry. Only one level of dispatch is supported: child work items cannot dispatch children and should report to their parent. Requires requestId; identical retries return the first result.',
+    description: 'Any session in a root work item can dispatch a child work item and agent session. Set model, effort or service tier only when the author asked for it or a skill or workflow the author wrote says so; otherwise omit agentConfig. Read work.agentOptions for exact ids and confirm agentConfig through work.get. Child reports are delivered automatically and wake a new turn, so polling is unnecessary. Child agents cannot see the parent’s chat history; include goals, reference node IDs, deliverables and acceptance criteria in brief. activate: true activates immediately. When global execution slots are full, queued: true leaves the item in todo awaiting a slot; do not retry. Only one level of dispatch is supported: child work items cannot dispatch children and should report to their parent. Requires requestId; identical retries return the first result.',
+  },
+  'work.agentOptions': {
+    ...work.agentOptions, callers: both, command: ['work', 'agent', 'options'],
+    summary: 'List an Agent kind’s models, efforts and service tiers',
+    description: 'Returns the same per-kind model catalog as session.agentOptions. Set model, effort or service tier only when the author asked for it or a skill or workflow the author wrote says so; otherwise omit agentConfig when dispatching. Use exact ids; if a name is ambiguous or absent, show the author the options instead of guessing.',
+  },
+  'work.setAgentConfig': {
+    ...work.setAgentConfig, callers: agent, command: ['work', 'set', 'agent', 'config'],
+    summary: 'Set a direct child’s main session model, effort and service tier',
+    description: 'Sets the first unarchived session of a direct child, effective next turn. Self, siblings and grandchildren are forbidden. Set model, effort or service tier only when the author asked for it or a skill or workflow the author wrote says so; otherwise omit agentConfig when dispatching and leave existing settings unchanged. Read work.agentOptions for exact ids and confirm agentConfig through work.get. Null uses Agent defaults; requires requestId and identical retries return the first result.',
   },
   'work.activate': {
     ...work.activate,

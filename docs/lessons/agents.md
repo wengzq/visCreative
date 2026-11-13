@@ -77,3 +77,11 @@
 - **Cause:** the guide said "open the page" without saying how and allowed "say so and continue" without asking for a try; Codex ran with its default web search, which reads a cached index; and `webSearch` items were dropped from the transcript, so nobody could check.
 - **Instead:** give Agents a concrete way to do a step (their web tool or `curl -sL`), ask for the URL and error when they report a failure, keep their native tools on, and show every native tool call in the transcript.
 - **Found in:** [RFC 0048](../rfc/0048-agent-native-capabilities.md#background).
+
+
+## Catalog validation yields before a child session write
+
+- **Symptom:** a parent passes an early permission check, but the child is reparented or its main session changes while the model catalog is being read; an old retry can also overwrite a later author setting.
+- **Cause:** catalog probes are asynchronous, while work-item relationships and main-session routing can change before the synchronous SQLite write transaction starts.
+- **Instead:** look up successful request replays before probing, validate with the shared session validator and per-kind cache, then require a caller resolver at the work-service boundary and resolve it unconditionally again in the write transaction. Use that fresh actor to check the active turn, caller identity, direct-child relationship and main-session identity. A replay returns its saved result without applying it again. Tests that need several messages in one batch should dispatch inactive, then activate and enqueue the messages synchronously: awaiting an active dispatch lets dequeue begin.
+- **Found in:** [RFC 0049](../rfc/0049-child-agent-model.md#implementation-notes-2026-11-13), `services/studiod/src/work-service.ts`.

@@ -5,6 +5,15 @@ import { moveFlowNodes, selectFlowNodes, toFlowNode } from './flow-nodes'
 const view: NodeView = { nodeId: 'text', kind: 'text', x: 20, y: 40, w: 320, h: 240, z: 0, layoutRevision: 0, slots: [] }
 
 describe('Flow node reconciliation', () => {
+  it('Preserves pending measurements without inventing dimensions during content and status updates', () => {
+    const initial = toFlowNode(view, undefined, false, undefined)
+    expect(initial.measured).toEqual({})
+    const updated = toFlowNode({ ...view, title: 'Delivered' }, undefined, false, { running: 0, problems: [] }, initial)
+    expect(updated.measured).toBe(initial.measured)
+    const acknowledged = { ...updated, measured: { width: 320, height: 240 } }
+    expect(toFlowNode(updated.data.view, undefined, false, updated.data.deco, acknowledged)).toBe(acknowledged)
+  })
+
   it('Reuses unchanged nodes including measurements returned by React Flow', () => {
     const previous = { ...toFlowNode(view, undefined, false, undefined), measured: { width: 320, height: 240 } }
     expect(toFlowNode(view, undefined, false, undefined, previous)).toBe(previous)

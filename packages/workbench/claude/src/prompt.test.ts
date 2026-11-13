@@ -93,3 +93,17 @@ it('timeline instructions explain document limits, pinned edits, local export, a
   const instructions = SYSTEM_APPEND
   for (const text of ['timelineFrom', '{ nodeId, durationMs }', '500\u201330000', 'durationSec', 'video', 'first', 'timeline.set', 'expectedRevision', 'assetVersionId', 'startMs', 'inMs', 'outMs', 'fadeInMs', 'fadeOutMs', '0–2', '1 条视频轨', '4 条音频轨', '200 个片段', '30 分钟', '10 秒', 'timeline.export', 'params: {}', 'exportOf', 'Frame', 'vis canvas get', 'vis canvas apply', 'vis media process', 'vis media get', 'vis media wait', '剪辑绝不提交生成任务', '单素材截取、变速、提取音轨', '仍不支持旋转', '画中画', 'media.captions_unavailable', 'overlay: { x, y, width, opacity }', '2 条叠加轨', 'speed', '0.25–4', 'transitionIn', 'crossfade', 'dip', 'textTracks', 'font.list', 'assetVersionId }', 'pnpm fonts:fetch', '字幕联动', '让字幕继续跟着原来的镜头', '不要编造字段', '没有实际完成并检查结果之前']) expect(instructions).toContain(text)
 })
+
+
+it('teaches exact child configuration only on author or author-written workflow direction', () => {
+  const work = { workItemId: 'root', parentId: null, hasChildren: true }
+  const instructions = systemAppend(work)
+  for (const text of ['only when the author asked', 'skill or workflow the author wrote', 'otherwise omit agentConfig', 'work.agentOptions', 'work.dispatch', 'work.setAgentConfig', 'work.get', 'ambiguous or not listed', 'Do not pick a model on your own initiative']) expect(instructions).toContain(text)
+})
+
+
+it('does not teach child sessions to configure or dispatch children', () => {
+  const child = { workItemId: 'child', parentId: 'root', hasChildren: false }
+  const instructions = systemAppend(child)
+  for (const text of ['work.agentOptions', 'work.dispatch', 'work.setAgentConfig']) expect(instructions).not.toContain(text)
+})

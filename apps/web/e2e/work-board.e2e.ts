@@ -20,6 +20,7 @@ const Database = createRequire(new URL('../../../packages/storage/package.json',
 const processes: ChildProcess[] = []
 const errors: string[] = []
 const historyReads: string[] = []
+const pendingWorkReads = new Set<string | number>()
 const reparentRequests: Array<{ workItemId: string; parentId: string | null }> = []
 let dir: string
 let projectsDir: string
@@ -173,11 +174,21 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
     page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
     page.setDefaultTimeout(5000)
     page.on('pageerror', error => errors.push(error.stack ?? error.message))
-    page.on('websocket', socket => socket.on('framesent', frame => {
-      const request = JSON.parse(String(frame.payload))
-      if (request.method === 'work.changes') historyReads.push(request.params.workItemId)
-      if (request.method === 'work.reparent') reparentRequests.push(request.params)
-    }))
+    page.on('websocket', socket => {
+      const pending = new Set<string | number>()
+      socket.on('framesent', frame => {
+        const request = JSON.parse(String(frame.payload))
+        if (request.method === 'work.changes') historyReads.push(request.params.workItemId)
+        if (request.method === 'work.changes' || request.method === 'work.list') { pending.add(request.id); pendingWorkReads.add(request.id) }
+        if (request.method === 'work.reparent') reparentRequests.push(request.params)
+      })
+      socket.on('framereceived', frame => {
+        const id = JSON.parse(String(frame.payload)).id
+        pending.delete(id)
+        pendingWorkReads.delete(id)
+      })
+      socket.on('close', () => { for (const id of pending) pendingWorkReads.delete(id) })
+    })
     await page.goto(webUrl)
     await showBoard()
   }, 30_000)
@@ -206,6 +217,79 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
     await Promise.all(processes.map(proc => proc.exitCode !== null || proc.signalCode !== null ? Promise.resolve() : new Promise<void>(resolve => proc.once('exit', () => resolve()))))
     removeTempDir(dir)
     removeTempDir(projectsDir)
+  })
+
+  it('opens all projects immediately, keeps scope filters optional, and centers the heading in both languages', async () => {
+    const other = await admin.call('space.create', { requestId: rid(), name: 'Second project' })
+    const local = (await admin.call('work.create', { requestId: rid(), spaceId, title: 'Project overview' })).item as WorkItemView
+    const remote = (await admin.call('work.create', { requestId: rid(), spaceId: other.spaceId, title: 'Cross-project task' })).item as WorkItemView
+    const shots = join(process.platform === 'win32' ? tmpdir() : '/tmp', 'board-scope')
+    mkdirSync(shots, { recursive: true })
+    try {
+      for (const locale of ['en', 'zh-CN'] as const) {
+        const overview = await browser.newPage({ locale, viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
+        const scopes: string[] = []
+        overview.on('websocket', socket => socket.on('framesent', frame => {
+          const request = JSON.parse(String(frame.payload))
+          if (request.method === 'work.list') scopes.push(request.params.scope)
+        }))
+        await overview.addInitScript(id => localStorage.setItem('vis.project', id), spaceId)
+        try {
+          const labels = locale === 'en'
+            ? { board: 'Board', title: 'Work board', all: 'All projects', current: 'Current project', canvas: 'Canvas', filter: 'Filter projects' }
+            : { board: '看板', title: '工作看板', all: '全部项目', current: '当前项目', canvas: '画布', filter: '项目筛选' }
+          await overview.goto(webUrl)
+          await overview.getByRole('tab', { name: labels.board, exact: true }).click()
+          const region = overview.getByRole('region', { name: labels.title, exact: true })
+          const all = region.getByRole('tab', { name: labels.all, exact: true })
+          const current = region.getByRole('tab', { name: labels.current, exact: true })
+          const remoteCard = region.getByRole('listitem').filter({ hasText: remote.title })
+          await remoteCard.waitFor()
+          expect(await all.getAttribute('aria-selected')).toBe('true')
+          expect(await region.getByRole('tab').allTextContents()).toEqual([labels.all, labels.current])
+          expect(scopes).toEqual(['all'])
+          const filters = region.getByLabel(labels.filter, { exact: true })
+          await filters.getByRole('button', { name: other.name, exact: true }).click()
+          expect(await region.getByRole('listitem').filter({ hasText: local.title }).count()).toBe(0)
+          await filters.getByRole('button', { name: other.name, exact: true }).click()
+          await current.click()
+          expect(await current.getAttribute('aria-selected')).toBe('true')
+          expect(await filters.count()).toBe(0)
+          expect(await remoteCard.count()).toBe(0)
+          await expect.poll(() => scopes).toEqual(['all', 'space'])
+          await overview.getByRole('tab', { name: labels.canvas, exact: true }).click()
+          await overview.getByRole('tab', { name: labels.board, exact: true }).click()
+          await remoteCard.waitFor()
+          expect(await all.getAttribute('aria-selected')).toBe('true')
+          await expect.poll(() => scopes).toEqual(['all', 'space', 'all'])
+          const heading = region.locator('.vis-work-board-heading')
+          const checkHeading = async (wrapped = false) => {
+            const title = (await heading.getByRole('heading', { name: labels.title, exact: true }).boundingBox())!
+            const tabs = (await heading.getByRole('tablist').boundingBox())!
+            const slots = (await heading.getByRole('button').last().boundingBox())!
+            const bounds = (await region.boundingBox())!
+            expect(tabs.x + tabs.width / 2).toBeCloseTo(bounds.x + bounds.width / 2, 0)
+            expect(title.x + title.width).toBeLessThanOrEqual(slots.x)
+            if (wrapped) expect(tabs.y).toBeGreaterThanOrEqual(Math.max(title.y + title.height, slots.y + slots.height))
+            else {
+              expect(title.x + title.width).toBeLessThanOrEqual(tabs.x)
+              expect(tabs.x + tabs.width).toBeLessThanOrEqual(slots.x)
+            }
+          }
+          await checkHeading()
+          await overview.evaluate(() => document.fonts.ready)
+          await overview.screenshot({ path: join(shots, `board-${locale}-1600.png`) })
+          if (locale === 'en') {
+            await overview.setViewportSize({ width: 1024, height: 1000 })
+            await checkHeading(true)
+            await overview.screenshot({ path: join(shots, 'board-en-1024.png') })
+          }
+        } finally { await overview.close() }
+      }
+    } finally {
+      await admin.call('work.delete', { requestId: rid(), spaceId, workItemId: local.workItemId })
+      await admin.call('work.delete', { requestId: rid(), spaceId: other.spaceId, workItemId: remote.workItemId })
+    }
   })
 
   it('list dragging expands the status bar, cancellation preserves status, and moving running turns keeps them active with a warning', async () => {
@@ -394,6 +478,7 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
     const transcript = await admin.call('session.getTranscript', { sessionId })
     expect(transcript.items.filter((entry: any) => entry.kind === 'approval')).toEqual([])
     await showBoard()
+    await board().getByRole('tab', { name: '当前项目', exact: true }).click()
     await card(parent.title).getByText('Codex', { exact: true }).waitFor()
     for (const childTitle of childTitles) {
       await card(childTitle).getByText(`↳ ${parent.title}`, { exact: true }).waitFor()
@@ -490,14 +575,19 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
       expect.objectContaining({ change: 'created', fromRevision: null, toRevision: 1 }),
     ]))
     expect((await item(work.workItemId)).changeCount).toBe(3)
+    const readsBeforeReload = historyReads.filter(id => id === work.workItemId).length
     await page.reload()
     await showBoard()
+    await board().getByRole('tab', { name: '当前项目', exact: true }).click()
     await card(work.title).getByText('本轮改动 3 处', { exact: true }).waitFor()
     expect(await card(work.title).getByText(/框内|未绑定画布框/).count()).toBe(0)
-    await expect.poll(() => historyReads.filter(id => id === work.workItemId).length).toBeGreaterThan(0)
+    await expect.poll(() => historyReads.filter(id => id === work.workItemId).length).toBeGreaterThan(readsBeforeReload)
+    // Let the scope snapshot and its revision-specific history read finish before checking cache reuse.
+    await expect.poll(() => pendingWorkReads.size).toBe(0)
     const reads = historyReads.filter(id => id === work.workItemId).length
     await page.getByRole('tab', { name: '画布', exact: true }).click()
     await showBoard()
+    await board().getByRole('tab', { name: '当前项目', exact: true }).click()
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     expect(historyReads.filter(id => id === work.workItemId)).toHaveLength(reads)
     await board().getByRole('tab', { name: '全部项目', exact: true }).click()
@@ -505,6 +595,8 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
     const current = await item(work.workItemId)
     await admin.call('work.update', { requestId: rid(), spaceId, workItemId: work.workItemId, expectedRevision: current.revision, title: current.title })
     await showBoard()
+    expect(await board().getByRole('tab', { name: '全部项目', exact: true }).getAttribute('aria-selected')).toBe('true')
+    await board().getByRole('tab', { name: '当前项目', exact: true }).click()
     expect(await board().getByRole('tab', { name: '当前项目', exact: true }).getAttribute('aria-selected')).toBe('true')
     await expect.poll(() => historyReads.filter(id => id === work.workItemId).length).toBeGreaterThan(reads)
     await screenshot('board.png')
@@ -517,6 +609,7 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
     expect(await viewport()).toBe(beforeViewport)
     expect(await selected()).toEqual(beforeSelected)
     await showBoard()
+    await board().getByRole('tab', { name: '当前项目', exact: true }).click()
     await card(work.title).hover()
     await card(work.title).getByRole('button', { name: '在画布中定位', exact: true }).click()
     await expect.poll(() => page.getByRole('tab', { name: '画布', exact: true }).getAttribute('aria-selected')).toBe('true')
@@ -755,7 +848,7 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
     const externallyDeleted = (await admin.call('work.create', { requestId: rid(), spaceId: other.spaceId, title: '跨项目 · 另一界面删除' })).item as WorkItemView
     await page.reload()
     await showBoard()
-    await board().getByRole('tab', { name: '全部项目', exact: true }).click()
+    expect(await board().getByRole('tab', { name: '全部项目', exact: true }).getAttribute('aria-selected')).toBe('true')
     await card(remote.title).getByText(other.name, { exact: true }).waitFor()
     const selectedProject = () => page.evaluate(() => localStorage.getItem('vis.project'))
     expect(await selectedProject()).toBe(spaceId)
@@ -782,6 +875,7 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
     expect((await admin.call('work.list', { spaceId: other.spaceId })).items).toEqual([])
     expect(await selectedProject()).toBe(spaceId)
     await board().getByRole('tab', { name: '当前项目', exact: true }).click()
+    expect(await board().getByRole('tab', { name: '当前项目', exact: true }).getAttribute('aria-selected')).toBe('true')
     await expect.poll(() => page.getByRole('button', { name: '切换项目', exact: true }).textContent()).toContain(projectName)
     expect(await card(remote.title).count()).toBe(0)
   })
@@ -800,7 +894,7 @@ describe.skipIf(!ready)('Work board and project canvas', () => {
       await jump.reload()
       await jump.getByRole('tab', { name: '看板', exact: true }).click()
       const allBoard = jump.getByRole('region', { name: '工作看板', exact: true })
-      await allBoard.getByRole('tab', { name: '全部项目', exact: true }).click()
+      expect(await allBoard.getByRole('tab', { name: '全部项目', exact: true }).getAttribute('aria-selected')).toBe('true')
       const remoteCard = allBoard.getByRole('listitem', { name: new RegExp(`^${remote.title}，`) })
       await remoteCard.getByRole('button', { name: '打开 Codex 会话', exact: true }).click()
       await expect.poll(() => jump.evaluate(() => localStorage.getItem('vis.project'))).toBe(other.spaceId)

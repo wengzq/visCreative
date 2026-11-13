@@ -1,5 +1,19 @@
 # UI lessons
 
+## A remounted board can disagree with its host's data scope
+
+- **Symptom:** opening the board briefly reads current-project data before loading all projects, or reads both scopes when reopened.
+- **Cause:** the board's local scope resets on mount while the host's fetch scope survives Canvas/Board switches.
+- **Instead:** initialize both scopes to the same default and reset the host while the board is unmounted. Cover the first opening and a return from Current project with RPC-scope assertions, while selecting Current project explicitly in tests of expanded card details. Cache checks after a reload must await a new read and its completion: request counters can already contain reads made before the reload.
+- **Found in:** [RFC 0009 amendment](../rfc/0009-work-items-and-board.md), `WorkBoard.tsx` and `apps/web/src/client/WorkUI.tsx`.
+
+## An edge can exist in React Flow's store without a rendered path
+
+- **Symptom:** generation output and its source edge are present in the browser's store, but no edge DOM appears, even after a ten-second wait. The result node has measured dimensions but no cached handle bounds.
+- **Cause:** handles already render unconditionally. React Flow measures them before returning the first dimensions callback to controlled node state. If a content or status update intervenes while that node still omits `measured`, React Flow interprets the omission as reinitialization and clears its handle cache. A later dimensions acknowledgement does not restore those bounds, and an unchanged-size node need not emit another resize. Provenance arrives with asset delivery; no later canvas reread, animation or viewport culling gates this edge.
+- **Instead:** give each new flow node an empty `measured` record and preserve it through reconciliation until React Flow supplies dimensions. Leave width and height unset in that record rather than inventing measurements. Regress the gap by holding dimension callbacks, updating content, then acknowledging the dimensions and checking both cached handles and the exact edge count; retain the original source-edge waits. The serial web fixture shares its page and project, so an early failure can skip cleanup and cascade into later cases.
+- **Found in:** [RFC 0025 first-measurement correction](../rfc/0025-performance.md#first-measurement-handle-retention-2026-11-13), [controlled-node browser regression](../../apps/web/e2e/canvas-rendering.e2e.ts).
+
 ## An attachment receipt can precede its reference number
 
 - **Symptom:** picking an unattached canvas source inserted a missing-reference chip or silently skipped insertion even though attachment succeeded.
@@ -132,3 +146,11 @@
 - **Cause:** `BoxHelper` is a line helper, while the general scene disposer handles meshes; leaving it attached to the helpers scene did not release its geometry and material.
 - **Instead:** let the outline owner remove and dispose every helper on teardown as well as when its selection changes. Verify geometry and material disposal against real helpers, including a repeated teardown.
 - **Found in:** [RFC 0044 step b](../rfc/0044-scene-change-proposals.md#as-built--step-b), `proposal-outlines.ts` and `SceneViewport.tsx`.
+
+
+## Display catalogs must not block review data
+
+- **Symptom:** opening a review waited for a slow model catalog, each review reload issued another request, and cards showed a raw id while the drawer showed the display label.
+- **Cause:** optional display metadata was awaited with the review load, and card/drawer labels had separate implementations.
+- **Instead:** render review data independently, share a per-kind client cache for pending, successful and briefly failed catalog reads, and resolve labels after render. Keep one indexed session-label helper and a separate stable accessible name for the session button; show effort-only and tier-only settings too. Hold a catalog response in the browser test and verify review actions remain usable before releasing it.
+- **Found in:** [RFC 0049 review corrections](../rfc/0049-child-agent-model.md#review-corrections-2026-11-13), `packages/workbench/ui/src/agentModels.ts` and `work/sessionLabels.ts`.

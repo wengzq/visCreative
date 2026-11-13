@@ -206,9 +206,41 @@ describe('Board history and role-free copy', () => {
       expect(html).toContain(isRoot ? '开始后可以自己完成，也可以拆分派发子工作项' : '开始后可以自己完成，完成后向上级报告')
       expect(html).not.toMatch(/协调者|执行者|普通对话/)
     }
-    const html = renderToStaticMarkup(createElement(AgentsContext.Provider, { value: [{ kind: 'codex', label: 'Codex', icon: [] } as unknown as import('@vis/protocol').AgentView] }, createElement(WorkCard, { variant: 'board', item: item({ sessions: [{ sessionId: 's', agentKind: 'codex', title: '工作区原始标题', silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false }] }) })))
+    const html = renderToStaticMarkup(createElement(AgentsContext.Provider, { value: [{ kind: 'codex', label: 'Codex', icon: [] } as unknown as import('@vis/protocol').AgentView] }, createElement(WorkCard, { variant: 'board', item: item({ sessions: [{ sessionId: 's', agentKind: 'codex', agentConfig: { model: null, effort: null, serviceTier: null }, title: '工作区原始标题', silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false }] }) })))
     expect(html).toContain('Codex')
     expect(html).not.toContain('工作区原始标题')
     expect(html).not.toMatch(/协调者|执行者|普通对话/)
   })
+})
+
+
+it('shows explicit child model labels beside the Agent in the review drawer and leaves defaults unlabeled in both locales', () => {
+  const session = { sessionId: 'child', agentKind: 'codex', title: 'Child', agentConfig: { model: 'provider/model:opaque', effort: 'high', serviceTier: null }, silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false }
+  const props: ReviewDrawerProps = { item: item({ sessions: [session] }), messages: [], completionReport: null, changes: [], hasMore: false, onClose() {}, onLoadMore() {}, onLocateNode() {}, async onApprove() {}, async onReject() {} }
+  for (const locale of ['en', 'zh-CN'] as const) {
+    const render = (props: ReviewDrawerProps) => renderToStaticMarkup(createElement(LocaleProvider, { locale, setLocale() {}, children: createElement(ReviewDrawer, props) }))
+    expect(render(props)).toContain('codex · provider/model:opaque · high')
+    expect(render({ ...props, agentModels: { codex: [{ id: 'provider/model:opaque', label: 'Careful model', isDefault: false, efforts: [], defaultEffort: null, serviceTiers: [] }] } })).toContain('codex · Careful model · high')
+    expect(render({ ...props, item: item({ sessions: [{ ...session, agentConfig: { model: null, effort: null, serviceTier: null } }] }) })).not.toContain('provider/model:opaque')
+  }
+})
+
+
+it('keeps card session names stable while sharing indexed catalog labels with the drawer', () => {
+  const make = (sessionId: string, model: string | null) => ({ sessionId, agentKind: 'codex', title: sessionId, silentSince: null, activeTurnId: null, doing: null, lastActivityAt: null, archived: false, agentConfig: { model, effort: null, serviceTier: null } })
+  const work = item({ sessions: [make('first', 'opaque'), make('second', 'opaque')] })
+  const agentModels = { codex: [{ id: 'opaque', label: 'Catalog display label', isDefault: true, efforts: [], defaultEffort: null, serviceTiers: [] }] }
+  const props: ReviewDrawerProps = { item: work, agentModels, messages: [], completionReport: null, changes: [], hasMore: false, onClose() {}, onLoadMore() {}, onLocateNode() {}, async onApprove() {}, async onReject() {} }
+  const agents = [{ kind: 'codex', label: 'Codex', icon: [] }] as unknown as import('@vis/protocol').AgentView[]
+  for (const locale of ['en', 'zh-CN'] as const) {
+    const render = (element: React.ReactNode) => renderToStaticMarkup(createElement(LocaleProvider, { locale, setLocale() {}, children: createElement(AgentsContext.Provider, { value: agents }, element) }))
+    const card = render(createElement(WorkCard, { item: { ...work, sessions: work.sessions.slice(0, 1) }, agentModels }))
+    const drawer = render(createElement(ReviewDrawer, props))
+    expect(card).toContain(locale === 'en' ? 'aria-label="Open Codex session"' : 'aria-label="打开 Codex 会话"')
+    expect(card).not.toContain('Open Codex ·')
+    expect(card).toContain('Catalog display label')
+    expect(card).not.toContain('>opaque<')
+    expect(drawer).toContain('Codex · Catalog display label')
+    expect(drawer).toContain('Codex 2 · Catalog display label')
+  }
 })

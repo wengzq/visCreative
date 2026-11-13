@@ -419,6 +419,27 @@ describe('protocol', () => {
     expect(config.safeParse({ model: 1, effort: null }).success).toBe(false)
   })
 
+  it('child session configuration defaults preserve old results and expose exact Agent option ids', () => {
+    const dispatch = METHODS['work.dispatch'].params
+    const params = { requestId: 'child', title: 'Child', brief: 'Explore', agentKind: 'codex' }
+    expect(dispatch.parse(params)).not.toHaveProperty('agentConfig')
+    for (const agentConfig of [{}, { model: null, effort: null, serviceTier: null }]) expect(dispatch.parse({ ...params, agentConfig })).toEqual(dispatch.parse(params))
+    expect(dispatch.parse({ ...params, agentConfig: { model: 'provider/model:opaque' } }).agentConfig).toEqual({ model: 'provider/model:opaque', effort: null, serviceTier: null })
+    for (const field of ['model', 'effort', 'serviceTier']) expect(dispatch.safeParse({ ...params, agentConfig: { [field]: '' } }).success).toBe(false)
+    const session = METHODS['work.get'].result.shape.item.shape.sessions.element
+    const old = { sessionId: 'child', agentKind: 'codex', title: 'Child', activeTurnId: null, doing: null, lastActivityAt: null, archived: false }
+    expect(session.parse(old).agentConfig).toEqual({ model: null, effort: null, serviceTier: null })
+    expect(session.parse({ ...old, agentConfig: { model: 'provider/model:opaque', effort: 'xhigh' } }).agentConfig).toEqual({ model: 'provider/model:opaque', effort: 'xhigh', serviceTier: null })
+    expect(METHODS['work.agentOptions'].callers).toEqual(['ui', 'agent'])
+    expect(METHODS['work.agentOptions'].params.parse({ agentKind: 'codex' })).toEqual({ agentKind: 'codex' })
+    expect(METHODS['work.agentOptions'].result).toBe(METHODS['session.agentOptions'].result)
+    const set = METHODS['work.setAgentConfig']
+    expect(set.callers).toEqual(['agent'])
+    const config = { requestId: 'set-child', workItemId: 'child', model: null, effort: null, serviceTier: null }
+    expect(set.params.parse(config)).toEqual(config)
+    for (const field of ['model', 'effort', 'serviceTier']) expect(set.params.safeParse({ ...config, [field]: undefined }).success).toBe(false)
+  })
+
   it('canvas.apply: content edits require expectedRevision, layout edits do not', () => {
     const apply = (op: object) => METHODS['canvas.apply'].params.safeParse({ requestId: 'r', ops: [op] }).success
     expect(apply({ op: 'slot.setText', slotId: 's', body: 'x', expectedRevision: 1 })).toBe(true)

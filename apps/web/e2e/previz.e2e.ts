@@ -178,7 +178,7 @@ describe.skipIf(!ready)('Shot previz editor acceptance', () => {
   it('imports through the picker, sorted multi-file drop and paste, fills from canvas, reorders and persists after reload', async () => {
     const [chooser] = await Promise.all([page.waitForEvent('filechooser'), editor().getByRole('button', { name: 'Import images', exact: true }).click()])
     await chooser.setFiles(fileA)
-    await expect.poll(async () => (await doc()).panels[0]!.underlay).not.toBeNull()
+    await expect.poll(async () => (await doc()).panels[0]!.underlay, { timeout: 10_000 }).not.toBeNull()
     const data = (path: string, name: string) => ({ name, bytes: readFileSync(path).toString('base64') })
     await drop([data(fileB, 'Z.png'), data(fileA, 'A.png')], editor().getByRole('main'))
     await expect.poll(async () => (await doc()).panels.length).toBe(3)

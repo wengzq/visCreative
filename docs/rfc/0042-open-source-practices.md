@@ -77,9 +77,33 @@ Where it runs:
 1. Refuse unless the working tree is clean and the commit is on `main`.
 2. Build a new commit whose tree is exactly the `main` tree and whose single parent is the current `public/main`, so `public` is a linear series of snapshots that shares no history with the archive.
 3. Set author and committer to the identity configured in `~/.config/vis-creative/release.json` (a noreply address); refuse if none is configured.
-4. Take the message from `--message <file>`: a release summary written for the public, checked like everything else.
-5. Run the privacy check on the tree, the message and the identity, with both layers.
-6. Print what would be pushed and stop. Pushing needs `--push` and an interactive confirmation; Agents never pass `--push` without the maintainer's explicit request, like any other push.
+4. Resolve the previous snapshot's archive source from the local ref `refs/vis/public-snapshot`, or from `--since <ref>` when supplied. Refuse if neither exists, if the ref cannot be resolved, or if it is not an ancestor of `--source` (default `main`).
+5. Take the message from `--message <file>`: a release summary written for the public. Collect `Co-Authored-By` trailers from all archive commits in `<previous source>..<source>` (previous exclusive, source inclusive, including merged branches) and append approved agent credits after a blank line. With no approved trailers, leave the supplied message unchanged.
+6. Run the privacy check on the tree, the final message including trailers, and the identity, with both layers.
+7. Print what would be pushed, the exact approved trailers, and counts of excluded candidates and omitted duplicates, then stop. Pushing needs `--push` and an interactive confirmation; Agents never pass `--push` without the maintainer's explicit request, like any other push.
+8. Only after a successful push, update `refs/vis/public-snapshot` to the archive source commit. Dry runs, rejected confirmations, failed pushes and an unchanged public tree never advance it. If the push succeeds but recording fails, report that publication succeeded and print the local repair command.
+
+#### Agent credit and the local range record (2026-11-13)
+
+The maintainer decided to preserve the AI co-authors' credit on public snapshots. A single squashed commit otherwise loses the attribution recorded throughout the archive. Only emails in `PUBLIC_AGENT_EMAILS` in `scripts/privacy-rules.mjs` are copied: `noreply@anthropic.com` and `noreply@openai.com`. The privacy rules share this same list. Human co-authors, other addresses and malformed candidates are counted but their values are never printed or copied. Only Git-parsed, single-line trailers qualify; examples in commit bodies and folded or malformed values do not.
+
+Deduplication uses the case-insensitive `(email, name)` pair, ordered alphabetically by email and then name using locale-independent lexical comparison. Distinct names with the same approved email retain their credit. Original trailer text is preserved; if equivalent pairs have different spelling or spacing, the lexically first original line is used, so traversal order cannot change the result. Copied names still pass the personal privacy rules before any trailer is printed.
+
+The local ref lives in the archive repository's Git metadata, shared by its worktrees, outside the repository tree. Source hashes are never added to generated snapshot messages or metadata. A new clone needs an explicit seed or `--since`; the script does not guess from public history, which deliberately has no archive ancestry. The published snapshot `2d321d8a` came from archive source `e84cb111`. Seed that known correspondence once, in the archive checkout:
+
+```sh
+git update-ref refs/vis/public-snapshot e84cb111
+```
+
+An explicit range can be previewed without updating the record:
+
+```sh
+node scripts/release-public.mjs --message /tmp/release-summary.txt --since e84cb111~5 --source e84cb111
+```
+
+As with every release dry run, first check out the selected source with a clean tree. The ref is local release state; never push it or an archive branch to `public`.
+
+These trailers provide durable attribution in each snapshot's commit message. They do not guarantee an entry in GitHub's Contributors list: GitHub associates contribution credit with account-linked email addresses, and the agents' shared vendor noreply addresses need not identify GitHub accounts. The snapshot author and committer remain the maintainer's noreply identity, so the list may still show only that author. See GitHub's [co-author attribution](https://docs.github.com/en/pull-requests/how-tos/commit-changes/creating-a-commit-with-multiple-authors) and [contributors graph](https://docs.github.com/en/repositories/viewing-activity-and-data-for-your-repository/viewing-a-projects-contributors) documentation.
 
 `public` only ever receives these snapshots. Its history shares nothing with the archive, so a branch of the archive pushed there would carry the whole archive history with it; the `pre-push` hook rejects that, because the range then contains commits with non-noreply identities. For a snapshot push it sees exactly one new commit.
 
