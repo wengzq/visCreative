@@ -1,6 +1,6 @@
 {
   "name": "@vis/desktop",
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0-preview.2",
   "private": true,
   "type": "module",
   "description": "Electron shell (RFC 0046): starts or attaches to studiod, runs the web host in the main process and shows it in one window.",

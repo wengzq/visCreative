@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report vulnerabilities through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/wengzq/visCreative/security/advisories/new)). Do not open a public issue, discussion or pull request for a security problem.
+Report vulnerabilities through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/aliuda/visCreative/security/advisories/new)). Do not open a public issue, discussion or pull request for a security problem.
 
 Include the version or commit, the platform, the steps to reproduce and what an attacker gains. **Never include a real provider API key, Agent login file or token**, even a revoked one; describe the value's shape instead, or use a key you created for the report and have already deleted.
 
