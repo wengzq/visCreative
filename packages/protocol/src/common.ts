@@ -18,6 +18,6 @@ export type MediaKind = z.infer<typeof MediaKind>
 // 0024d: font assets are referenced by timeline text and never placed on the canvas
 export const AssetKind = z.enum([...MediaKind.options, 'font', 'model'])
 export type AssetKind = z.infer<typeof AssetKind>
-export function isMediaKind(kind: AssetKind): kind is MediaKind {
+export function isMediaKind(kind: string): kind is MediaKind {
   return kind === 'image' || kind === 'video' || kind === 'audio'
 }

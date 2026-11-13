@@ -8,14 +8,122 @@ import { NOTIFICATIONS } from './events'
 import { ErrorData } from './rpc'
 import { MediaTaskView, numberReferences } from './operations'
 import { JobView } from './generation'
-import { providers } from './providers'
+import { hosting, HostingErrorReason, HostingConfigSchema, ModelDocLink, ParamCopy, ProviderConfigSchema, providers, ReferenceInputs } from './providers'
 import { ShotLink, ShotRole } from './script'
 import { isMediaKind } from './common'
+import { scene, SceneChange, SceneProposal, SceneObjectContent, SceneViewContent } from './scene'
 
 describe('protocol', () => {
+  const hostingConfig = { type: 'tos', region: 'cn-beijing', bucket: 'reference-clips', accessKeyId: 'example-access-key', prefix: 'vis-creative/refs/' }
+
+  it('accepts model doc links only as public HTTPS pages of a known kind (RFC 0045)', () => {
+    expect(ModelDocLink.parse({ kind: 'prompt_guide', url: 'https://docs.example.com/guide' })).toEqual({ kind: 'prompt_guide', url: 'https://docs.example.com/guide' })
+    for (const url of ['http://docs.example.com/guide', 'https://localhost/guide', 'https://127.0.0.1/guide', 'javascript:alert(1)', 'file:///etc/hosts']) {
+      expect(ModelDocLink.safeParse({ kind: 'api_reference', url }).success, url).toBe(false)
+    }
+    expect(ModelDocLink.safeParse({ kind: 'blog', url: 'https://docs.example.com/guide' }).success).toBe(false)
+    expect(ModelDocLink.safeParse({ kind: 'prompt_guide', url: 'https://docs.example.com/guide', text: 'copied vendor text' }).success).toBe(false)
+  })
+
+  it('keeps TOS hosting separate from provider configuration and provider updates', () => {
+    const config = { providers: [], defaults: {} }
+    expect(ProviderConfigSchema.parse(config)).not.toHaveProperty('hosting')
+    expect(ProviderConfigSchema.safeParse({ ...config, hosting: hostingConfig }).success).toBe(false)
+    expect(providers.update.params.safeParse({ config: { ...config, hosting: hostingConfig } }).success).toBe(false)
+    expect(HostingConfigSchema.parse(hostingConfig)).toEqual(hostingConfig)
+    const { prefix: _prefix, ...withoutPrefix } = hostingConfig
+    expect(HostingConfigSchema.parse(withoutPrefix).prefix).toBe('vis-creative/refs/')
+    for (const bucket of ['a-b', '123', 'a'.repeat(63)]) {
+      expect(HostingConfigSchema.safeParse({ ...hostingConfig, bucket }).success).toBe(true)
+    }
+    for (const prefix of ['refs..other/', 'a._-/clips_1.2/', `${'a'.repeat(199)}/`]) {
+      expect(HostingConfigSchema.parse({ ...hostingConfig, prefix }).prefix).toBe(prefix)
+    }
+  })
+
+  it.each([
+    { type: 's3' },
+    ...['', 'beijing', 'CN-beijing', 'cn-BeiJing', 'cn-beijing/other', 'cn-beijing\n', 'cn-beijing\r'].map(region => ({ region })),
+    ...['', 'ab', 'a'.repeat(64), '-clips', 'clips-', 'Clips', 'clip_s', 'clip.s', 'clips\n'].map(bucket => ({ bucket })),
+    ...['', ' ', 'key id', 'key\tid', 'key\nid', 'key\n', 'key\r', 'key\0'].map(accessKeyId => ({ accessKeyId })),
+    ...['', '/refs/', '../refs/', 'refs/../', 'refs/./', './', '../', 'refs', 'refs//clips/', 'refs /', 'refs\t/', 'refs\r/', 'refs\n/', 'refs\0/', 'refs\\clips/', 'refs?/', 'refs#/', 'refs%/', 'Refs/', `${'a'.repeat(200)}/`].map(prefix => ({ prefix })),
+    { secret: 'must-not-be-configured' },
+    { secretAccessKey: 'must-not-be-configured' },
+  ])('rejects invalid hosting config fields: %j', invalid => {
+    expect(HostingConfigSchema.safeParse({ ...hostingConfig, ...invalid }).success).toBe(false)
+  })
+
+  it.each([
+    { minMs: 0, maxMs: 1000, totalMs: 2000 },
+    { minMs: 2000, maxMs: 1000, totalMs: 3000 },
+    { minMs: 1000, maxMs: 3000, totalMs: 2000 },
+  ])('rejects inconsistent timed reference declarations: %j', limits => {
+    for (const kind of ['video', 'audio']) {
+      expect(ReferenceInputs.safeParse({ image: 0, [kind]: { max: 3, ...limits } }).success).toBe(false)
+    }
+    expect(ReferenceInputs.parse({ image: 0, video: { max: 1, minMs: 1, maxMs: 1, totalMs: 1 } }).video?.minMs).toBe(1)
+  })
+
+  it('keeps hosting credentials write-only and test diagnostics limited to safe reasons', () => {
+    expect(hosting.get.result.parse({ config: null, hasSecret: false })).toEqual({ config: null, hasSecret: false })
+    expect(hosting.get.result.parse({ config: hostingConfig, hasSecret: true }).config).toEqual(hostingConfig)
+    expect(hosting.update.params.parse({ config: null })).toEqual({ config: null })
+    expect(hosting.update.params.parse({ config: hostingConfig })).toEqual({ config: hostingConfig })
+    expect(hosting.setSecret.params.parse({ secret: 'example-secret' })).toEqual({ secret: 'example-secret' })
+    expect(hosting.setSecret.params.safeParse({ secret: '  ' }).success).toBe(false)
+    for (const hasSecret of [false, true]) {
+      const result = hosting.setSecret.result.parse({ hasSecret })
+      expect(result).toEqual({ hasSecret })
+      expect(result).not.toHaveProperty('secret')
+      expect(hosting.setSecret.result.safeParse({ hasSecret, secret: 'example-secret' }).success).toBe(false)
+    }
+    expect(hosting.clearSecret.params.parse({})).toEqual({})
+    expect(hosting.clearSecret.result.parse({ hasSecret: false })).toEqual({ hasSecret: false })
+    expect(hosting.test.result.parse({ ok: true })).toEqual({ ok: true })
+    for (const step of ['upload', 'read', 'delete', 'config']) {
+      expect(hosting.test.result.parse({ ok: false, step, reason: 'hosting.test_failed' })).toEqual({ ok: false, step, reason: 'hosting.test_failed' })
+    }
+    expect(hosting.test.result.parse({ ok: false, step: 'config', reason: 'hosting.not_configured' }).ok).toBe(false)
+    for (const result of [
+      { ok: false, step: 'sign', reason: 'hosting.test_failed' },
+      { ok: false, step: 'read', reason: 'example-secret' },
+      { ok: true, url: 'https://example.invalid/signed' },
+    ]) expect(hosting.test.result.safeParse(result).success).toBe(false)
+  })
+
+  it('exposes optional per-model reference limits and required hosting readiness without hosting details', () => {
+    const model = { id: 'video', label: 'Video', kind: 'video', paramsSchema: {} }
+    const catalog = (entry: object, videoReferences = 'hosting_required') => ({ providerTypes: [], providers: [{ id: 'mock', type: 'mock', label: 'Mock', available: true, needsKey: false, hasKey: false, models: [entry] }], defaults: {}, videoReferences })
+    expect(providers.list.result.parse(catalog(model)).providers[0]!.models[0]).not.toHaveProperty('referenceInputs')
+    const referenceInputs = { image: 9, video: { max: 3, minMs: 2000, maxMs: 15000, totalMs: 15000 }, audio: { max: 3, minMs: 2000, maxMs: 15000, totalMs: 15000 }, total: 50 }
+    for (const videoReferences of ['ready', 'hosting_required']) {
+      expect(providers.list.result.parse(catalog({ ...model, referenceInputs }, videoReferences)).providers[0]!.models[0]!.referenceInputs).toEqual(referenceInputs)
+    }
+    for (const requiresHosting of [true, false]) {
+      const limits = { ...referenceInputs, video: { ...referenceInputs.video, requiresHosting } }
+      expect(providers.list.result.parse(catalog({ ...model, referenceInputs: limits })).providers[0]!.models[0]!.referenceInputs).toEqual(limits)
+      expect(providers.list.result.safeParse(catalog({ ...model, referenceInputs: { ...referenceInputs, audio: { ...referenceInputs.audio, requiresHosting } } })).success).toBe(false)
+    }
+    expect(providers.list.result.parse(catalog({ ...model, referenceInputs: { image: 0 } })).providers[0]!.models[0]!.referenceInputs).toEqual({ image: 0 })
+    for (const invalid of [{ video: referenceInputs.video }, { ...referenceInputs, image: -1 }, { ...referenceInputs, total: 0 }, { ...referenceInputs, video: { ...referenceInputs.video, max: -1 } }, { ...referenceInputs, audio: { ...referenceInputs.audio, totalMs: undefined } }]) {
+      expect(providers.list.result.safeParse(catalog({ ...model, referenceInputs: invalid })).success).toBe(false)
+    }
+    expect(providers.list.result.safeParse(catalog(model, 'unknown')).success).toBe(false)
+    const { videoReferences: _readiness, ...missingReadiness } = catalog(model)
+    expect(providers.list.result.safeParse(missingReadiness).success).toBe(false)
+    expect(providers.list.result.safeParse({ ...catalog(model), hosting: hostingConfig }).success).toBe(false)
+  })
+
+  it('parses bilingual parameter annotations independently of JSON Schema keywords', () => {
+    const copy = { 'x-vis-label': { zh: '尺寸', en: 'Size' }, 'x-vis-options': { auto: { zh: '自动', en: 'Auto' } } }
+    expect(ParamCopy.parse({ type: 'string', ...copy })).toEqual(copy)
+    expect(ParamCopy.safeParse({ 'x-vis-label': { zh: '尺寸' } }).success).toBe(false)
+    expect(ParamCopy.safeParse({ 'x-vis-description': { zh: '', en: 'Description' } }).success).toBe(false)
+    expect(ParamCopy.safeParse({ 'x-vis-options': { auto: { zh: '自动', en: 1 } } }).success).toBe(false)
+  })
   it('recognizes only image, video and audio as media, excluding font and model assets', () => {
     for (const kind of ['image', 'video', 'audio'] as const) expect(isMediaKind(kind)).toBe(true)
-    for (const kind of ['font', 'model'] as const) expect(isMediaKind(kind)).toBe(false)
+    for (const kind of ['font', 'model', 'text', 'script', 'timeline', 'previz', 'scene', 'frame'] as const) expect(isMediaKind(kind)).toBe(false)
   })
 
   it('shares the skill source limits without changing manuscript limits', () => {
@@ -63,6 +171,7 @@ describe('protocol', () => {
 
   it('exposes the previz guide and explicit batch composition and panel-frame estimates', () => {
     expect(METHODS['guide.get'].params.parse({ topic: 'previz' })).toEqual({ topic: 'previz' })
+    expect(METHODS['guide.get'].params.parse({ topic: 'scene' })).toEqual({ topic: 'scene' })
     const plan = {
       scriptNodeId: 'script', media: 'frames', shots: [{ shotId: 'shot', steps: [{ role: 'first', source: 'panel', status: 'skipped', nodeId: 'frame' }] }],
       estimate: { shots: 1, jobs: 0, billedJobs: 0, provider: 'mock', model: 'image', quotaRemaining: null,
@@ -108,8 +217,28 @@ describe('protocol', () => {
     const error = { code: 'provider_rejected', message: 'Request rejected', data: { reason: 'generation.moderation_rejected', params: { category: 'image' } } }
     expect(JobView.shape.error.parse(error)).toEqual(error)
     expect(JobView.shape.error.parse({ code: 'old', message: 'Old job' })).toEqual({ code: 'old', message: 'Old job' })
-    const catalog = { providerTypes: [], providers: [{ id: 'missing', type: 'example', label: 'Missing', available: false, unavailableReason: 'provider.settings_invalid', needsKey: true, hasKey: false, models: [] }], defaults: {}, unavailableDefaults: ['image'] }
+    const catalog = { videoReferences: 'hosting_required', providerTypes: [], providers: [{ id: 'missing', type: 'example', label: 'Missing', available: false, unavailableReason: 'provider.settings_invalid', needsKey: true, hasKey: false, models: [] }], defaults: {}, unavailableDefaults: ['image'] }
     expect(providers.list.result.parse(catalog)).toMatchObject(catalog)
+  })
+  it('exposes operation settings and prompt rules only for declared non-generate operations', () => {
+    const paramsSchema = { type: 'object', properties: { scale: { enum: [2, 4], default: 2, 'x-vis-label': { zh: '倍率', en: 'Scale' }, 'x-vis-options': { 2: { zh: '2 倍', en: '2×' } } } } }
+    const spec = { paramsSchema, prompt: 'none' }
+    const model = { id: 'image', label: 'Image', kind: 'image', paramsSchema: {}, operations: ['generate', 'image.upscale'], operationSpecs: { 'image.upscale': spec } }
+    const catalog = (entry: object) => ({ videoReferences: 'hosting_required', providerTypes: [], providers: [{ id: 'mock', type: 'mock', label: 'Mock', available: true, needsKey: false, hasKey: false, models: [entry] }], defaults: {} })
+    expect(providers.list.result.parse(catalog(model)).providers[0]!.models[0]).toEqual(model)
+    const { operationSpecs: _specs, ...legacy } = model
+    expect(providers.list.result.parse(catalog(legacy)).providers[0]!.models[0]).not.toHaveProperty('operationSpecs')
+    for (const prompt of ['none', 'optional', 'required']) {
+      expect(providers.list.result.safeParse(catalog({ ...model, operationSpecs: { 'image.upscale': { ...spec, prompt } } })).success).toBe(true)
+    }
+    for (const invalid of [
+      { operationSpecs: { generate: spec } },
+      { operationSpecs: { 'image.outpaint': spec } },
+      { operationSpecs: { 'unknown.operation': spec } },
+      { operations: undefined },
+      { operationSpecs: { 'image.upscale': { paramsSchema, prompt: 'always' } } },
+      { operationSpecs: { 'image.upscale': { prompt: 'none' } } },
+    ]) expect(providers.list.result.safeParse(catalog({ ...model, ...invalid })).success).toBe(false)
   })
   it('exposes complete asset version history to the UI without granting agent access', () => {
     const method = METHODS['asset.versions']
@@ -118,12 +247,16 @@ describe('protocol', () => {
     expect(method.params.safeParse({}).success).toBe(false)
     expect(method.result.parse({ versions: [] })).toEqual({ versions: [] })
   })
-  it('numbers unique media assets in input order and excludes text and empty inputs', () => {
+  it('numbers unique media assets per type in input order and excludes text and empty inputs', () => {
     expect(numberReferences([
       { nodeId: 'prompt', kind: 'text', hasAsset: false }, { nodeId: 'empty', kind: 'image', hasAsset: false },
       { nodeId: 'b', kind: 'video', hasAsset: true }, { nodeId: 'b', kind: 'video', hasAsset: true },
       { nodeId: 'a', kind: 'audio', hasAsset: true },
-    ])).toEqual([{ nodeId: 'b', kind: 'video', number: 1 }, { nodeId: 'a', kind: 'audio', number: 2 }])
+      { nodeId: 'image', kind: 'image', hasAsset: true }, { nodeId: 'second-video', kind: 'video', hasAsset: true },
+    ])).toEqual([
+      { nodeId: 'b', kind: 'video', number: 1 }, { nodeId: 'a', kind: 'audio', number: 1 },
+      { nodeId: 'image', kind: 'image', number: 1 }, { nodeId: 'second-video', kind: 'video', number: 2 },
+    ])
   })
 
   it('validates transient media progress separately from durable task status events', () => {
@@ -310,6 +443,42 @@ describe('protocol', () => {
     expect(METHODS['generation.submit'].params.safeParse({ ...base, targets: [t(0), t(1)] }).success).toBe(true)
     expect(METHODS['generation.submit'].params.safeParse({ ...base, targets: [t(0), t(0)] }).success).toBe(false)
     expect(METHODS['generation.get'].params.safeParse({ jobId: 'j', waitMs: 30_001 }).success).toBe(false)
+  })
+
+  it('regeneration optionally targets a single node and validates its ID', () => {
+    const params = { requestId: 'regenerate', jobId: 'job' }
+    const schema = METHODS['generation.regenerate'].params
+    expect(schema.parse(params)).toEqual(params)
+    expect(schema.parse({ ...params, targetNodeId: 'image' })).toEqual({ ...params, targetNodeId: 'image' })
+    expect(schema.safeParse({ ...params, targetNodeId: '' }).success).toBe(false)
+    expect(schema.safeParse({ ...params, targetNodeId: 'x'.repeat(65) }).success).toBe(false)
+  })
+
+  it('slot.history preserves the authored and used prompts and validates their provenance kind', () => {
+    const version = { revision: 1, content: { type: 'empty' }, createdAt: 1, actor: 'system', isCurrent: true }
+    const source = { jobId: 'job', provider: 'mock', model: 'mock-image', prompt: '{{ref:image}}', params: {}, inputNodeIds: ['image'] }
+    const parse = (fields: object) => METHODS['slot.history'].result.safeParse({ versions: [{ ...version, source: { ...source, ...fields } }], hasMore: false })
+    for (const usedPromptKind of ['revised', 'sent', 'resolved', 'authored']) {
+      const result = parse({ usedPrompt: 'The prompt used', usedPromptKind })
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.data.versions[0]?.source).toEqual({ ...source, usedPrompt: 'The prompt used', usedPromptKind })
+    }
+    expect(parse({}).success).toBe(true)
+    expect(parse({ usedPromptKind: 'inferred' }).success).toBe(false)
+  })
+
+  it('slot.history preserves optional generation operation provenance and rejects local operations', () => {
+    const version = { revision: 1, content: { type: 'empty' }, createdAt: 1, actor: 'system', isCurrent: true }
+    const source = { jobId: 'job', provider: 'mock', model: 'mock-image', params: {}, inputNodeIds: ['subject'] }
+    const parse = (fields: object) => METHODS['slot.history'].result.safeParse({ versions: [{ ...version, source: { ...source, ...fields } }], hasMore: false })
+    const result = parse({ operation: 'image.outpaint' })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.versions[0]?.source).toEqual({ ...source, operation: 'image.outpaint' })
+    const plain = parse({})
+    expect(plain.success).toBe(true)
+    if (plain.success) expect(plain.data.versions[0]?.source).not.toHaveProperty('operation')
+    expect(parse({ operation: 'image.crop' }).success).toBe(false)
+    expect(parse({ operation: 'unknown' }).success).toBe(false)
   })
 
   it('audio reuses media generation, asset and canvas contracts without requiring visual dimensions', () => {
@@ -571,4 +740,39 @@ it('contracts MOV as a UI-only download without making a canvas version', async 
   }
   const task = { taskId: 't', operation: 'video.exportMov', status: 'succeeded', nodeId: 'n', slotId: 's', createdAt: 1, download: { filename: 'video.mov', byteSize: 123, expiresAt: 1000 } }
   expect(MediaTaskView.parse(task)).toEqual(task)
+})
+
+
+it('declares distinct parameter-free hosting upload and storage failures outside test diagnostics', () => {
+  for (const reason of ['hosting.upload_failed', 'hosting.store_failed']) {
+    expect(HostingErrorReason.parse(reason)).toBe(reason)
+    expect(hosting.test.result.safeParse({ ok: false, step: 'upload', reason }).success).toBe(false)
+  }
+})
+
+
+it('defines content-only scene proposals, server-filled change identities and UI-only resolution inputs', () => {
+  const object = { id: 'bench', name: 'Bench', hidden: false, transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }, source: { type: 'prop', propId: 'bench' } }
+  const view = { id: 'wide', name: 'Wide', camera: { position: [0, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 }, aspectRatio: '16:9' }
+  const input = { requestId: 'propose', slotId: 'slot', baseRevision: 2, summary: 'Move the bench', changes: [{ target: 'object', id: 'bench', action: 'update', item: object }] }
+  expect(scene.propose.params.safeParse(input).success).toBe(true)
+  for (const extra of [{ createdBy: 'agent' }, { userTouched: false }]) expect(SceneObjectContent.safeParse({ ...object, ...extra }).success).toBe(false)
+  for (const extra of [{ createdBy: 'agent' }, { userTouched: false }, { still: null }]) expect(SceneViewContent.safeParse({ ...view, ...extra }).success).toBe(false)
+  expect(scene.propose.params.safeParse({ ...input, changes: [{ ...input.changes[0], base: object }] }).success).toBe(false)
+  for (const changes of [[], Array.from({ length: 98 }, () => input.changes[0])]) expect(scene.propose.params.safeParse({ ...input, changes }).success).toBe(false)
+  for (const summary of ['', ' ', 'x'.repeat(2001)]) expect(scene.propose.params.safeParse({ ...input, summary }).success).toBe(false)
+  expect(scene.proposalList.params.parse({})).toEqual({ status: 'open' })
+  const refs = [{ proposalId: 'proposal', changeId: 'change' }]
+  const accept = { requestId: 'accept', slotId: 'slot', action: 'accept', changes: refs, expectedRevision: 2 }
+  expect(scene.proposalResolve.params.safeParse(accept).success).toBe(true)
+  expect(scene.proposalResolve.params.safeParse({ ...accept, expectedRevision: undefined }).success).toBe(false)
+  expect(scene.proposalResolve.params.safeParse({ ...accept, doc: {} }).success).toBe(false)
+  expect(scene.proposalResolve.params.safeParse({ ...accept, changes: [...refs, ...refs] }).success).toBe(false)
+  expect(scene.proposalResolve.params.safeParse({ requestId: 'reject', slotId: 'slot', action: 'reject', changes: refs }).success).toBe(true)
+  const change = { ...input.changes[0], base: object, changeId: 'change', status: 'pending' }
+  for (const status of ['pending', 'accepted', 'rejected', 'stale', 'superseded']) expect(SceneChange.safeParse({ ...change, status }).success).toBe(true)
+  const proposal = { proposalId: 'proposal', nodeId: 'node', slotId: 'slot', baseRevision: 2, sessionId: 'session', summary: 'Move', changes: [change], status: 'open', createdAt: 1 }
+  expect(SceneProposal.safeParse(proposal).success).toBe(true)
+  expect(NOTIFICATIONS['events.event'].safeParse({ seq: 1, type: 'scene.proposalChanged', entityType: 'sceneProposal', entityId: 'proposal', payload: { proposalId: 'proposal', slotId: 'slot' } }).success).toBe(true)
+  expect(ErrorData.parse({ code: 'forbidden', reason: 'scene.object_protected', hint: 'Use scene.propose' }).hint).toBe('Use scene.propose')
 })

@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in visCreative does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Everything here is public: never paste provider keys, tokens, Agent login files or private paths and hosts. Security problems go through private vulnerability reporting (see SECURITY.md), not issues.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release or `git rev-parse --short HEAD` of your checkout.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [macOS, Windows, Linux]
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and generation provider
+      description: Which Agent (and its version) and which provider were involved, if any. Names only, never keys.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a project
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What happened instead. Screenshots and log excerpts help; remove keys, tokens and personal paths first.
+    validations:
+      required: true

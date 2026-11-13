@@ -8,6 +8,11 @@ const input: DispatchInput = {
   refs: [], resumeId: null, sessionTitle: 'Session', titleSource: 'default',
 }
 
+function hasEnglishGuideProse(guide: { topic: string; body: string }): boolean {
+  const prose = guide.topic === 'generation' ? guide.body.replace(/`@?(?:视频|图片|音频)\d+`/g, '') : guide.body
+  return !/\p{Script=Han}/u.test(prose)
+}
+
 it('keeps the core within the 1200-word budget and ends with the generated guide index', () => {
   expect(CORE_INSTRUCTIONS.split(/\s+/).length).toBeLessThanOrEqual(1200)
   expect(CORE_INSTRUCTIONS.endsWith(GUIDES.map(({ topic, when }) => `- ${topic}: ${when}`).join('\n'))).toBe(true)
@@ -27,12 +32,31 @@ it('serves all registered complete guides without loading specialist bodies into
   }
   expect(getGuide()).toEqual({ topics: listGuides() })
   expect(CORE_INSTRUCTIONS).not.toMatch(/\p{Script=Han}/u)
-  expect(GUIDES.every(guide => !/\p{Script=Han}/u.test(guide.body))).toBe(true)
+  expect(GUIDES.every(hasEnglishGuideProse)).toBe(true)
+})
+
+it('permits only literal vendor reference identifiers in the generation guide and rejects other Han prose', () => {
+  const body = 'Use `视频1`, `图片12`, `音频2`, `@视频3`, `@图片1` and `@音频1` as literal identifiers.'
+  expect(hasEnglishGuideProse({ topic: 'generation', body })).toBe(true)
+  expect(hasEnglishGuideProse({ topic: 'generation', body: `${body} 其他文字` })).toBe(false)
+  for (const token of ['`视频`', '`图片n`', '`@音频`', '`@@图片1`', '视频1']) expect(hasEnglishGuideProse({ topic: 'generation', body: token })).toBe(false)
+  for (const guide of GUIDES.filter(guide => guide.topic !== 'generation')) expect(hasEnglishGuideProse({ topic: guide.topic, body })).toBe(false)
 })
 
 it('teaches labeling and setting proposals through the library guide', () => {
   const body = getGuide('library').guide!.body
   for (const fact of ['asset.label in batches of at most 50', 'skippedFields', 'never claim to have listened', 'entity.propose', 'castIds and one styleId', 'Only the user deletes a setting']) expect(body).toContain(fact)
+})
+
+it('teaches scene authoring, free local checks and proposals for protected content', () => {
+  const body = getGuide('scene').guide!.body
+  for (const fact of [
+    'metres', 'Y is up', 'quaternions [x, y, z, w]', "type: 'group'", 'Human joint ids:', 'Human preset pose names:',
+    'durationS', 'cameraKeys', 'strictly increasing', 'easeInOut', 'Visibility is stepped',
+    "provider: 'render', model: 'scene'", "kind: 'image'", 'params.timeS', "kind: 'video'", 'first input',
+    'Never suggest paid providers', 'call scene.propose', 'a proposal is waiting in the scene editor', 'Do not retry the write',
+    'panel.blockout and sceneRef stay user-only',
+  ]) expect(body).toContain(fact)
 })
 
 it('teaches deterministic anime.js and plain JavaScript without installing author libraries', () => {

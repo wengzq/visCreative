@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { resolveExecutable } from './resolve-executable'
+import { nodeChildEnv, resolveExecutable } from './resolve-executable'
 
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vis-executable-')) })
@@ -51,4 +51,17 @@ describe.runIf(process.platform === 'win32')('Windows executable resolution', ()
 it.runIf(process.platform !== 'win32')('POSIX: leaves executable and PATH lookup unchanged', () => {
   expect(resolveExecutable('codex')).toEqual({ command: 'codex', args: [] })
   expect(resolveExecutable('codex', '/custom/codex')).toEqual({ command: '/custom/codex', args: [] })
+})
+
+describe('nodeChildEnv (RFC 0046)', () => {
+  const app = { electron: '39.0.0', execPath: '/Applications/visCreative.app/Contents/MacOS/visCreative' }
+  it('marks only children launched through the Electron binary as Node', () => {
+    expect(nodeChildEnv(app.execPath, app)).toEqual({ ELECTRON_RUN_AS_NODE: '1' })
+    expect(nodeChildEnv('/usr/local/bin/codex', app)).toEqual({})
+    expect(nodeChildEnv('/usr/bin/sandbox-exec', app)).toEqual({})
+  })
+  it('adds nothing outside Electron', () => {
+    expect(nodeChildEnv(process.execPath)).toEqual(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {})
+    expect(nodeChildEnv('/usr/local/bin/node', { execPath: '/usr/local/bin/node' })).toEqual({})
+  })
 })

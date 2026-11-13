@@ -9,6 +9,7 @@ import { type ApprovalRequest, type ChildLike, createSessionService, type Dispat
 import { createDeepseekRuntime } from './adapter'
 import * as resolver from './resolve-dsh'
 import * as sandbox from '@vis/workbench-core'
+import * as sandboxPolicy from '../../core/src/sandbox'
 
 type Handler = (params: any, id: number) => unknown | 'hang' | { error: { code: number; message: string } }
 
@@ -95,17 +96,19 @@ let workContext: DispatchInput['workContext']
 let agentConfig: DispatchInput['agentConfig']
 let dir: string
 let clock = 1_800_000_000_000
+let fallbackDirs: string[]
 let tokenSeq = 0
 
-const realPrepareSandbox = sandbox.prepareSandbox
+const realPrepareSandbox = sandboxPolicy.prepareSandbox
 
 beforeEach(() => {
   vi.restoreAllMocks()
-  vi.spyOn(sandbox, 'prepareSandbox').mockImplementation(options => realPrepareSandbox({ ...options, platform: 'linux' }))
+  vi.spyOn(sandboxPolicy, 'prepareSandbox').mockImplementation(options => realPrepareSandbox({ ...options, platform: 'linux' }))
   vi.spyOn(resolver, 'resolveDsh').mockReturnValue({ path: '/fake/dsh', version: 'test' })
   db = openSpaceDb(':memory:')
   dir = mkdtempSync(join(tmpdir(), 'vis-dsh-'))
   servers = []
+  fallbackDirs = []
   tokenSeq = 0
   projectContext = undefined
   workContext = undefined
@@ -127,6 +130,7 @@ beforeEach(() => {
     workDir: id => db.select().from(s.sessions).where(eq(s.sessions.id, id)).get()?.workDir || join(dir, 'sessions', id),
     overlayPath: join(dir, 'agents', 'dsh-overlay.yml'),
     cliBinDir: join(dir, 'cli bin'),
+    fallbackDirs,
     issueToken: () => ({ token: `spc_1.tok${++tokenSeq}`, tokenHash: `hash${tokenSeq}` }),
     socketPath: '/tmp/vis.sock',
     visMcp: { command: '/usr/bin/node', args: ['/opt/vis/vis.mjs', 'mcp'] },
@@ -179,7 +183,7 @@ function acpConfig(model = FLASH, effort = 'high', providerDefault = false) {
 
 describe('Model and reasoning effort (0014)', () => {
   it('Use the same sandbox and overlay, probe effort for each opaque model value, close sessions, and send no model requests', async () => {
-    vi.spyOn(sandbox, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
+    vi.spyOn(sandboxPolicy, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
     handlers['session/new'] = () => ({ sessionId: 'probe', configOptions: acpConfig() })
     handlers['session/set_config_option'] = ({ value }) => ({ configOptions: acpConfig(value, value === PRO ? 'max' : '', value === FLASH) })
     const models = await runtime.agentOptions('deepseek', {})
@@ -314,7 +318,7 @@ describe('Model and reasoning effort (0014)', () => {
     send(sid, 'A')
     await sessions.idle()
     const server = servers[0]!
-    expect(server.received.map(request => request.method)).toEqual(['initialize', 'session/resume', 'session/new', 'session/close', 'session/set_config_option', 'session/prompt'])
+    expect(server.received.map(request => request.method)).toEqual(['initialize', 'session/new', 'session/close', 'session/resume', 'session/set_config_option', 'session/prompt'])
     expect(server.requests('session/new')[0]!.params.mcpServers).toEqual([])
     expect(server.requests('session/close')[0]!.params.sessionId).toBe('default-probe')
     expect(server.requests('session/set_config_option')[0]!.params).toEqual({ sessionId: 'dss_1', configId: 'model', value: FLASH })
@@ -362,8 +366,15 @@ describe('Model and reasoning effort (0014)', () => {
 })
 
 describe('A single turn', () => {
+  it('passes packaged media through the shared ACP runtime after the user PATH', async () => {
+    fallbackDirs.push('/app/ffmpeg')
+    send(newSession(), 'test')
+    await sessions.idle()
+    expect(servers[0]!.options.env.PATH).toBe([join(dir, 'cli bin'), '/usr/bin', '/app/ffmpeg'].join(delimiter))
+  })
+
   it('Windows: allow writes without an isolation sandbox and retain tool approvals', async () => {
-    vi.mocked(sandbox.prepareSandbox).mockImplementation(options => realPrepareSandbox({ ...options, platform: 'win32' }))
+    vi.mocked(sandboxPolicy.prepareSandbox).mockImplementation(options => realPrepareSandbox({ ...options, platform: 'win32' }))
     const sid = newSession()
     send(sid, 'test')
     await sessions.idle()
@@ -377,6 +388,7 @@ describe('A single turn', () => {
     expect(yml).not.toContain('The outer sandbox blocks')
   })
   it('Rewrite the overlay and read the latest child work-item facts when resuming a session', async () => {
+    handlers['session/new'] = () => ({ sessionId: 'dss_1', configOptions: acpConfig() })
     const sid = newSession()
     const first = send(sid, '找个 DeepSeek 来验收')
     await sessions.idle()
@@ -435,7 +447,7 @@ describe('A single turn', () => {
   })
 
   it.each(['allow_once', 'deny'] as const)('Outer isolation enables tools; reconstruct ACP command approvals by toolCallId: %s', async decision => {
-    vi.spyOn(sandbox, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
+    vi.spyOn(sandboxPolicy, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
     const approve = vi.fn(async (_request: ApprovalRequest) => decision)
     runtimeContext.requestApproval = approve
     const sid = newSession()
@@ -457,7 +469,7 @@ describe('A single turn', () => {
   })
 
   it('Native write arguments prove targets; ACP locations only supplement checks; unknown tools do not fall back to cwd', async () => {
-    vi.spyOn(sandbox, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
+    vi.spyOn(sandboxPolicy, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
     const approve = vi.fn(async (_request: ApprovalRequest) => 'deny' as const)
     runtimeContext.requestApproval = approve
     const sid = newSession()
@@ -490,7 +502,7 @@ describe('A single turn', () => {
   })
 
   it('Command directory overrides come from workdir; unknown directories and extra permissions are not auto-approved by session directory', async () => {
-    vi.spyOn(sandbox, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
+    vi.spyOn(sandboxPolicy, 'prepareSandbox').mockReturnValue({ env: { HOME: dir }, policy: 'test-policy', notice: undefined, isolation: 'sandbox' })
     const approve = vi.fn(async (_request: ApprovalRequest) => 'deny' as const)
     runtimeContext.requestApproval = approve
     const sid = newSession()
@@ -585,6 +597,7 @@ describe('A single turn', () => {
   })
 
   it('Receiving an update means acceptance; updates become transcript entries; close the session and exit on completion, then resume next turn', async () => {
+    handlers['session/new'] = () => ({ sessionId: 'dss_1', configOptions: acpConfig() })
     const sid = newSession()
     const a = send(sid, 'A')
     await until(() => servers.length === 1 && servers[0]!.requests('session/prompt').length === 1)
@@ -684,7 +697,7 @@ describe('A single turn', () => {
     const id = server.request('session/request_permission', { sessionId: 'dss_1', toolCall, options })
     await until(() => server.answers.has(id))
     expect(server.answers.get(id)).toEqual({ outcome: { outcome: 'selected', optionId: decision === 'deny' ? 'no' : 'once' } })
-    expect(approve).toHaveBeenCalledWith({ sessionId: sid, turnId: turnOf(sent.messageId).id, kind: 'network', summary: '读取外部素材', detail: JSON.stringify({ kind: 'fetch', title: toolCall.title, rawInput: toolCall.rawInput }, null, 2), cwd: join(dir, 'sessions', sid) })
+    expect(approve).toHaveBeenCalledWith({ sessionId: sid, turnId: turnOf(sent.messageId).id, kind: 'network', summary: '读取外部素材', detail: JSON.stringify({ kind: 'fetch', title: toolCall.title, rawInput: toolCall.rawInput }, null, 2), cwd: join(dir, 'sessions', sid), webRead: true })
   })
 
   it.each([

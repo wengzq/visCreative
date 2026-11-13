@@ -1,10 +1,11 @@
-import { promptRef } from '@vis/protocol'
-import { useFormat, useMessages } from '@vis/ui-kit'
-import { forwardRef, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { promptRef, type NodeView, type ReferenceInputs } from '@vis/protocol'
+import { describeError, useFormat, useLocale, useMessages } from '@vis/ui-kit'
+import { forwardRef, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { messages } from './messages'
 import { promptMessages } from './prompt-messages'
-import { PromptHistory, promptParts, type PromptReference, type PromptSelection, type PromptSnapshot } from './prompt-references'
+import { canvasReferences, filterReferenceChoices, pickPromptReference, promptMention, PromptHistory, promptParts, type PromptReference, type PromptSelection, type PromptSnapshot } from './prompt-references'
 import { ReferencePreview } from './ReferenceStrip'
+import { nodeTitleNumbers } from './node-title'
 
 export type PromptRefInputHandle = { insert(nodeId: string): void }
 
@@ -55,6 +56,7 @@ function restoreSelection(root: HTMLElement, selection: PromptSelection) {
 export const PromptRefInput = forwardRef<PromptRefInputHandle, {
   value: string
   references: readonly PromptReference[]
+  canvas?: { nodeId: string; nodes: readonly NodeView[]; limits?: ReferenceInputs | undefined; allKinds?: boolean; attach(nodeId: string): Promise<void> } | undefined
   assetUrl(id: string): string
   posterUrl(id: string): string
   placeholder: string
@@ -63,22 +65,47 @@ export const PromptRefInput = forwardRef<PromptRefInputHandle, {
   onCommit(): void
   onReset(): void
   onComposing(value: boolean): void
-}>(function PromptRefInput({ value, references, assetUrl, posterUrl, placeholder, readOnly, onChange, onCommit, onReset, onComposing }, handle) {
+}>(function PromptRefInput({ value, references, canvas, assetUrl, posterUrl, placeholder, readOnly, onChange, onCommit, onReset, onComposing }, handle) {
   const m = useMessages(messages)
   const p = useMessages(promptMessages)
   const format = useFormat()
+  const { locale } = useLocale()
   const root = useRef<HTMLDivElement>(null)
   const composing = useRef(false)
   const cursor = useRef<PromptSelection>({ start: value.length, end: value.length })
   const history = useRef(new PromptHistory({ text: value, ...cursor.current }))
   const [choices, setChoices] = useState(false)
+  const [mention, setMention] = useState<ReturnType<typeof promptMention>>(null)
+  const [attaching, setAttaching] = useState(false)
+  const picking = useRef(false)
+  const [pending, setPending] = useState<{ before: string; next: PromptSnapshot; nodeId: string } | null>(null)
+  const [error, setError] = useState<unknown>(null)
   const [choiceIndex, setChoiceIndex] = useState(0)
   const choicesId = useId()
   const available = references.filter(reference => reference.node && reference.number !== undefined)
+  const titleNumbers = useMemo(() => nodeTitleNumbers(canvas?.nodes ?? []), [canvas?.nodes])
+  const title = (node: NodeView) => node.title ?? p.referenceLabel(m[node.kind], format.number(titleNumbers.get(node.nodeId) ?? 1))
+  const candidates = useMemo(() => canvas ? canvasReferences(canvas.nodeId, canvas.nodes, references, title, canvas.limits, canvas.allKinds) : [], [canvas?.nodeId, canvas?.nodes, references, canvas?.limits, canvas?.allKinds, titleNumbers, m, p, format])
+  const filtered = filterReferenceChoices(references, candidates, mention?.query ?? '', title)
+  const options = [...filtered.attached.map(reference => ({ reference, title: title(reference.node!), attached: true, reason: undefined as string | undefined })), ...filtered.canvas.map(candidate => ({
+    ...candidate, attached: false, reason: candidate.limit ? candidate.limit.kind === 'total' ? p.referenceTotalLimit(format.number(candidate.limit.max)) : p.referenceKindLimit(m[candidate.limit.kind], format.number(candidate.limit.max)) : undefined,
+  }))]
+  const activeIndex = options.length ? choiceIndex % options.length : -1
+  useLayoutEffect(() => {
+    if (choices && activeIndex >= 0) document.getElementById(`${choicesId}-${activeIndex}`)?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+  }, [choices, choiceIndex, activeIndex, choicesId])
   const label = (reference: PromptReference) => p.referenceLabel(reference.node ? m[reference.node.kind] : p.brokenReference, format.number(reference.number!))
   const remember = () => {
     const selection = root.current && selectionIn(root.current)
-    if (selection) { cursor.current = selection; history.current.select(selection) }
+    if (selection) {
+      cursor.current = selection
+      history.current.select(selection)
+      if (choices && !picking.current) {
+        const next = promptMention(readPromptDom(root.current!), selection)
+        if (!next) setChoices(false)
+        if (next?.query !== mention?.query) { setMention(next); setChoiceIndex(0) }
+      }
+    }
   }
   const draw = (text: string, selection?: PromptSelection) => {
     const editor = root.current
@@ -142,51 +169,93 @@ export const PromptRefInput = forwardRef<PromptRefInputHandle, {
     onChange(snapshot.text)
   }
   const insert = (nodeId: string) => {
-    if (readOnly || composing.current || !root.current || !available.some(reference => reference.nodeId === nodeId)) return
+    if (readOnly || composing.current || picking.current || !root.current || !available.some(reference => reference.nodeId === nodeId)) return
     const text = readPromptDom(root.current)
     const selection = selectionIn(root.current) ?? cursor.current
     history.current.select(selection)
-    const start = choices && text[selection.start - 1] === '@' ? selection.start - 1 : selection.start
+    const start = (choices ? promptMention(text, selection)?.start : undefined) ?? selection.start
     const marker = promptRef(nodeId)
     const next = { text: text.slice(0, start) + marker + text.slice(selection.end), start: start + marker.length, end: start + marker.length }
     history.current.record(next)
     root.current.focus()
     apply(next)
     setChoices(false)
+    setMention(null)
   }
   useImperativeHandle(handle, () => ({ insert }))
+  useLayoutEffect(() => {
+    if (!pending || !available.some(reference => reference.nodeId === pending.nodeId) || !root.current) return
+    // The attach receipt can precede its canvas event. Wait for numbering before drawing the chip.
+    if (readPromptDom(root.current) === pending.before) {
+      history.current.record(pending.next)
+      root.current.focus()
+      apply(pending.next)
+    }
+    setPending(null)
+    setAttaching(false)
+    picking.current = false
+    setChoices(false)
+    setMention(null)
+  }, [pending, references])
+  const pick = (index: number) => {
+    const option = options[index]
+    if (!option || option.reason || readOnly || composing.current || picking.current || !root.current) return
+    setError(null)
+    if (option.attached) { insert(option.reference.nodeId); return }
+    const before = readPromptDom(root.current)
+    const selection = selectionIn(root.current) ?? cursor.current
+    const start = promptMention(before, selection)?.start ?? selection.start
+    const marker = promptRef(option.reference.nodeId)
+    const next = { text: before.slice(0, start) + marker + before.slice(selection.end), start: start + marker.length, end: start + marker.length }
+    history.current.select(selection)
+    picking.current = true
+    setAttaching(true)
+    void pickPromptReference(option.reference.nodeId, false, id => canvas!.attach(id), () => {
+      if (root.current) setPending({ before, next, nodeId: option.reference.nodeId })
+    }).catch(error => {
+      picking.current = false
+      setAttaching(false)
+      setError(error)
+    })
+  }
+  const updateChoices = (text: string, selection: PromptSelection) => {
+    const next = promptMention(text, selection)
+    setMention(next)
+    setChoices(Boolean(next) && (available.length > 0 || candidates.length > 0))
+    setChoiceIndex(0)
+    setError(null)
+  }
   const input = () => {
-    if (!root.current || composing.current) return
+    if (!root.current || composing.current || picking.current) return
     const text = readPromptDom(root.current)
     const selection = selectionIn(root.current) ?? { start: text.length, end: text.length }
     history.current.record({ text, ...selection })
     cursor.current = selection
     draw(text, selection)
     onChange(text)
-    setChoices(text[selection.start - 1] === '@' && available.length > 0)
-    setChoiceIndex(0)
+    updateChoices(text, selection)
   }
   const insertText = (text: string) => {
-    if (!root.current || readOnly || composing.current) return
+    if (!root.current || readOnly || composing.current || picking.current) return
     const current = readPromptDom(root.current)
     const selection = selectionIn(root.current) ?? cursor.current
     history.current.select(selection)
     const next = { text: current.slice(0, selection.start) + text + current.slice(selection.end), start: selection.start + text.length, end: selection.start + text.length }
     history.current.record(next)
     apply(next)
-    setChoices(text.endsWith('@') && available.length > 0)
-    setChoiceIndex(0)
+    updateChoices(next.text, next)
   }
   return <div className="vis-prompt-ref-field">
-    <div ref={root} role="textbox" aria-label={m.prompt} aria-multiline="true" aria-readonly={readOnly} aria-haspopup="listbox" aria-autocomplete="list" aria-expanded={choices && available.length > 0}
-      aria-controls={choices && available.length ? choicesId : undefined} aria-activedescendant={choices && available.length ? `${choicesId}-${choiceIndex % available.length}` : undefined}
+    <div ref={root} role="textbox" aria-label={m.prompt} aria-multiline="true" aria-readonly={readOnly || attaching} aria-busy={attaching} aria-haspopup="listbox" aria-autocomplete="list" aria-expanded={choices}
+      aria-controls={choices ? choicesId : undefined} aria-activedescendant={choices && activeIndex >= 0 ? `${choicesId}-${activeIndex}` : undefined}
       className="vis-prompt-ref-input nodrag nopan nowheel" contentEditable={!readOnly} suppressContentEditableWarning data-placeholder={placeholder}
       onInput={input} onSelect={remember} onKeyUp={remember} onPointerUp={remember}
-      onBlur={() => { remember(); setChoices(false); if (!composing.current) onCommit() }}
-      onCompositionStart={() => { remember(); composing.current = true; onComposing(true); setChoices(false) }}
+      onBlur={() => { remember(); setChoices(false); if (!composing.current && !picking.current) onCommit() }}
+      onCompositionStart={() => { if (readOnly || picking.current) return; remember(); composing.current = true; onComposing(true); setChoices(false) }}
       onCompositionEnd={() => { composing.current = false; input(); onComposing(false) }}
       onBeforeInput={event => {
         const type = (event.nativeEvent as InputEvent).inputType
+        if (readOnly || picking.current) { event.preventDefault(); return }
         if (composing.current) return
         remember()
         if (type === 'insertParagraph' || type === 'insertLineBreak') { event.preventDefault(); insertText('\n') }
@@ -214,7 +283,7 @@ export const PromptRefInput = forwardRef<PromptRefInputHandle, {
       onKeyDown={event => {
         event.stopPropagation()
         if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return
-        if (readOnly) {
+        if (readOnly || attaching) {
           if (event.key === 'Enter' || event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && ['z', 'y'].includes(event.key.toLowerCase()))) event.preventDefault()
           return
         }
@@ -226,11 +295,11 @@ export const PromptRefInput = forwardRef<PromptRefInputHandle, {
           setChoices(false)
           return
         }
-        if (choices && available.length && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
+        if (choices && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
           event.preventDefault()
           if (event.key === 'Escape') setChoices(false)
-          else if (event.key === 'Enter') { const reference = available[choiceIndex % available.length]; if (reference) insert(reference.nodeId) }
-          else setChoiceIndex(index => (index + (event.key === 'ArrowDown' ? 1 : available.length - 1)) % available.length)
+          else if (event.key === 'Enter') pick(activeIndex)
+          else if (options.length) setChoiceIndex(index => (index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length)
           return
         }
         if (event.key === 'Enter') {
@@ -241,10 +310,25 @@ export const PromptRefInput = forwardRef<PromptRefInputHandle, {
         if (event.key === 'Escape') onReset()
       }}
     />
-    {choices && available.length ? <div id={choicesId} className="vis-prompt-ref-choices" role="listbox" aria-label={p.referenceChoices}>
-      {available.map((reference, index) => <button id={`${choicesId}-${index}`} key={reference.nodeId} role="option" aria-selected={index === choiceIndex % available.length} aria-label={label(reference)} onMouseDown={event => event.preventDefault()} onClick={() => insert(reference.nodeId)}>
-        <span className="vis-reference-choice-preview"><ReferencePreview reference={reference} assetUrl={assetUrl} posterUrl={posterUrl} /></span>{label(reference)}
-      </button>)}
+    {choices ? <div id={choicesId} className="vis-prompt-ref-choices" role="listbox" aria-label={p.referenceChoices} aria-busy={attaching}>
+      {filtered.hasMore ? <div className="vis-reference-choice-hint" role="status">{p.typeToNarrow}</div> : null}
+      {([true, false] as const).map(attached => {
+        const group = options.flatMap((option, index) => option.attached === attached ? [{ option, index }] : [])
+        if (!group.length) return null
+        const groupId = `${choicesId}-${attached ? 'attached' : 'canvas'}`
+        return <div key={groupId} role="group" aria-labelledby={groupId}>
+          <div id={groupId} className="vis-reference-choice-heading">{attached ? p.attachedReferences : p.onCanvas}</div>
+          {group.map(({ option, index }) => <button type="button" tabIndex={-1} id={`${choicesId}-${index}`} key={option.reference.nodeId} role="option" className={index === activeIndex ? 'is-active' : undefined} aria-selected={index === activeIndex && !option.reason && !attaching} aria-disabled={Boolean(option.reason) || attaching}
+            aria-label={attached ? label(option.reference) : option.title} aria-describedby={option.reason ? `${choicesId}-${index}-reason` : undefined}
+            onMouseDown={event => event.preventDefault()} onClick={() => pick(index)}>
+            <span className="vis-reference-choice-preview"><ReferencePreview reference={option.reference} assetUrl={assetUrl} posterUrl={posterUrl} /></span>
+            <span className="vis-reference-choice-caption"><span>{attached ? label(option.reference) : option.title}</span>{attached ? <small>{option.title}</small> : null}
+              {option.reason ? <small id={`${choicesId}-${index}-reason`}>{option.reason}</small> : null}</span>
+          </button>)}
+        </div>
+      })}
+      {!options.length ? <div role="status">{p.noReferenceMatches}</div> : null}
     </div> : null}
+    {error ? <div className="vis-prompt-broken" role="status">{describeError(error, locale)}</div> : null}
   </div>
 })

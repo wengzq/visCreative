@@ -1,8 +1,7 @@
 import { mkdirSync } from 'node:fs'
-import { delimiter } from 'node:path'
 import type { Options, Query, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { SpaceDb } from '@vis/storage'
-import { type AgentEvent, type AgentRuntimePort, type ChildLike, DispatchError, exitInstance, killTree, markInstanceReady, spawnAgentProcess, startTurnInstance } from '@vis/workbench-core'
+import { agentPath, type AgentEvent, type AgentRuntimePort, type ChildLike, DispatchError, exitInstance, killTree, markInstanceReady, spawnAgentProcess, startTurnInstance } from '@vis/workbench-core'
 import { buildPrompt, systemAppend } from './prompt'
 import { translate } from './translate'
 
@@ -21,6 +20,8 @@ export type ClaudeRuntimeOptions = {
   socketPath: string
   /** Directory containing the vis executable, prepended to the Agent process PATH */
   cliBinDir: string
+  /** Packaged tools appended after the user PATH. */
+  fallbackDirs?: readonly string[]
   model?: string
   /** Maximum wait from startup to receiving init */
   initTimeoutMs?: number
@@ -152,7 +153,7 @@ export function createClaudeRuntime(
               systemPrompt: { type: 'preset', preset: 'claude_code', append: systemAppend(input.workContext) },
               env: {
                 ...env,
-                PATH: [opts.cliBinDir, env.PATH].filter(Boolean).join(delimiter),
+                PATH: agentPath({ cliBinDir: opts.cliBinDir, fallbackDirs: opts.fallbackDirs, base: env.PATH }),
                 VIS_SOCKET: opts.socketPath,
                 VIS_AGENT_TOKEN: token,
                 CLAUDE_AGENT_SDK_CLIENT_APP: 'vis-creative',

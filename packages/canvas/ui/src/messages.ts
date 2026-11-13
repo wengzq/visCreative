@@ -408,9 +408,7 @@ export const controlMessages = defineMessages({
   organizationLimit: (count: string) => `整理需要 ${count} 条操作，超过单次 200 条上限，请减少选中节点后重试`,
   providerLabel: (id: string, label: string) => label,
   modelLabel: (id: string, label: string) => label,
-  parameterDescription: (description: string) => description,
   parameterLabel: (name: string) => ({ 'size': '尺寸', 'n': '数量', 'width': '宽度', 'height': '高度', 'ratio': '画幅', 'resolution': '分辨率', 'duration': '时长', 'imageMode': '参考图片模式', 'watermark': '水印', 'generateAudio': '生成音频', 'cameraFixed': '固定镜头', 'seed': '随机种子' } as Record<string, string>)[name] ?? name,
-  imageModeLabel: (mode: string) => ({ 'auto': '自动', 'first_frame': '首帧', 'first_last': '首尾帧', 'reference': '参考图' } as Record<string, string>)[mode] ?? mode,
 }, {
   mockDefaultParams: 'Mock · Default parameters',
   modelAndParams: 'Model and parameters',
@@ -496,8 +494,6 @@ export const controlMessages = defineMessages({
   providerLabel: (id: string, label: string) => id === 'render' && label === '本机代码渲染' ? 'Local code rendering' : label,
   modelLabel: (id: string, label: string) => id === 'mock-music-1' && label === 'Mock 音乐' ? 'Mock Music' : id === 'mock-sfx-1' && label === 'Mock 音效' ? 'Mock Sound Effects' : label,
   parameterLabel: (name: string) => ({ 'size': 'Size', 'n': 'Count', 'width': 'Width', 'height': 'Height', 'ratio': 'Aspect ratio', 'resolution': 'Resolution', 'duration': 'Duration', 'imageMode': 'Reference image mode', 'watermark': 'Watermark', 'generateAudio': 'Generate audio', 'cameraFixed': 'Fixed camera', 'seed': 'Seed' } as Record<string, string>)[name] ?? name,
-  imageModeLabel: (mode: string) => ({ 'auto': 'Auto', 'first_frame': 'First frame', 'first_last': 'First and last frames', 'reference': 'Reference images' } as Record<string, string>)[mode] ?? mode,
-  parameterDescription: (description: string) => ({ '图片尺寸：1K、2K、4K 或宽x高': 'Image size: 1K, 2K, 4K, or width x height', '最多生成的图片数量，1–4': 'Maximum number of images to generate, 1–4', '是否添加水印': 'Whether to add a watermark', '每次生成一个视频': 'Generate one video per request', '视频宽高比，留空使用模型默认值': 'Video aspect ratio; leave empty to use the model default', '视频分辨率，需所选模型支持': 'Video resolution; requires support from the selected model', '视频秒数；-1 由模型决定，需所选模型支持': 'Video duration in seconds; -1 lets the model decide. Requires support from the selected model', '生成同步声音，需所选模型支持': 'Generate synchronized audio; requires support from the selected model', '随机种子，-1 表示随机': 'Random seed; -1 selects a random seed', '固定镜头，需所选模型支持': 'Fixed camera; requires support from the selected model', 'auto：单图首帧、多图参考；first_frame：一图首帧；first_last：两图首尾帧；reference：参考图': 'auto: one image as the first frame, multiple images as references; first_frame: one first-frame image; first_last: first and last frames; reference: reference images', '视频秒数，4–15': 'Video duration in seconds, 4–15', '该模型每次只生成一张图片': 'This model generates one image per request', '音乐秒数，5–60': 'Music duration in seconds, 5–60', '音效秒数，1–10': 'Sound effect duration in seconds, 1–10' } as Record<string, string>)[description] ?? description.replace(/^视频分辨率：/, 'Video resolution: '),
 })
 
 export const movExportMessages = defineMessages({

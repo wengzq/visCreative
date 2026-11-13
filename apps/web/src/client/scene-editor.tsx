@@ -1,9 +1,10 @@
 import { extensionPosition } from '@vis/canvas-ui'
-import type { MethodResult, NodeView } from '@vis/protocol'
+import type { MethodResult, NodeView, SceneProposal } from '@vis/protocol'
 import type { SceneEditorHost } from '@vis/scene-ui'
 import { formatter, messagesFor, useLocale, useMessages, type Locale } from '@vis/ui-kit'
 import { lazy, Suspense, useMemo } from 'react'
 import { actionMessages } from './messages'
+import { registerSceneDraft, resolveSceneProposal } from './scene-proposals'
 import { RpcError } from './rpc'
 import { sceneHostMessages } from './scene-messages'
 import type { SpaceConnection } from './space'
@@ -14,6 +15,9 @@ type Options = {
   node: NodeView
   nodes: readonly NodeView[]
   locale: Locale
+  proposals?: readonly SceneProposal[] | undefined
+  initialProposalId?: string | undefined
+  updateProposals?: ((proposals: SceneProposal[]) => void) | undefined
   initialViewId?: string | undefined
   initialTarget?: ScenePanelTarget | undefined
   close(): void
@@ -24,6 +28,7 @@ const SceneEditor = lazy(async () => {
   await import('@vis/scene-ui/scene.css')
   return { default: editor.SceneEditor }
 })
+const pendingRenders = new WeakMap<SpaceConnection, Map<string, string>>()
 
 export function sceneEditorHost(options: Options): SceneEditorHost {
   const { conn, node, nodes, locale } = options
@@ -55,6 +60,15 @@ export function sceneEditorHost(options: Options): SceneEditorHost {
   }
   return {
     node, nodes,
+    proposals: options.proposals ?? [],
+    ...(options.initialProposalId ? { initialProposalId: options.initialProposalId } : {}),
+    sessionName: id => conn.getView().state.sessions.get(id)?.title,
+    registerDraft: handle => registerSceneDraft(conn, node.slots.find(slot => slot.slotKey === 'main')!.slotId, handle),
+    async resolveProposal(action, changes) {
+      const slotId = node.slots.find(slot => slot.slotKey === 'main')!.slotId
+      const proposals = await resolveSceneProposal(conn, spaceId, locale, slotId, action, changes)
+      options.updateProposals?.(proposals)
+    },
     ...(options.initialViewId ? { initialViewId: options.initialViewId } : {}),
     ...(options.initialTarget ? { initialTarget: options.initialTarget } : {}),
     assetUrl: id => `/assets/${encodeURIComponent(spaceId)}/${encodeURIComponent(id)}?t=${token}`,
@@ -94,6 +108,26 @@ export function sceneEditorHost(options: Options): SceneEditorHost {
         inputNodeIds: [node.nodeId], content: { assetVersionId },
       }] })
     },
+    async renderVideo({ viewId, revision, width, height, fps, prompt }) {
+      assertProject()
+      const current = conn.getView().state.nodes.get(node.nodeId)
+      const slot = current?.slots.find(slot => slot.slotKey === 'main')
+      if (!slot || slot.content.type !== 'scene') throw new Error(m.nodeDeleted)
+      let pending = pendingRenders.get(conn)
+      if (!pending) { pending = new Map(); pendingRenders.set(conn, pending) }
+      const signature = JSON.stringify({ spaceId, nodeId: node.nodeId, revision, viewId, width, height, fps, prompt })
+      const requestId = pending.get(signature) ?? `scene-video-${crypto.randomUUID()}`
+      // A lost reply retries the same job even if a canvas event recreated the editor host.
+      pending.set(signature, requestId)
+      await call('generation.submit', {
+        requestId,
+        provider: 'render', model: 'scene', kind: 'video', prompt,
+        inputs: [{ slotId: slot.slotId, revision }],
+        params: { viewId, width, height, fps },
+        targets: [{ outputIndex: 0, kind: 'new_node', nearNodeId: node.nodeId }],
+      })
+      pending.delete(signature)
+    },
     async sendToPanel(target, source) {
       for (let attempt = 0; attempt < 2; attempt++) {
         const result = await call<MethodResult<'canvas.get'>>('canvas.get', { nodeIds: [target.nodeId] })
@@ -129,8 +163,8 @@ export function sceneEditorHost(options: Options): SceneEditorHost {
 export function SceneEditorMount(options: Omit<Options, 'locale'>) {
   const { locale } = useLocale()
   const m = useMessages(sceneHostMessages)
-  const { conn, node, nodes, initialViewId, initialTarget, close } = options
-  const host = useMemo(() => sceneEditorHost({ conn, node, nodes, locale, initialViewId, initialTarget, close }), [conn, node, nodes, locale, initialViewId, initialTarget, close])
+  const { conn, node, nodes, initialViewId, initialTarget, initialProposalId, proposals, updateProposals, close } = options
+  const host = useMemo(() => sceneEditorHost({ conn, node, nodes, locale, initialViewId, initialTarget, initialProposalId, proposals, updateProposals, close }), [conn, node, nodes, locale, initialViewId, initialTarget, initialProposalId, proposals, updateProposals, close])
   return <Suspense fallback={<div className="app-scene-loading" role="dialog" aria-modal="true" aria-label={m.scene} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') close() }}><p role="status">{m.loading}</p><button autoFocus onClick={close}>{m.close}</button></div>}>
     <SceneEditor host={host} />
   </Suspense>

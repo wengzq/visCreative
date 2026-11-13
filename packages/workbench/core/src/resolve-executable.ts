@@ -3,6 +3,14 @@ import { delimiter, dirname, extname, isAbsolute, resolve } from 'node:path'
 
 export type ResolvedExecutable = { command: string; args: string[] }
 
+/**
+ * RFC 0046: inside the desktop app, process.execPath is the Electron binary, which acts as Node only with
+ * ELECTRON_RUN_AS_NODE. Set it on exactly the children launched through process.execPath, never across Agent environments.
+ */
+export function nodeChildEnv(command: string, runtime: { electron?: string | undefined; execPath: string } = { electron: process.versions.electron, execPath: process.execPath }): Record<string, string> {
+  return runtime.electron && command === runtime.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}
+}
+
 function file(path: string): boolean {
   try { return statSync(path).isFile() } catch { return false }
 }

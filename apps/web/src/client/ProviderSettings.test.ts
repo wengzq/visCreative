@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { ProviderSettings } from './ProviderSettings'
 
-const catalog: ProviderCatalog = { providerTypes: [{
+const catalog: ProviderCatalog = { videoReferences: 'hosting_required', providerTypes: [{
   type: 'volcengine-ark', label: { zh: '火山方舟', en: 'Volcengine Ark' }, needsKey: true,
   kinds: ['image', 'video', 'audio'], regions: [], allowCustomBaseUrl: true, knownModels: [],
   help: { consoleUrl: 'https://example.invalid', key: { zh: '', en: '' } }, verified: true,
@@ -89,5 +89,24 @@ describe('Audio service settings and agent generation limits', () => {
     expect(html).toContain('只限制 Agent 提交的付费生成；你在界面上的生成不受限制。0 表示不限')
     expect(html).toContain('最大并发任务数对所有付费生成生效。')
     expect(html).toMatch(/id="[^"]+-dailyAudio"[^>]+value="20"/)
+  })
+})
+
+
+describe('Media hosting settings', () => {
+  it('renders independent hosting controls, write-only secrets, disclosure and lifecycle guidance in English', () => {
+    const html = renderToStaticMarkup(createElement(LocaleProvider, { locale: 'en', setLocale() {}, children: createElement(ProviderSettings, {
+      catalog: { ...catalog, agentIsolation: 'none' }, localePreference: null, async onLocaleChange() {}, rpc: { call: vi.fn() }, onClose() {}, onUpdated() {}, initialSection: 'hosting',
+    }) }))
+    for (const text of ['Media hosting', 'Hosting region', 'Bucket', 'Access key ID', 'Object prefix', 'Secret access key', 'Save hosting secret', 'Test media hosting', 'Save media hosting', 'A referenced clip leaves this machine', 'Anyone holding the signed link', 'after 3 days', 'Agents on Windows run without an isolation sandbox']) expect(html).toContain(text)
+    expect(html).toMatch(/type="password" autoComplete="off" spellCheck="false"/)
+    expect(html).not.toContain('type="submit" class="is-primary"')
+  })
+
+  it('provides the same media hosting disclosure and separate save action in Chinese', () => {
+    const html = renderToStaticMarkup(createElement(ProviderSettings, {
+      catalog, localePreference: null, async onLocaleChange() {}, rpc: { call: vi.fn() }, onClose() {}, onUpdated() {}, initialSection: 'hosting',
+    }))
+    for (const text of ['媒体托管', '保存媒体托管', '测试媒体托管', '引用的视频会离开本机', '在 3 天后删除对象前缀下的文件']) expect(html).toContain(text)
   })
 })

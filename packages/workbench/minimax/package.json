@@ -1,0 +1,19 @@
+{
+  "name": "@vis/agent-minimax",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MiniMax Code adapter on the shared ACP runtime (RFC 0041).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/workbench-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@vis/storage": "workspace:*"
+  }
+}

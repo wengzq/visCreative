@@ -1,12 +1,18 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ProviderError } from '../types'
+import { createAssetStore } from '@vis/assets'
+import { eq, openSpaceDb, spaceSchema as s } from '@vis/storage'
+import { createGenerationService } from '../../service'
+import { MAX_PRESIGN_SECONDS, ProviderError, referenceImageLimit } from '../types'
 import { providerContract } from '../contract'
-import type { ProviderOutputRef, ProviderRequest } from '../types'
+import type { HostedInputs, ProviderInputMetadata, ProviderOutputRef, ProviderRequest } from '../types'
+import { arkProviderType } from './type'
 import { ARK_MAX_INPUT_BYTES, ARK_MAX_PROMPT_LENGTH, arkImageParamsSchema, arkParamsSchema, arkVideoParamsSchema, createArkProvider } from './index'
+import { createIsolatedHttpServer } from '../../../../../scripts/testing/isolated-http'
 
 type Request = { method: string | undefined; path: string | undefined; headers: IncomingMessage['headers']; body: Record<string, unknown> }
 const cleanups: (() => Promise<unknown>)[] = []
@@ -24,7 +30,7 @@ async function setup(handler: (req: Request, res: ServerResponse) => void = (_re
   const dir = await mkdtemp(join(tmpdir(), 'vis-ark-test-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const requests: Request[] = []
-  const server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const chunks: Buffer[] = []
     for await (const chunk of req) chunks.push(Buffer.from(chunk))
     const body = Buffer.concat(chunks).toString('utf8')
@@ -32,14 +38,13 @@ async function setup(handler: (req: Request, res: ServerResponse) => void = (_re
     requests.push(request)
     handler(request, res)
   })
+  const { server } = isolated
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   cleanups.push(() => new Promise<void>((resolve, reject) => {
     server.closeAllConnections()
     server.close(error => error ? reject(error) : resolve())
   }))
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Test HTTP service has not started')
-  const origin = `http://127.0.0.1:${address.port}`
+  const origin = isolated.baseUrl
   const getKey = vi.fn(async () => 'secret-do-not-expose')
   const options = { id: 'test-ark', dataDir: dir, baseUrl: `${origin}/api/v3/`, imageModels: [{ id: 'configured-image', label: '图片模型' }], videoModels: [{ id: 'configured-video', label: '视频模型' }], getKey }
   return { dir, requests, origin, getKey, options, provider: createArkProvider(options) }
@@ -87,6 +92,27 @@ async function outputsOf(provider: ReturnType<typeof createArkProvider>, externa
 }
 
 describe('Ark provider', () => {
+  it('serializes model-specific image format and optimization plus task lifetime and last frame', async () => {
+    const h = await setup((req, res) => json(res, req.path?.endsWith('/images/generations') ? { data: [{ url: 'https://output.invalid/a.png', size: '128x96' }] } : { id: 'video-copy' }))
+    const model = 'doubao-seedream-5-0-pro'
+    const image = createArkProvider({ ...h.options, imageModels: [{ id: model, label: model }] })
+    await image.submit({ ...imageRequest, model, params: { size: '1.5K', outputFormat: 'png', optimizePromptMode: 'fast' } }, { idempotencyKey: 'image-copy' })
+    expect(h.requests[0]?.body).toMatchObject({ size: '1.5K', output_format: 'png', optimize_prompt_options: { mode: 'fast' } })
+    await h.provider.submit({ ...videoRequest, params: { returnLastFrame: true, executionExpiresAfter: 3600 } }, { idempotencyKey: 'video-copy' })
+    expect(h.requests[1]?.body).toMatchObject({ return_last_frame: true, execution_expires_after: 3600 })
+    expect(arkParamsSchema('image', 'doubao-seedream-5-0-flash').safeParse({ optimizePromptMode: 'fast' }).success).toBe(false)
+    expect(arkVideoParamsSchema.safeParse({ executionExpiresAfter: 3599 }).success).toBe(false)
+    for (const size of ['4K', '512x512', '8192x8192']) expect(arkParamsSchema('image', model).safeParse({ size }).success).toBe(false)
+    expect(arkParamsSchema('image', model).safeParse({ size: '2048x1024' }).success).toBe(true)
+    const videoModel = 'doubao-seedance-2-0'
+    const video = createArkProvider({ ...h.options, videoModels: [{ id: videoModel, label: videoModel }] })
+    await video.submit({ ...videoRequest, model: videoModel, params: { duration: 5, seed: 10, cameraFixed: true } }, { idempotencyKey: 'known-video-copy' })
+    expect(h.requests[2]?.body).toMatchObject({ duration: 5, generate_audio: true })
+    expect(h.requests[2]?.body).not.toHaveProperty('seed')
+    expect(h.requests[2]?.body).not.toHaveProperty('camera_fixed')
+    await video.submit({ ...videoRequest, model: videoModel, params: { duration: 5, generateAudio: false } }, { idempotencyKey: 'known-silent-video' })
+    expect(h.requests[3]?.body).toMatchObject({ duration: 5, generate_audio: false })
+  })
   it('validates frame metadata without relying on the provider type', async () => {
     const { provider, getKey } = await setup()
     const frame = { kind: 'image' as const, mime: 'image/png', frameRole: 'first' as const }
@@ -323,11 +349,11 @@ describe('Ark provider', () => {
     { status: 429, body: { error: { code: 'RateLimitExceeded.EndpointRPMExceeded', message: 'secret-do-not-expose' } }, kind: 'transient' },
   ] as const)('explicit HTTP $status rejection allows later retries with the same key without leaking secrets', async ({ status, body, kind }) => {
     let count = 0
-    const { provider, requests } = await setup((_req, res) => count++ === 0 ? json(res, body, status) : json(res, { data: [{ url: 'https://output.invalid/a.png' }] }))
+    const { provider, requests } = await setup((_req, res) => count++ < (status === 429 ? 2 : 1) ? json(res, body, status) : json(res, { data: [{ url: 'https://output.invalid/a.png' }] }))
     await errorOf(provider.submit(imageRequest, { idempotencyKey: 'retry' }), kind)
     await expect(provider.findTaskByIdempotencyKey!('retry')).resolves.toBeNull()
     await provider.submit(imageRequest, { idempotencyKey: 'retry' })
-    expect(requests).toHaveLength(2)
+    expect(requests).toHaveLength(status === 429 ? 3 : 2)
   })
 
   it.each(['network', 'timeout', 'malformed', 'server-without-error', 'server-with-id', 'generic-server-error', 'no-service-error'] as const)('%s submission results are unknown; restart only queries without resubmitting', async fault => {
@@ -566,7 +592,431 @@ describe('Ark custom paths', () => {
       return Response.json({ status: 'queued' })
     } })
     expect(await provider.getTask('cgt-1')).toEqual({ state: 'pending' })
-    expect(new URL(routed[0]!).pathname).toBe('/api/v3/jobs/cgt-1/status')
+    expect(routed).toEqual([`${options.baseUrl}jobs/cgt-1/status`])
     expect(() => createArkProvider({ ...options, endpoints: { taskQuery: '/jobs' } })).toThrow('endpoint paths')
+  })
+})
+
+
+describe('Ark video references', () => {
+  const models = ['doubao-seedance-2-0-260128', 'doubao-seedance-2-0-fast-260128', 'doubao-seedance-2-0-mini-260615', 'doubao-seedance-2-5-260628']
+  const video = { type: 'asset' as const, kind: 'video' as const, mime: 'video/mp4', path: '/pinned.mp4', durationMs: 3000, width: 1280, height: 720, fps: 30, bytes: 1000 }
+  const signed = 'https://bucket.example.invalid/clip.mp4?X-Tos-Credential=private-access-id%2Fscope&X-Tos-Signature=private-signature'
+  function hosting(): HostedInputs {
+    return { configured: true, url: vi.fn(async () => signed), release: vi.fn(async () => {}), redact: vi.fn((text: string) => text.replaceAll('private-access-id', '[REDACTED]').replaceAll('private-signature', '[REDACTED]')) }
+  }
+
+  it.each(models)('%s resolves node markers to exact per-type labels in the content order sent over HTTP', async model => {
+    const h = await setup((_req, res) => json(res, { id: 'mixed-task' }))
+    const db = openSpaceDb(':memory:')
+    const assets = createAssetStore({ blobsDir: join(h.dir, 'blobs') })
+    const paths: string[] = []
+    for (const [id, kind] of [['image', 'image'], ['video-a', 'video'], ['video-b', 'video']] as const) {
+      const staged = await assets.stageBytes(Buffer.from(id))
+      const { assetVersionId } = assets.registerVersion(db, { staged, kind, mime: kind === 'image' ? 'image/png' : 'video/mp4', origin: 'import', ...(kind === 'video' ? { durationMs: 3000, width: 1280, height: 720, fps: 30 } : {}) })
+      paths.push(assets.blobPath(staged.hash))
+      db.insert(s.operations).values({ id: `op-${id}`, actorKind: 'user', createdAt: 1 }).run()
+      db.insert(s.nodes).values({ id, kind, x: 0, y: 0, w: 100, h: 100, z: 1, createdAt: 1 }).run()
+      db.insert(s.slots).values({ id, nodeId: id, slotKey: 'main', contentType: kind, currentRevision: 1 }).run()
+      db.insert(s.slotRevisions).values({ slotId: id, revision: 1, assetVersionId, operationId: `op-${id}`, createdAt: 1 }).run()
+    }
+    const hosted = hosting()
+    vi.mocked(hosted.url).mockImplementation(async input => `https://bucket.example.invalid/${input.path === paths[2] ? 'first' : 'second'}.mp4`)
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    const service = createGenerationService({ db, assets, providers: [provider], defaults: { video: { provider: provider.id, model } },
+      delivery: { deliverOutput() { throw new Error('This test only submits a task') } },
+    })
+    try {
+      const prompt = 'Use {{ref:video-a}} with {{ref:image}}, then {{ref:video-b}} and {{ref:video-a}}'
+      const { jobId } = service.submit({ sessionId: null, turnId: null, inputSnapshotId: null }, {
+        requestId: 'mixed-labels', kind: 'video', prompt, inputs: ['video-b', 'image', 'video-a'].map(slotId => ({ slotId })),
+      })
+      await service.pump()
+      const prefix = model.includes('2-5') ? '@' : ''
+      const expected = `Use ${prefix}视频2 with ${prefix}图片1, then ${prefix}视频1 and ${prefix}视频2`
+      expect(h.requests).toHaveLength(1)
+      expect(h.requests[0]!.body.content).toEqual([
+        { type: 'text', text: expected },
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from('image').toString('base64')}` }, role: 'reference_image' },
+        { type: 'video_url', video_url: { url: 'https://bucket.example.invalid/first.mp4' }, role: 'reference_video' },
+        { type: 'video_url', video_url: { url: 'https://bucket.example.invalid/second.mp4' }, role: 'reference_video' },
+      ])
+      expect(vi.mocked(hosted.url).mock.calls.map(([input]) => input.path)).toEqual([paths[2], paths[1]])
+      expect(db.select().from(s.generationJobs).where(eq(s.generationJobs.id, jobId)).get()!.params).toMatchObject({ prompt, resolvedPrompt: expected, actualPrompt: expected })
+    } finally { await service.stop(); db.$client.close() }
+  })
+
+  it('uses documented audio labels too and leaves unknown Ark models on the legacy format', async () => {
+    const { provider } = await setup()
+    for (const model of models) {
+      expect(provider.referenceLabelFor?.('video', model, { kind: 'audio', number: 2 })).toBe(`${model.includes('2-5') ? '@' : ''}音频2`)
+    }
+    expect(provider.referenceLabelFor?.('video', 'custom-endpoint', { kind: 'video', number: 1 })).toBeUndefined()
+    expect(provider.referenceLabelFor?.('image', 'doubao-seedream-5-0-pro', { kind: 'image', number: 1 })).toBeUndefined()
+  })
+
+  it.each([undefined, false])('requires configured hosting before any file read or key lookup (%s)', async configured => {
+    const h = await setup()
+    const model = models[0]!
+    const hosted = configured === undefined ? undefined : { ...hosting(), configured }
+    const provider = createArkProvider({ ...h.options, videoModels: [{ id: model, label: model }], ...(hosted ? { hosted } : {}) })
+    expect(() => provider.validateInputs?.('video', model, [video], {}, 'generate')).toThrow(expect.objectContaining({ kind: 'rejected', reason: 'generation.video_reference_hosting_required' }))
+    await expect(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'no-hosting' })).rejects.toMatchObject({ kind: 'rejected', reason: 'generation.video_reference_hosting_required' })
+    expect(h.getKey).not.toHaveBeenCalled()
+    expect(h.requests).toHaveLength(0)
+    await expect(provider.findTaskByIdempotencyKey!('no-hosting')).resolves.toBeNull()
+  })
+
+  it.each(models)('%s declares and validates every reference limit before upload', async model => {
+    const h = await setup()
+    const hosted = hosting()
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    const latest = model.includes('2-5')
+    const max = latest ? 10 : 3
+    const maxMs = latest ? 30000 : 15000
+    const image = { kind: 'image' as const, mime: 'image/png' }
+    const audio = { kind: 'audio' as const, mime: 'audio/wav', durationMs: 2000 }
+    const limits = { max, minMs: 2000, maxMs, totalMs: maxMs }
+    expect(provider.referenceLimitsFor?.('video', model)).toEqual({ image: latest ? 30 : 9, video: { ...limits, requiresHosting: true }, audio: limits, ...(latest ? { total: 50 } : {}) })
+    const cases: { inputs: ProviderInputMetadata[]; reason: string; params?: Record<string, number>; requestParams?: Record<string, unknown> }[] = [
+      { inputs: Array.from({ length: max + 1 }, () => video), reason: 'generation.video_reference_count', params: { max } },
+      ...[1999, maxMs + 1, NaN].map(durationMs => ({ inputs: [{ ...video, durationMs }], reason: 'generation.video_reference_duration', params: { minMs: 2000, maxMs } })),
+      { inputs: [{ ...video, durationMs: maxMs }, video], reason: 'generation.video_reference_total_duration', params: { totalMs: maxMs } },
+      { inputs: [{ ...video, mime: 'video/webm' }], reason: 'generation.video_reference_format' },
+      { inputs: [{ ...video, bytes: 200_000_001 }], reason: 'generation.video_reference_size', params: { maxBytes: 200_000_000 } },
+      ...[23.99, 60.01, NaN].map(fps => ({ inputs: [{ ...video, fps }], reason: 'generation.video_reference_fps', params: { minFps: 24, maxFps: 60 } })),
+      ...[{ width: 300, height: 1000 }, { width: 3000, height: 1000 }, { width: 600, height: 600 }, { width: 3000, height: 3000 }, { width: NaN }].map(size => ({ inputs: [{ ...video, ...size }], reason: 'generation.video_reference_dimensions', params: { minAspect: 0.4, maxAspect: 2.5, minPixels: 407696, maxPixels: 8295044 } })),
+      { inputs: [image, ...Array.from({ length: max + 1 }, () => audio)], reason: 'generation.audio_reference_count', params: { max } },
+      { inputs: [image, { ...audio, durationMs: maxMs + 1 }], reason: 'generation.audio_reference_duration', params: { minMs: 2000, maxMs } },
+      { inputs: [image, { ...audio, durationMs: maxMs }, audio], reason: 'generation.audio_reference_total_duration', params: { totalMs: maxMs } },
+      { inputs: [image, video], requestParams: { imageMode: 'first_frame' }, reason: 'generation.frames_reference_mix' },
+      { inputs: [{ ...image, frameRole: 'first' }, video], reason: 'generation.frames_reference_mix' },
+      { inputs: Array.from({ length: latest ? 31 : 10 }, () => image), reason: 'generation.invalid_params' },
+      ...(latest ? [{ inputs: [...Array.from({ length: 31 }, () => image), ...Array.from({ length: 10 }, () => ({ ...video, durationMs: 2000 })), ...Array.from({ length: 10 }, () => audio)], reason: 'generation.invalid_params' }] : []),
+    ]
+    for (const test of cases) {
+      expect(() => provider.validateInputs?.('video', model, test.inputs, test.requestParams ?? {}, 'generate')).toThrow(expect.objectContaining({ kind: 'rejected', reason: test.reason, ...(test.params ? { params: test.params } : {}) }))
+    }
+    if (latest) expect(() => provider.validateInputs?.('video', model, [...Array.from({ length: 30 }, () => image), ...Array.from({ length: 11 }, () => video), ...Array.from({ length: 10 }, () => audio)], {}, 'generate')).toThrow(expect.objectContaining({ params: { detail: 'Ark reference inputs allow at most 50 items' } }))
+    expect(() => provider.validateInputs?.('video', model, [...Array.from({ length: latest ? 30 : 9 }, () => image), ...Array.from({ length: max }, () => ({ ...video, durationMs: 2000 })), ...Array.from({ length: max }, () => audio)], {}, 'generate')).not.toThrow()
+    for (const input of [{ ...video, mime: 'video/quicktime' }, { ...video, fps: 24 }, { ...video, fps: 60 }, { ...video, bytes: 200_000_000 }, { ...video, width: 640, height: 1600 }, { ...video, width: 1600, height: 640 }, { ...video, width: 638, height: 640 }, { ...video, width: 2880, height: 2880 }]) expect(() => provider.validateInputs?.('video', model, [input], {}, 'generate')).not.toThrow()
+    if (latest) expect(() => provider.validateInputs?.('video', model, [audio], {}, 'generate')).not.toThrow()
+    else expect(() => provider.validateInputs?.('video', model, [audio], {}, 'generate')).toThrow(expect.objectContaining({ reason: 'generation.audio_reference_image_required' }))
+    expect(hosted.url).not.toHaveBeenCalled()
+    expect(h.getKey).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, 3600])('uploads before intent and sends reference roles with expiry %s and deterministic input ordinals', async executionExpiresAfter => {
+    let intentPresent = false
+    const h = await setup((_req, res) => {
+      intentPresent = existsSync(join(h.dir, 'ark', `${key}.json`))
+      json(res, { id: 'hosted-task' })
+    })
+    const hosted = hosting()
+    const model = models[3]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    const path = join(h.dir, 'reference.png')
+    await writeFile(path, 'image')
+    const key = `hosted-${executionExpiresAfter ?? 'default'}`
+    const order: string[] = []
+    vi.mocked(hosted.url).mockImplementation(async () => {
+      await expect(readFile(join(h.dir, 'ark', `${key}.json`))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(h.requests).toHaveLength(0)
+      order.push('upload')
+      return signed
+    })
+    await provider.submit({ ...videoRequest, model, params: { executionExpiresAfter }, inputs: [{ type: 'asset', kind: 'image', mime: 'image/png', path }, video] }, { idempotencyKey: key })
+    expect(hosted.url).toHaveBeenCalledWith({ path: video.path, mime: video.mime, key: `${key}:1` }, (executionExpiresAfter ?? 21600) + 3600, undefined)
+    expect(order).toEqual(['upload'])
+    expect(intentPresent).toBe(true)
+    expect(h.requests[0]!.body).toMatchObject({ execution_expires_after: executionExpiresAfter ?? 21600, omni_reference_task_type: 'reference', content: [{ type: 'text' }, { role: 'reference_image' }, { type: 'video_url', video_url: { url: signed }, role: 'reference_video' }] })
+    const record = await readFile(join(h.dir, 'ark', `${key}.json`), 'utf8')
+    expect(record).not.toContain('https:')
+    expect(record).not.toContain('private-')
+    const restarted = createArkProvider({ ...h.options, hosted })
+    await restarted.cleanup!({ idempotencyKey: key, status: 'succeeded' })
+    await restarted.cleanup!({ idempotencyKey: key, status: 'succeeded' })
+    expect(hosted.release).toHaveBeenCalledTimes(1)
+    expect(hosted.release).toHaveBeenCalledWith(key)
+    await expect(restarted.findTaskByIdempotencyKey!(key)).resolves.toEqual({ externalTaskId: 'hosted-task' })
+  })
+
+  it.each([
+    ['hosting.not_configured', 'rejected', 'generation.video_reference_hosting_required'],
+    ['hosting.store_failed', 'transient', 'hosting.store_failed'],
+    ['hosting.upload_failed', 'transient', 'hosting.upload_failed'],
+  ] as const)('preserves the retry policy and localized reason for %s upload failures', async (reason, kind, expectedReason) => {
+    const h = await setup()
+    const hosted = hosting()
+    vi.mocked(hosted.url).mockRejectedValue(Object.assign(new Error('Private hosting diagnostic'), { details: { reason } }))
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    const key = `reason-${reason}`
+    await expect(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: key })).rejects.toMatchObject({ kind, reason: expectedReason })
+    expect(hosted.url).toHaveBeenCalledTimes(1)
+    expect(h.requests).toHaveLength(0)
+    await expect(provider.findTaskByIdempotencyKey!(key)).resolves.toBeNull()
+  })
+
+  it('releases earlier uploads best-effort when a later reference upload fails', async () => {
+    const h = await setup()
+    const hosted = hosting()
+    vi.mocked(hosted.url).mockResolvedValueOnce(signed).mockRejectedValueOnce(Object.assign(new Error('Private diagnostic'), { details: { reason: 'hosting.upload_failed' } }))
+    vi.mocked(hosted.release).mockRejectedValueOnce(new Error('Private cleanup diagnostic'))
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    await expect(provider.submit({ ...videoRequest, model, inputs: [video, video] }, { idempotencyKey: 'partial-upload' })).rejects.toMatchObject({ kind: 'transient', reason: 'hosting.upload_failed' })
+    expect(hosted.url).toHaveBeenCalledTimes(2)
+    expect(hosted.release).toHaveBeenCalledExactlyOnceWith('partial-upload')
+    expect(h.requests).toHaveLength(0)
+    await expect(provider.findTaskByIdempotencyKey!('partial-upload')).resolves.toBeNull()
+  })
+
+  it('rejects a reference link lifetime beyond the hosting maximum before calling url', async () => {
+    const h = await setup()
+    const hosted = hosting()
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    await expect(provider.submit({ ...videoRequest, model, params: { executionExpiresAfter: MAX_PRESIGN_SECONDS }, inputs: [video] }, { idempotencyKey: 'invalid-hosting-ttl' })).rejects.toMatchObject({ kind: 'rejected', reason: 'generation.invalid_params', params: { detail: expect.any(String) } })
+    expect(hosted.url).not.toHaveBeenCalled()
+    expect(h.requests).toHaveLength(0)
+  })
+
+  it.each(models)('bounds %s execution expiry plus its fetch margin within the shared presign maximum', async model => {
+    const h = await setup()
+    const provider = createArkProvider({ ...h.options, hosted: hosting(), videoModels: [{ id: model, label: model }] })
+    const schema = provider.paramsSchemaFor!('video', model).toJSONSchema({ io: 'input' }) as { properties: Record<string, { maximum?: number }> }
+    const maximum = schema.properties.executionExpiresAfter!.maximum
+    expect(typeof maximum).toBe('number')
+    expect(maximum! + 3600).toBeLessThanOrEqual(MAX_PRESIGN_SECONDS)
+  })
+
+  it('upload failure is transient without an intent or paid POST and never exposes the upload error', async () => {
+    const h = await setup()
+    const hosted = hosting()
+    vi.mocked(hosted.url).mockRejectedValue(new Error(signed))
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    const error = await errorOf(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'upload-failed' }), 'transient')
+    expect(String(error)).not.toContain('https:')
+    expect(String(error)).not.toContain('private-')
+    await expect(provider.findTaskByIdempotencyKey!('upload-failed')).resolves.toBeNull()
+    expect(h.requests).toHaveLength(0)
+    await createArkProvider({ ...h.options, hosted }).cleanup!({ idempotencyKey: 'upload-failed', status: 'failed' })
+    expect(hosted.release).toHaveBeenCalledExactlyOnceWith('upload-failed')
+  })
+
+  it('redacts echoed signed URLs and query values, rejects sensitive task IDs and logs cleanup failures safely', async () => {
+    let echo = signed
+    const h = await setup((_req, res) => json(res, { error: { code: 'InvalidReference', message: echo } }, 400))
+    const hosted = hosting()
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    for (const [index, value] of [signed, new URL(signed).search, 'private-signature', 'private-access-id'].entries()) {
+      echo = value
+      const error = await errorOf(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: `redact-${index}` }), 'rejected')
+      expect(String(error)).not.toContain('private-')
+      expect(String(error)).not.toContain('https:')
+    }
+    const logs = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const success = await setup((_req, res) => json(res, { id: 'cleanup-task' }))
+      const accepted = createArkProvider({ ...success.options, hosted, videoModels: [{ id: model, label: model }] })
+      await accepted.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'cleanup' })
+      vi.mocked(hosted.release).mockRejectedValue(new Error(signed))
+      await expect(createArkProvider({ ...success.options, hosted }).cleanup!({ idempotencyKey: 'cleanup', status: 'failed' })).resolves.toBeUndefined()
+      expect(logs).toHaveBeenCalled()
+      expect(JSON.stringify(logs.mock.calls)).not.toContain('private-')
+      expect(JSON.stringify(logs.mock.calls)).not.toContain('https:')
+    } finally { logs.mockRestore() }
+  })
+
+  it('keeps the per-model image limit hook ahead of its compatibility fallback', async () => {
+    const { provider } = await setup()
+    provider.referenceImageLimitFor = () => 1
+    expect(referenceImageLimit(provider, 'video', models[3]!)).toBe(30)
+    expect(referenceImageLimit(provider, 'image', 'configured-image')).toBe(10)
+    delete provider.referenceLimitsFor
+    expect(referenceImageLimit(provider, 'image', 'configured-image')).toBe(1)
+    delete provider.referenceImageLimitFor
+    expect(referenceImageLimit(provider, 'image', 'configured-image')).toBe(Infinity)
+  })
+
+  it.each(['audio', 'image'] as const)('forces the 2.5 reference task type for %s references without video hosting', async kind => {
+    const h = await setup((_req, res) => json(res, { id: 'reference-task' }))
+    const model = models[3]!
+    const provider = createArkProvider({ ...h.options, videoModels: [{ id: model, label: model }] })
+    const path = join(h.dir, kind === 'audio' ? 'reference.wav' : 'reference.png')
+    await writeFile(path, 'local input')
+    await provider.submit({ ...videoRequest, model, params: { imageMode: 'reference' }, inputs: [{ type: 'asset', kind, mime: kind === 'audio' ? 'audio/wav' : 'image/png', path, ...(kind === 'audio' ? { durationMs: 30000 } : {}) }] }, { idempotencyKey: kind })
+    expect(h.requests[0]!.body).toMatchObject({ omni_reference_task_type: 'reference', content: [{ type: 'text' }, { role: kind === 'audio' ? 'reference_audio' : 'reference_image' }] })
+    expect(h.requests[0]!.body).not.toHaveProperty('execution_expires_after')
+  })
+
+  it('does not save a vendor task ID containing a hosted URL, signature or access key ID', async () => {
+    let id = signed
+    const h = await setup((_req, res) => json(res, { id }))
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted: hosting(), videoModels: [{ id: model, label: model }] })
+    for (const [index, value] of [signed, encodeURIComponent(signed), 'private-signature', 'private-access-id'].entries()) {
+      id = value
+      const key = `sensitive-id-${index}`
+      const error = await errorOf(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: key }), 'timeout')
+      expect(String(error)).not.toContain('private-')
+      const record = await readFile(join(h.dir, 'ark', `${key}.json`), 'utf8')
+      expect(record).toBe(JSON.stringify({ state: 'submitting', referenceVideos: true }))
+      const hosted = hosting()
+      await createArkProvider({ ...h.options, hosted }).cleanup!({ idempotencyKey: key, status: 'failed' })
+      expect(hosted.release).toHaveBeenCalledWith(key)
+    }
+  })
+
+  it('redacts URL and query echoes from vendor failures after restart', async () => {
+    let echo = signed
+    const h = await setup((_req, res) => json(res, { status: 'failed', error: { code: 'InvalidReference', message: echo } }))
+    const restarted = createArkProvider(h.options)
+    for (const value of [signed, encodeURIComponent(signed), new URL(signed).search]) {
+      echo = value
+      const state = await restarted.getTask('remote-video')
+      expect(state).toMatchObject({ state: 'failed' })
+      expect(JSON.stringify(state)).not.toContain('private-')
+      expect(JSON.stringify(state)).not.toContain('https:')
+    }
+  })
+
+  it('probes missing video metadata and validates it before uploading', async () => {
+    const h = await setup()
+    const hosted = hosting()
+    const model = models[0]!
+    const path = join(h.dir, 'reference.mp4')
+    await writeFile(path, 'video')
+    const probe = vi.fn(async () => ({ kind: 'video' as const, mime: 'video/mp4', width: 1280, height: 720, fps: 12, durationMs: 3000 }))
+    const provider = createArkProvider({ ...h.options, hosted, media: { probe }, videoModels: [{ id: model, label: model }] })
+    await expect(provider.submit({ ...videoRequest, model, inputs: [{ type: 'asset', kind: 'video', mime: 'video/mp4', path }] }, { idempotencyKey: 'missing-metadata' })).rejects.toMatchObject({ reason: 'generation.video_reference_fps' })
+    expect(probe).toHaveBeenCalledWith(path)
+    expect(hosted.url).not.toHaveBeenCalled()
+    expect(h.requests).toHaveLength(0)
+    await expect(provider.findTaskByIdempotencyKey!('missing-metadata')).resolves.toBeNull()
+  })
+
+  it('accepts public URL query values in task IDs and preserves ordinary vendor text', async () => {
+    let fail = false
+    const h = await setup((_req, res) => fail ? json(res, { error: { code: 'InvalidRequest', message: 'Invalid host header' } }, 400) : json(res, { id: 'task-25200-TOS4-HMAC-SHA256-host' }))
+    const hosted = hosting()
+    const url = new URL(signed)
+    url.searchParams.set('X-Tos-Expires', '25200')
+    url.searchParams.set('X-Tos-SignedHeaders', 'host')
+    url.searchParams.set('X-Tos-Algorithm', 'TOS4-HMAC-SHA256')
+    vi.mocked(hosted.url).mockResolvedValue(url.href)
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    await expect(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'public-query' })).resolves.toEqual({ externalTaskId: 'task-25200-TOS4-HMAC-SHA256-host' })
+    fail = true
+    const error = await errorOf(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'host-header' }), 'rejected')
+    expect(error.message).toBe('InvalidRequest: Invalid host header')
+  })
+
+  it.each(['task', 'http', 'image'] as const)('uses host redaction for vendor %s errors after restart', async mode => {
+    const echo = 'Reference rejected for isolated-access-id'
+    const h = await setup((_req, res) => json(res, mode === 'image' ? { error: { code: 'Rejected', message: echo } } : { status: 'failed', error: { code: 'Rejected', message: echo } }, mode === 'http' ? 400 : 200))
+    const hosted = hosting()
+    vi.mocked(hosted.redact).mockImplementation(text => text.replaceAll('isolated-access-id', '[REDACTED]'))
+    const provider = createArkProvider({ ...h.options, hosted })
+    const state = mode === 'http'
+      ? await errorOf(provider.getTask('remote-task'), 'rejected')
+      : mode === 'image'
+        ? await provider.getTask((await provider.submit(imageRequest, { idempotencyKey: 'image-redaction' })).externalTaskId)
+        : await provider.getTask('remote-task')
+    const message = state instanceof Error ? state.message : JSON.stringify(state)
+    expect(message).not.toContain('isolated-access-id')
+    expect(hosted.redact).toHaveBeenCalledWith(expect.stringContaining('isolated-access-id'))
+    expect(message).toContain('Reference rejected')
+  })
+
+  it('keeps ordinary documentation URLs in image moderation errors', async () => {
+    const message = 'Read https://docs.example.invalid/policy before retrying'
+    const h = await setup((_req, res) => json(res, { error: { code: 'SensitiveContent', message } }, 400))
+    const error = await errorOf(h.provider.submit(imageRequest, { idempotencyKey: 'docs-link' }), 'rejected')
+    expect(error.message).toBe(`SensitiveContent: ${message}`)
+    expect(error.reason).toBe('generation.moderation_rejected')
+  })
+
+  it('rejects missing API keys before uploading a video', async () => {
+    const h = await setup()
+    const hosted = hosting()
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, getKey: async () => undefined, videoModels: [{ id: model, label: model }] })
+    await expect(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'key-before-upload' })).rejects.toMatchObject({ kind: 'rejected', message: 'Configure Ark API Key first' })
+    expect(hosted.url).not.toHaveBeenCalled()
+    expect(h.requests).toHaveLength(0)
+  })
+
+  it('checks frame counts before reading local images', async () => {
+    const h = await setup()
+    const image = { type: 'asset' as const, kind: 'image' as const, mime: 'image/png', path: '/not-read.png' }
+    await expect(h.provider.submit({ ...videoRequest, inputs: [image, image], params: { imageMode: 'first_frame' } }, { idempotencyKey: 'invalid-frame-count' })).rejects.toMatchObject({ message: 'First-frame mode requires exactly one image' })
+    expect(h.getKey).not.toHaveBeenCalled()
+  })
+
+  it('checks the inline body estimate before uploading videos', async () => {
+    const h = await setup()
+    const imagePath = join(h.dir, 'large.png')
+    const audioPath = join(h.dir, 'large.wav')
+    await writeFile(imagePath, '')
+    await writeFile(audioPath, '')
+    await truncate(imagePath, 4 * 1024 * 1024)
+    await truncate(audioPath, 15_000_000)
+    const hosted = hosting()
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    const audio = { type: 'asset' as const, kind: 'audio' as const, mime: 'audio/wav', path: audioPath, durationMs: 2000 }
+    await expect(provider.submit({ ...videoRequest, model, inputs: [{ type: 'asset', kind: 'image', mime: 'image/png', path: imagePath }, audio, audio, audio, video] }, { idempotencyKey: 'body-before-upload' })).rejects.toMatchObject({ message: 'Ark request body size cannot exceed 64 MB' })
+    expect(hosted.url).not.toHaveBeenCalled()
+    expect(h.getKey).not.toHaveBeenCalled()
+    expect(h.requests).toHaveLength(0)
+  })
+
+  it('reuses hosted video URLs during a definite 429 POST retry', async () => {
+    let posts = 0
+    const h = await setup((_req, res) => posts++ === 0 ? json(res, { error: { code: 'RateLimitExceeded.EndpointRPMExceeded', message: 'Try again' } }, 429) : json(res, { id: 'retried-task' }))
+    const hosted = hosting()
+    const model = models[0]!
+    const provider = createArkProvider({ ...h.options, hosted, videoModels: [{ id: model, label: model }] })
+    await expect(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'retry-upload-once' })).resolves.toEqual({ externalTaskId: 'retried-task' })
+    expect(hosted.url).toHaveBeenCalledTimes(1)
+    expect(h.requests).toHaveLength(2)
+    expect(h.requests[1]!.body).toEqual(h.requests[0]!.body)
+  })
+
+  it('releases unknown submissions once across restart and leaves image jobs alone', async () => {
+    const h = await setup((req, res) => req.path?.includes('/images/') ? json(res, { data: [{ url: 'https://output.invalid/a.png' }] }) : res.destroy())
+    const hosted = hosting()
+    const model = models[0]!
+    const options = { ...h.options, hosted, videoModels: [{ id: model, label: model }] }
+    const provider = createArkProvider(options)
+    await errorOf(provider.submit({ ...videoRequest, model, inputs: [video] }, { idempotencyKey: 'unknown-release' }), 'timeout')
+    await createArkProvider(options).cleanup!({ idempotencyKey: 'unknown-release', status: 'unknown' })
+    expect(hosted.release).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(await readFile(join(h.dir, 'ark', 'unknown-release.json'), 'utf8'))).toEqual({ state: 'submitting', referenceVideos: true, released: true })
+    await createArkProvider(options).cleanup!({ idempotencyKey: 'unknown-release', status: 'unknown' })
+    expect(hosted.release).toHaveBeenCalledTimes(1)
+    await provider.submit(imageRequest, { idempotencyKey: 'image-cleanup' })
+    await provider.cleanup!({ idempotencyKey: 'image-cleanup', status: 'succeeded' })
+    await provider.cleanup!({ idempotencyKey: 'no-record', status: 'failed' })
+    expect(hosted.release).toHaveBeenCalledTimes(1)
+  })
+
+  it('registers Seedance 2.5 parameters with its supported duration, resolution and defaults', () => {
+    expect(arkProviderType.knownModels.map(model => model.id)).toEqual(models)
+    const schema = arkParamsSchema('video', models[3]!)
+    expect(schema.parse({})).toMatchObject({ generateAudio: true })
+    for (const duration of [-1, 4, 30]) for (const resolution of ['480p', '720p', '1080p']) expect(schema.safeParse({ duration, resolution }).success).toBe(true)
+    for (const duration of [0, 3, 31]) expect(schema.safeParse({ duration }).success).toBe(false)
+    expect(schema.safeParse({ resolution: '4k' }).success).toBe(false)
+    const json = schema.toJSONSchema({ io: 'input' })
+    expect(json.properties).not.toHaveProperty('seed')
+    expect(json.properties).not.toHaveProperty('cameraFixed')
+    expect(json.properties).toHaveProperty('returnLastFrame')
+    expect(json.properties).toHaveProperty('executionExpiresAfter')
   })
 })

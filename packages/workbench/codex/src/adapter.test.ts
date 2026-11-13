@@ -158,6 +158,16 @@ describe('A single turn', () => {
     expect(params.developerInstructions).not.toContain('this session is read-only')
     expect(params.config.shell_environment_policy).toBeUndefined()
   })
+  it('appends packaged media after the user PATH without leaking Electron flags', async () => {
+    runtimeOptions.cliBinDir = '/app/cli'
+    runtimeOptions.fallbackDirs = ['/app/ffmpeg']
+    runtimeOptions.env = { ...runtimeOptions.env, ELECTRON_RUN_AS_NODE: '1', ELECTRON: '1' }
+    runtime = createCodexRuntime(runtimeContext, runtimeOptions)
+    send(newSession(), 'test')
+    await sessions.idle()
+    expect(servers[0]!.options.env.PATH).toBe(['/app/cli', '/usr/bin', '/app/ffmpeg'].join(delimiter))
+    expect(Object.keys(servers[0]!.options.env).some(key => key.startsWith('ELECTRON'))).toBe(false)
+  })
   it('macOS sandbox: hand TMPPREFIX to the Codex shell so zsh here-documents avoid the blocked /tmp', async () => {
     vi.mocked(sandbox.prepareSandbox).mockImplementation(() => ({ env: { PATH: '/usr/bin', TMPDIR: '/work/.vis-tmp', TMPPREFIX: '/work/.vis-tmp/zsh' }, policy: undefined, notice: undefined, isolation: 'sandbox' }) as unknown as ReturnType<typeof realPrepareSandbox>)
     runtime = createCodexRuntime(runtimeContext, runtimeOptions)
@@ -167,6 +177,7 @@ describe('A single turn', () => {
     const params = servers[0]!.requests('thread/start')[0]!.params
     expect(params.sandbox).toBe('danger-full-access')
     expect(params.config.shell_environment_policy).toEqual({ set: { TMPPREFIX: '/work/.vis-tmp/zsh' } })
+    expect(params.config.web_search).toBe('live')
   })
   it.each([
     { model: 'model-a', effort: 'xhigh', serviceTier: null },

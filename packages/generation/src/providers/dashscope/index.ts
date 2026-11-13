@@ -57,13 +57,16 @@ function validateInputs(kind: MediaKind, id: string, inputs: ProviderInputMetada
   const frames = inputs.filter(input => input.frameRole)
   const references = inputs.filter(input => !input.frameRole)
   if (frames.length && (model.mode === 'text' || model.mode === 'image')) throw new ProviderError('rejected', 'This DashScope model does not support frames', 'generation.provider_input_unsupported')
-  if (frames.length && (frames.filter(input => input.frameRole === 'first').length !== 1 || frames.filter(input => input.frameRole === 'last').length > (model.mode === 'frames' ? 1 : 0))) throw new ProviderError('rejected', 'DashScope frame roles do not match the model', 'generation.provider_input_unsupported')
+  if (frames.length && (frames.filter(input => input.frameRole === 'first').length !== 1 || frames.filter(input => input.frameRole === 'last').length > (model.mode === 'frames' || model.mode === 'unified' ? 1 : 0))) throw new ProviderError('rejected', 'DashScope frame roles do not match the model', 'generation.provider_input_unsupported')
   if (model.mode === 'frames') {
     if (frames.length ? references.length > 0 : references.length !== 1) throw new ProviderError('rejected', 'DashScope image-to-video needs a first frame, with an optional last frame', 'generation.provider_input_unsupported')
+  } else if (model.mode === 'unified' && frames.length && references.length) {
+    throw new ProviderError('rejected', 'Wan3.0 cannot combine frames with reference images', 'generation.provider_input_unsupported')
   } else if (references.length > model.references || (model.mode === 'reference' && !references.length)) {
     throw new ProviderError('rejected', 'DashScope reference count does not match the model', 'generation.provider_input_unsupported')
   }
-  if (model.mode === 'image' && params.size === '4K' && inputs.length) throw new ProviderError('rejected', 'DashScope 4K output requires text-to-image without references', 'generation.provider_input_unsupported')
+  const customPixels = typeof params.size === 'string' && params.size.includes('*') ? params.size.split('*').map(Number).reduce((width, height) => width * height) : undefined
+  if (model.mode === 'image' && inputs.length && (params.size === '4K' || (customPixels !== undefined && customPixels > 2048 ** 2))) throw new ProviderError('rejected', 'DashScope output above 2K requires text-to-image without references', 'generation.provider_input_unsupported')
 }
 
 export function createDashScopeProvider(opts: Options): ProviderAdapter {
@@ -134,7 +137,9 @@ export function createDashScopeProvider(opts: Options): ProviderAdapter {
     const req = prepareRequest(original)
     const model = dashscopeModel(req.kind, req.model)
     if (!(req.kind === 'image' ? opts.imageModels : opts.videoModels).some(model => model.id === req.model)) throw new ProviderError('rejected', 'DashScope model is not configured', 'generation.provider_input_unsupported')
-    if (!req.prompt.trim() || Array.from(req.prompt).length > 5000) throw new ProviderError('rejected', 'DashScope prompt must contain 1 to 5000 characters', 'generation.provider_input_unsupported')
+    // Wan3.0 documents 20,000 characters and truncates beyond it; earlier models stop at 5000
+    const promptLimit = model.mode === 'unified' ? 20_000 : 5000
+    if (!req.prompt.trim() || Array.from(req.prompt).length > promptLimit) throw new ProviderError('rejected', `DashScope prompt must contain 1 to ${promptLimit} characters`, 'generation.provider_input_unsupported')
     const parsed = model.schema.safeParse(req.params)
     if (!parsed.success) throw new ProviderError('rejected', 'Invalid DashScope parameters', 'generation.provider_input_unsupported')
     const params: Record<string, unknown> = parsed.data
@@ -165,7 +170,8 @@ export function createDashScopeProvider(opts: Options): ProviderAdapter {
       body: { model: req.model, input: { messages: [{ role: 'user', content: [...images.map(({ url }) => ({ image: url })), { text: req.prompt }] }] }, parameters: params },
     }
     const { n: _n, negative_prompt, ...parameters } = params
-    if (req.frames) delete parameters.ratio
+    // Wan2.7 frame models take the ratio from the frame; Wan3.0 accepts one with frames (adaptive by default)
+    if (req.frames && model.mode !== 'unified') delete parameters.ratio
     return {
       path: endpoint('video'),
       body: { model: req.model, input: { prompt: req.prompt, ...(negative_prompt !== undefined ? { negative_prompt } : {}), ...(images.length ? { media: images } : {}) }, parameters },
@@ -242,7 +248,7 @@ export function createDashScopeProvider(opts: Options): ProviderAdapter {
     operationsFor: (kind, id) => DASHSCOPE_MODELS.some(model => model.kind === kind && model.id === id) ? ['generate'] : [],
     frameModesFor: (kind, id) => {
       const mode = DASHSCOPE_MODELS.find(model => model.kind === kind && model.id === id)?.mode
-      return mode === 'frames' ? ['first', 'first_last'] : mode === 'reference' ? ['first'] : []
+      return mode === 'frames' || mode === 'unified' ? ['first', 'first_last'] : mode === 'reference' ? ['first'] : []
     },
     referenceImageLimitFor: (kind, id) => DASHSCOPE_MODELS.find(model => model.kind === kind && model.id === id)?.references ?? 0,
     validateInputs, prepareRequest,
@@ -280,7 +286,10 @@ export function createDashScopeProvider(opts: Options): ProviderAdapter {
         }
       }
       if (!urls.length) throw new ProviderError('transient', 'DashScope completed task has no confirmed outputs')
-      return { state: 'succeeded', outputs: urls.map((url, outputIndex) => ({ outputIndex, ref: safeUrl(url, secret) })) }
+      const outputs = urls.map((url, outputIndex) => ({ outputIndex, ref: safeUrl(url, secret) }))
+      // Wan video tasks report the prompt-extended text they actually rendered (RFC 0039 §2). The runner trims and caps it.
+      const revised = kind === 'video' && typeof output.actual_prompt === 'string' ? redact(output.actual_prompt, secret).trim() : ''
+      return { state: 'succeeded', outputs, ...(revised ? { revisedPrompt: revised } : {}) }
     },
     async cancel(externalTaskId, options) {
       const { id } = parseId(externalTaskId)

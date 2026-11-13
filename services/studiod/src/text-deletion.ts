@@ -1,31 +1,12 @@
+import { textDeletionApprovals as approvals, currentTextDeletion as current, updateTextDeletion as update, refreshReviews, refreshTextDeletionApprovals } from './reviews'
+export { refreshTextDeletionApprovals } from './reviews'
 import { applyOps } from '@vis/canvas-core'
 import { newId, VisError } from '@vis/domain'
 import { ApprovalPayload, type ApprovalDecision, type MethodParams } from '@vis/protocol'
-import { and, appendEvent, eq, isNull, runIdempotent, spaceSchema as s, type SpaceDb, type SpaceTx } from '@vis/storage'
+import { and, appendEvent, eq, isNull, runIdempotent, spaceSchema as s, type SpaceDb } from '@vis/storage'
 import { readSessionSummary, upsertItem } from '@vis/workbench-core'
-import { refreshTextProposals } from './text-proposals'
 
 const TTL_MS = 10 * 60_000
-const approvals = (tx: SpaceTx) => tx.select().from(s.transcriptEntries).where(eq(s.transcriptEntries.kind, 'approval')).all()
-function current(tx: SpaceTx, target: NonNullable<ApprovalPayload['textDelete']>) {
-  return tx.select().from(s.slots).innerJoin(s.nodes, eq(s.nodes.id, s.slots.nodeId))
-    .where(and(eq(s.slots.id, target.slotId), eq(s.nodes.id, target.nodeId), eq(s.slots.currentRevision, target.revision), isNull(s.slots.deletedAt), isNull(s.nodes.deletedAt))).get()
-}
-function update(tx: SpaceTx, row: typeof s.transcriptEntries.$inferSelect, payload: ApprovalPayload, at: number) {
-  upsertItem(tx, { sessionId: row.sessionId, turnId: row.turnId, itemId: row.itemId, revision: row.revision + 1, kind: 'approval', payload }, at)
-  appendEvent(tx, { type: 'session.updated', entityType: 'session', entityId: row.sessionId, payload: readSessionSummary(tx, row.sessionId) }, at)
-}
-
-/** Text revision changes void approval immediately; restoring the old body never restores the permission. */
-export function refreshTextDeletionApprovals(tx: SpaceTx, at: number) {
-  for (const row of approvals(tx)) {
-    const parsed = ApprovalPayload.safeParse(row.payload)
-    if (!parsed.success || parsed.data.kind !== 'text_delete' || parsed.data.status !== 'pending') continue
-    const payload = parsed.data
-    if (!payload.textDelete || payload.textDelete.expiresAt <= at || !current(tx, payload.textDelete)) update(tx, row, { ...payload, status: 'expired' }, at)
-  }
-}
-
 export function createTextDeletionService(db: SpaceDb, now = Date.now) {
   let timer: ReturnType<typeof setTimeout> | undefined
   function schedule() {
@@ -71,8 +52,7 @@ export function createTextDeletionService(db: SpaceDb, now = Date.now) {
         update(tx, fresh, { ...payload, status, ...(status === 'expired' ? {} : { decision: params.decision as ApprovalDecision }) }, now())
         if (status === 'approved') {
           applyOps(tx, { kind: 'user' }, { requestId: params.requestId, ops: [{ op: 'node.delete', nodeId: target!.nodeId }] }, now())
-          refreshTextProposals(tx, now())
-          refreshTextDeletionApprovals(tx, now())
+          refreshReviews(tx, now())
         }
         return { status }
       }, now)

@@ -18,7 +18,13 @@ Read `packages/workbench/core/src/runtime-port.ts` and one existing adapter:
 | `packages/workbench/deepseek/src/` | ACP through dsh, with an overlay in `overlay.ts` |
 | `packages/workbench/claude/src/` | Injected Claude SDK `query`; currently restricted tools and no interactive approvals |
 
+For an ACP Agent, start with the shared runtime in `packages/workbench/core/src/acp/` and `createAcpRuntime`, exported by `@vis/workbench-core`. Supply an `AcpAgentProfile` for launch arguments and files, sandbox metadata, instruction channel, config option ids, native tool classification, transcript prefix, resume method and default effort. DeepSeek's `adapter.ts` is a profile example; keep Agent-specific overlays, tool argument interpretation and model defaults in the adapter package. The shared runtime owns process lifecycle, admission, approvals, translation and model probing. Use the `prompt` instruction channel when launch cannot carry always-loaded instructions: it prepends shared instructions on every turn, including resumed turns, and denies mutating permissions in the read-only fallback.
+
 For an unfamiliar Agent, first establish acceptance, resume, interruption and approval semantics with a scripted transport. Do not launch a real Agent for tests or development. Real-Agent acceptance requires the maintainer's explicit approval, an isolated data directory and tight generation limits. For OpenCode, read the [RFC 0028 research appendix](../rfc/0028-agent-and-provider-registries.md#appendix-opencode-notes-for-a-future-contributor-2026-11-03-docs-only); its unverified notes are not an implementation contract.
+
+An ACP profile's `classifyTool` must set `visTool: true` only when the Agent's native metadata proves the tool belongs to the vis MCP server. The runtime does not infer identity from a display title: some Agents fill it from a tool argument's description. Verified vis confirmations bypass approvals only for non-mutating classifications; unknown tools stay `other` without `visTool`.
+
+New ACP profiles must leave `readOnlyEnforcedByAgent` unset unless the Agent provably disables mutating tools itself in read-only fallback; otherwise, the runtime permits only verified non-mutating vis confirmations and proven `read` permissions, and denies all other requests before approval.
 
 ## 2. Create the package and descriptor
 

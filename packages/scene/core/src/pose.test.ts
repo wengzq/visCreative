@@ -2,7 +2,7 @@ import type { Quat, Vec3 } from '@vis/protocol'
 import { expect, it } from 'vitest'
 import { Quaternion, Vector3 } from 'three'
 import { HUMAN_BODY } from './descriptors'
-import { clampJointRotation, jointEuler, jointQuaternion, mirrorPose, pairedJoints, presetPose, reflectJointRotation, resetJointPose } from './pose'
+import { clampJointRotation, jointEuler, jointQuaternion, mirrorPose, pairedJoints, presetPose, reflectJointRotation, resetJointPose, setJointAxis } from './pose'
 import type { BodyDescriptor } from './types'
 
 const sameRotation = (a: Quat, b: Quat) => expect(new Quaternion(...a).angleTo(new Quaternion(...b))).toBeCloseTo(0, 6)
@@ -97,4 +97,20 @@ it('derives pairs for other bodies and leaves a non-human body without pairs unc
   sameRotation(resetJointPose(body, pose, 'coil').coil!, body.poses[0]!.joints.coil!)
   const fins = { ...body, joints: [{ ...root, id: 'frontLeftFin' }, { ...root, id: 'frontRightFin' }] }
   expect(pairedJoints(fins).map(pair => [pair.left.id, pair.right.id])).toEqual([['frontLeftFin', 'frontRightFin']])
+})
+
+it('sets one joint axis clamped to its limit before converting, so Y past 90 degrees never flips X and Z', () => {
+  const radians = (degrees: Vec3) => degrees.map(value => value * Math.PI / 180) as Vec3
+  const degrees = (rotation: Quat) => jointEuler(rotation).map(value => value * 180 / Math.PI)
+  const elbow = HUMAN_BODY.joints.find(joint => joint.id === 'leftElbow')!
+  const bent = jointQuaternion(radians([-40, 50, 0]))
+  degrees(setJointAxis(elbow, bent, 1, 95 * Math.PI / 180)).forEach((value, axis) => expect(value).toBeCloseTo([-40, 80, 0][axis]!))
+  degrees(setJointAxis(elbow, bent, 0, -200 * Math.PI / 180)).forEach((value, axis) => expect(value).toBeCloseTo([-150, 50, 0][axis]!))
+  const neck = HUMAN_BODY.joints.find(joint => joint.id === 'neck')!
+  degrees(setJointAxis(neck, jointQuaternion(radians([10, 55, -5])), 1, 100 * Math.PI / 180)).forEach((value, axis) => expect(value).toBeCloseTo([10, 55, -5][axis]!))
+  // Within the limits it matches converting the edited angles and clamping, which is what the inspector did before.
+  const edited = jointEuler(bent)
+  edited[0] = -1
+  sameRotation(setJointAxis(elbow, bent, 0, -1), clampJointRotation(elbow, jointQuaternion(edited)))
+  sameRotation(setJointAxis(shoulder, [0, 0, 0, 0], 2, 0.5), jointQuaternion([0, 0, 0.5]))
 })

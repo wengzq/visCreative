@@ -74,3 +74,19 @@ it('persists a completed failure and its reason across restart and cleanup witho
     expect(call).toHaveBeenCalledTimes(1)
   } finally { await rm(dataDir, { recursive: true, force: true }) }
 })
+
+
+it('retains staged bytes and recovery records when the job outcome is unknown', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'vis-sync-unknown-'))
+  const call = vi.fn(async () => [{ data: new Uint8Array([1, 2]), mime: 'image/png' }])
+  const options = { dataDir, providerId: 'tiny', maxBytes: 10, mimeTypes: ['image/png'], call }
+  try {
+    const adapter = stageSyncOutput(options)
+    const submitted = await adapter.submit(request, { idempotencyKey: 'recoverable' })
+    await adapter.cleanup!({ idempotencyKey: 'recoverable', status: 'unknown' })
+    const restarted = stageSyncOutput(options)
+    await expect(restarted.download({ ref: submitted.externalTaskId, outputIndex: 0 })).resolves.toEqual({ data: new Uint8Array([1, 2]), mime: 'image/png' })
+    expect(await restarted.submit(request, { idempotencyKey: 'recoverable' })).toEqual(submitted)
+    expect(call).toHaveBeenCalledTimes(1)
+  } finally { await rm(dataDir, { recursive: true, force: true }) }
+})

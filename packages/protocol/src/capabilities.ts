@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import { METHODS, isMethodName, type Caller, type MethodName, type MethodResult, type MethodSpec } from './methods'
 import type { CapabilitySummary } from './runtime'
+import { CanvasOp, canvas } from './canvas'
+
+const agentCanvasOps = CanvasOp.options.filter(op => op.shape.op.value !== 'node.setPrompt')
+const agentCanvasApply = canvas.apply.params.extend({
+  ops: z.array(z.discriminatedUnion('op', [agentCanvasOps[0]!, ...agentCanvasOps.slice(1)])).min(1).max(200),
+})
 
 export function commandOf(method: MethodName): readonly string[] {
   const spec: MethodSpec = METHODS[method]
@@ -32,7 +38,7 @@ export function describeCapability(method: string, caller: Caller): MethodResult
     command: commandOf(method).join(' '),
     summary: spec.summary,
     description: spec.description ?? spec.summary,
-    params: z.toJSONSchema(spec.params, { io: 'input', unrepresentable: 'any' }),
+    params: z.toJSONSchema(method === 'canvas.apply' && caller === 'agent' ? agentCanvasApply : spec.params, { io: 'input', unrepresentable: 'any' }),
     result: z.toJSONSchema(spec.result, { io: 'output', unrepresentable: 'any' }),
   }
 }

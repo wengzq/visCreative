@@ -1,18 +1,9 @@
+import { manuscript, refreshReviews } from './reviews'
+export { refreshTextProposals } from './reviews'
 import { applyOps } from '@vis/canvas-core'
 import { ulid, VisError } from '@vis/domain'
 import { applyTextEdits, textEditAnchor, type MethodParams, type TextProposal, type TextProposalEdit } from '@vis/protocol'
 import { and, appendEvent, asc, eq, isNull, runIdempotent, spaceSchema as s, type SpaceDb, type SpaceTx } from '@vis/storage'
-
-function manuscript(tx: SpaceTx, slotId: string) {
-  const row = tx.select({ slot: s.slots, node: s.nodes, body: s.slotRevisions.textBody }).from(s.slots)
-    .innerJoin(s.nodes, eq(s.nodes.id, s.slots.nodeId))
-    .leftJoin(s.slotRevisions, and(eq(s.slotRevisions.slotId, s.slots.id), eq(s.slotRevisions.revision, s.slots.currentRevision)))
-    .where(and(eq(s.slots.id, slotId), isNull(s.slots.deletedAt), isNull(s.nodes.deletedAt))).get()
-  if (!row || row.node.kind !== 'text' || row.node.format === 'code' || row.slot.slotKey !== 'main') {
-    throw VisError.of('invalid_params', 'writing.manuscript_required', {}, 'A live non-code main text slot is required')
-  }
-  return { ...row, body: row.body ?? '' }
-}
 
 function changed(tx: SpaceTx, row: typeof s.textProposals.$inferSelect, at: number) {
   appendEvent(tx, { type: 'text.proposalChanged', entityType: 'textProposal', entityId: row.id, payload: { proposalId: row.id, slotId: row.slotId } }, at)
@@ -20,24 +11,6 @@ function changed(tx: SpaceTx, row: typeof s.textProposals.$inferSelect, at: numb
 function view(tx: SpaceTx, row: typeof s.textProposals.$inferSelect): TextProposal {
   const nodeId = tx.select({ nodeId: s.slots.nodeId }).from(s.slots).where(eq(s.slots.id, row.slotId)).get()!.nodeId
   return { proposalId: row.id, nodeId, slotId: row.slotId, baseRevision: row.baseRevision, sessionId: row.sessionId, summary: row.summary, edits: row.edits, status: row.status, createdAt: row.createdAt }
-}
-
-/** Called inside every canvas mutation, including undo, so a stale edit never becomes applicable again. */
-export function refreshTextProposals(tx: SpaceTx, at: number) {
-  for (const row of tx.select().from(s.textProposals).where(eq(s.textProposals.status, 'open')).all()) {
-    let body: string | null = null
-    try { body = manuscript(tx, row.slotId).body } catch { /* Deleted or converted manuscripts invalidate pending anchors. */ }
-    let dirty = false
-    const edits = row.edits.map(edit => {
-      if (edit.status !== 'pending' || (body !== null && textEditAnchor(body, edit))) return edit
-      dirty = true
-      return { ...edit, status: 'stale' as const }
-    })
-    if (dirty) {
-      tx.update(s.textProposals).set({ edits }).where(eq(s.textProposals.id, row.id)).run()
-      changed(tx, row, at)
-    }
-  }
 }
 
 export function createTextProposalService(db: SpaceDb, now = Date.now) {
@@ -91,7 +64,7 @@ export function createTextProposalService(db: SpaceDb, now = Date.now) {
           changed(tx, row, now())
         }
         if (params.action === 'accept') applyOps(tx, { kind: 'user' }, { requestId: params.requestId, ops: [{ op: 'slot.setText', slotId: params.slotId, expectedRevision: params.expectedRevision, body: params.body }] }, now())
-        refreshTextProposals(tx, now())
+        refreshReviews(tx, now())
         return { proposals: [...proposals.keys()].map(id => view(tx, tx.select().from(s.textProposals).where(eq(s.textProposals.id, id)).get()!)),
           ...(params.action === 'accept' ? { revision: params.expectedRevision + 1 } : {}) }
       }, now)

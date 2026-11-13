@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,7 @@ import { openStudiodLink, type StudiodLink } from '../src/host/studiod-link'
 import { chromePath, removeTempDir } from './platform'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
+const screenshots = join(process.platform === 'win32' ? tmpdir() : '/tmp', 'vis-at-refs')
 const chrome = chromePath()
 const documentEnd = process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End'
 const ready = existsSync(chrome) && existsSync(join(root, 'apps/web/dist/client/index.html'))
@@ -114,7 +115,7 @@ describe.skipIf(!ready)('Numbered prompt references and parameters', () => {
     expect(await page.getByRole('button', { name: 'Insert Image', exact: true }).isDisabled()).toBe(true)
     await prompt().fill('@')
     await page.getByRole('listbox', { name: 'Insert reference', exact: true }).waitFor()
-    expect(await page.getByRole('option').allTextContents()).toEqual(['Image 1', 'Image 2'])
+    expect(await page.getByRole('group', { name: 'Attached references', exact: true }).getByRole('option').evaluateAll(options => options.map(option => option.getAttribute('aria-label')))).toEqual(['Image 1', 'Image 2'])
     await prompt().press('Escape')
     for (const id of [idMap.text, idMap.empty]) {
       await prompt().fill(promptRef(id))
@@ -159,6 +160,56 @@ describe.skipIf(!ready)('Numbered prompt references and parameters', () => {
     await expect.poll(storedPrompt).toEqual({ type: 'text', body: `Before ${promptRef(sourceId)} after\nLong prompt` })
   })
 
+  it.each(['image', 'video'] as const)('inserts attached image and video references in the %s prompt even when their sources are hidden', async kind => {
+    const { idMap } = await apply([
+      { op: 'node.delete', nodeId: targetId },
+      { op: 'node.create', tempId: 'draft', kind, title: 'Reference draft', x: 300, y: 0, w: 320, h: 240, prompt: 'Use ' },
+    ])
+    targetId = idMap.draft
+    await page.getByText('Reference draft', { exact: true }).click()
+    await page.getByRole('button', { name: 'Add reference', exact: true }).click()
+    await page.locator(`.react-flow__node[data-id="${sourceId}"] .vis-node-label`).click()
+    await expect.poll(async () => (await nodes()).find(node => node.nodeId === targetId)?.inputs).toEqual([sourceId])
+    await page.getByLabel('Upload references', { exact: true }).and(page.locator('input')).setInputFiles(join(root, 'packages/generation/src/providers/mock/fixtures/sample.mp4'))
+    await expect.poll(async () => (await nodes()).find(node => node.nodeId === targetId)?.inputs?.length).toBe(2)
+    const videoId = (await nodes()).find(node => node.nodeId === targetId)!.inputs![1]!
+    await prompt().click()
+    await prompt().press(documentEnd)
+    await prompt().press('@')
+    await page.getByRole('listbox', { name: 'Insert reference', exact: true }).waitFor()
+    expect(await page.getByRole('group', { name: 'Attached references', exact: true }).getByRole('option').evaluateAll(options => options.map(option => option.getAttribute('aria-label')))).toEqual(['Image 1', 'Video 1'])
+    await prompt().press('Escape')
+    await prompt().fill('Use ')
+    await page.getByRole('button', { name: 'Parameter summary', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Generation parameters', exact: true }).press('Escape')
+    await apply([
+      { op: 'node.setMeta', nodeId: sourceId, purpose: 'working' },
+      { op: 'node.setMeta', nodeId: videoId, purpose: 'working' },
+    ])
+    await expect.poll(() => page.locator(`.react-flow__node[data-id="${sourceId}"]`).count()).toBe(0)
+    await expect.poll(() => page.locator(`.react-flow__node[data-id="${videoId}"]`).count()).toBe(0)
+    await expect.poll(() => page.getByRole('button', { name: 'Insert Video 1', exact: true }).isEnabled()).toBe(true)
+    await prompt().click()
+    await prompt().press(documentEnd)
+    await prompt().press('@')
+    mkdirSync(screenshots, { recursive: true })
+    await page.getByRole('option', { name: 'Image 1', exact: true }).waitFor()
+    await page.screenshot({ path: join(screenshots, `${kind}-choices.png`), animations: 'disabled' })
+    await page.getByRole('option', { name: 'Image 1', exact: true }).click()
+    expect(await marker().count()).toBe(1)
+    await prompt().pressSequentially(' and @')
+    await page.getByRole('option', { name: 'Video 1', exact: true }).click()
+    expect(await prompt().getByText('Video 1', { exact: true }).count()).toBe(1)
+    expect(await prompt().textContent()).toBe('Use Image 1 and Video 1')
+    await page.getByRole('button', { name: 'Parameter summary', exact: true }).click()
+    await expect.poll(storedPrompt).toEqual({ type: 'text', body: `Use ${promptRef(sourceId)} and ${promptRef(videoId)}` })
+    await page.getByRole('dialog', { name: 'Generation parameters', exact: true }).press('Escape')
+    await page.screenshot({ path: join(screenshots, `${kind}-chips.png`), animations: 'disabled' })
+    await page.reload()
+    await page.getByText('Reference draft', { exact: true }).click()
+    await expect.poll(() => prompt().textContent()).toBe('Use Image 1 and Video 1')
+  })
+
   it('updates the schema-driven summary and retains the selected value after reopening', async () => {
     const summary = page.getByRole('button', { name: 'Parameter summary', exact: true })
     await expect.poll(() => summary.innerText()).toContain('Count 1')
@@ -170,6 +221,21 @@ describe.skipIf(!ready)('Numbered prompt references and parameters', () => {
     await params.press('Escape')
     await summary.click()
     expect(await params.getByRole('group', { name: 'Count', exact: true }).getByRole('button', { name: '3', exact: true }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('attaches a video before choosing a capable model and shows unsupported feedback in the panel', async () => {
+    const space = studiod.spaces.get(projectSpaceId)!
+    const staged = await space.assets.stageFile(join(root, 'packages/generation/src/providers/mock/fixtures/sample.mp4'))
+    const asset = space.assets.registerVersion(space.db, { staged, kind: 'video', mime: 'video/mp4', origin: 'import', width: 128, height: 128, durationMs: 1000 })
+    const { idMap } = await apply([{ op: 'node.create', tempId: 'clip', kind: 'video', title: 'Video picker fixture', x: 0, y: 440, w: 180, h: 160, content: { assetVersionId: asset.assetVersionId } }])
+    await page.getByText('Video picker fixture', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Add reference', exact: true }).click()
+    await page.getByText('Video picker fixture', { exact: true }).click()
+    await expect.poll(async () => (await nodes()).find(node => node.nodeId === targetId)?.inputs).toEqual([sourceId, otherId, idMap.clip])
+    await page.getByText('The selected model does not support video references. Remove the video or choose a model that does.', { exact: true }).waitFor()
+    expect(await page.getByRole('button', { name: 'Generate', exact: true }).isDisabled()).toBe(true)
+    await page.getByRole('button', { name: `Remove reference ${idMap.clip}`, exact: true }).click()
+    await expect.poll(() => page.getByRole('button', { name: 'Generate', exact: true }).isEnabled()).toBe(true)
   })
 
   it('preserves composition, plain-text paste and multiline marker round trips', async () => {

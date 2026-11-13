@@ -23,6 +23,15 @@ export function textSummary(body: string, limit = 160): string {
   return characters.length > limit ? `${characters.slice(0, limit).join('')}…` : text
 }
 
+/** Zoomed-out cards show a title and a summary: the node title, else a leading Markdown heading, which then leaves the summary. */
+export function textOverview(body: string, title?: string | null): { title: string; summary: string } {
+  if (title?.trim()) return { title: title.trim(), summary: textSummary(body) }
+  // A closing # run only counts after whitespace (CommonMark), so '# Learn C#' keeps its last character.
+  const heading = /^\s*#{1,6}[ \t]+([^\n]*?)(?:[ \t]+#+)?[ \t]*(?:\n|$)/.exec(body)
+  if (!heading) return { title: '', summary: textSummary(body) }
+  return { title: textSummary(heading[1]!, 60), summary: textSummary(body.slice(heading[0].length)) }
+}
+
 /** Read only a bounded prefix; complete Markdown blocks retain their formatting on long cards. */
 export function markdownOpening(body: string, limit = 2400): string {
   if (body.length <= limit) return body

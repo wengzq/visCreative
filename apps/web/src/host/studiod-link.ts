@@ -17,6 +17,8 @@ export type StudiodLink = {
   call(method: string, params?: unknown): Promise<any>
   close(): void
   readonly closed: boolean
+  /** What studiod answered to the handshake; a different protocolVersion means it only accepts runtime.shutdown (RFC 0004) */
+  readonly server: { protocolVersion: number; studiodVersion: string }
 }
 
 /**
@@ -82,8 +84,9 @@ export async function openStudiodLink(opts: {
     pending.set(id, { resolve, reject })
     write(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
   })
+  let server: StudiodLink['server']
   try {
-    await call('runtime.hello', { protocolVersion: PROTOCOL_VERSION, credential: { kind: 'ui', token } })
+    server = await call('runtime.hello', { protocolVersion: PROTOCOL_VERSION, credential: { kind: 'ui', token } })
   } catch (error) {
     socket.destroy()
     throw error
@@ -93,5 +96,6 @@ export async function openStudiodLink(opts: {
     call,
     close: () => socket.destroy(),
     get closed() { return closed },
+    server,
   }
 }

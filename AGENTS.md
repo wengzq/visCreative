@@ -61,8 +61,8 @@ pnpm dev:studiod && pnpm dev:web         # run locally; data lives in ~/.vis-dev
 ## Hard rules
 
 **Security (non-negotiable)**
-- Provider API keys live only in the system credential store: macOS Keychain or Windows Credential Manager. On macOS, write through stdin to `security -i`, read with `security find-generic-password -s vis-creative.provider -a <providerId> -w`. On Windows, use WinRT `PasswordVault` through `powershell.exe -NoProfile -NonInteractive -Command -`, with both script and secret through stdin, resource `vis-creative.provider`, userName = providerId; discard the error stream. A key must never reach a database, config file, log, event, error message, or any agent-visible output.
-- Never read or print the real `vis-creative.provider` credential entries. Tests use only the fake `vis-creative.provider.test` entry and delete it in `finally`.
+- Provider API keys and media hosting secrets live only in the system credential store: macOS Keychain or Windows Credential Manager. On macOS, write through stdin to `security -i`, read with `security find-generic-password -s vis-creative.provider -a <providerId> -w`. Hosting uses service `vis-creative.hosting` and account `tos` with the same commands. On Windows, use WinRT `PasswordVault` through `powershell.exe -NoProfile -NonInteractive -Command -`, with both script and secret through stdin, resource `vis-creative.provider` / `vis-creative.hosting`, userName = providerId / `tos`; discard the error stream. A key must never reach a database, config file, log, event, error message, or any agent-visible output.
+- Never read or print the real `vis-creative.provider` or `vis-creative.hosting` credential entries. Tests use only the fake `vis-creative.provider.test` / `vis-creative.hosting.test` entries and delete them in `finally`.
 - Never open credential files under `~/.dsh` or `~/.codex`. The app only launches dsh; it does not read or store `DEEPSEEK_API_KEY`, and must never ask users to paste it.
 - On macOS, the sandbox prevents agents from reading provider keys, studiod tokens or database files. Windows has no equivalent isolation in RFC 0022: agents run as the current user and can technically access these resources; the UI must disclose this before key configuration. Gateway permissions, environment filtering and approval rules remain in force. The web UI never executes agent-produced HTML (Markdown goes through react-markdown with raw HTML disabled).
 - Permissions are enforced in the gateway by caller and work-item relationships, never by prompt wording.
@@ -74,6 +74,12 @@ pnpm dev:studiod && pnpm dev:web         # run locally; data lives in ~/.vis-dev
 **Data**
 - SQLite is the source of truth. State changes happen in transactions and emit events; clients deduplicate by `seq`.
 - Content edits carry `expectedRevision` (read before write). A work item's `revision` also bumps when derived fields change, so the UI rereads and retries once for state transitions and pin/title edits.
+
+**Public repository (RFC 0042)**
+- Everything written in the repository and on GitHub is public and permanent: code, docs, comments, fixtures, file names, commit messages, issues, pull requests and review comments. Editing text later does not remove it from history.
+- No internal company services, repositories, tools, hosts, people, accounts or project ids. Examples use placeholders (`<project dir>`, `me@example.com`). Machine-specific values live in local config, never in the repository.
+- `pnpm check:privacy` (part of `pnpm check`) must pass; install the hooks with `git config core.hooksPath scripts/hooks`. A public value that trips a rule gets `privacy-allow: <reason>` on its line or the line before.
+- The `public` remote only receives snapshots from `scripts/release-public.mjs`, which uses a noreply identity. Never push archive branches there, and never run it with `--push` or change repository visibility without the maintainer's explicit request.
 
 ## Work items and multi-agent (RFC 0009 + 0010 in brief)
 
@@ -91,6 +97,7 @@ pnpm dev:studiod && pnpm dev:web         # run locally; data lives in ~/.vis-dev
 - Default branch is `main`; work on feature branches with English commit messages.
 - Push or merge only when the maintainer asks.
 - Attribution trailer: Codex uses `Co-Authored-By: Codex <noreply@openai.com>`; Claude Code uses the trailer its environment provides.
+- Before touching an area, read its file in `docs/lessons/`; when you hit a non-obvious pitfall, add an entry there in the same change (symptom, cause, what to do instead, link).
 - When behavior or a contract changes, update the relevant RFC and both READMEs (English and Chinese) in the same change, including the roadmap.
 - When several workers run in parallel, scope is split by directory. If you need to touch another worker's files or the contract, explain why to the coordinator first instead of widening your own scope.
 - Screenshots (1600×1000, deviceScaleFactor 2) and scratch reports go under `/tmp`, not into the repo (`artifacts/` is gitignored).

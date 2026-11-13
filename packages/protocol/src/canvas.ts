@@ -5,6 +5,7 @@ import { SCRIPT_LIMITS, ScriptDoc, ScriptDocInput, ScriptOp, ShotLink } from './
 import { PrevizDoc } from './previz'
 import { SceneDoc } from './scene'
 import { ExportOf, TIMELINE_LIMITS, TimelineDoc } from './timeline'
+import { GenerationOperation } from './operations'
 
 export { CanvasNodeKind } from './common'
 
@@ -47,7 +48,10 @@ export const SlotVersionView = z.object({
   isCurrent: z.boolean(),
   source: z.object({
     jobId: Id,
+    operation: GenerationOperation.optional(),
     prompt: z.string().optional(),
+    usedPrompt: z.string().optional(),
+    usedPromptKind: z.enum(['revised', 'sent', 'resolved', 'authored']).optional(),
     provider: z.string(),
     model: z.string(),
     params: z.record(z.string(), z.unknown()),
@@ -159,6 +163,8 @@ export const CanvasOp = z.discriminatedUnion('op', [
   // 0016: only change provided fields; null category or title means clear.
   z.object({ op: z.literal('node.setMeta'), nodeId: Id, ...NodeMeta }),
   z.object({ op: z.literal('node.setGeneration'), nodeId: Id, generation: NodeGeneration.optional(), onlyIfUnset: z.boolean().optional() }),
+  // UI-only: revision zero requires an absent prompt slot.
+  z.object({ op: z.literal('node.setPrompt'), nodeId: Id, body: z.string(), expectedRevision: Revision }),
   z.object({ op: z.literal('node.delete'), nodeId: Id }),
   // Content edits require expectedRevision (read before write); layout edits do not.
   z.object({ op: z.literal('slot.setText'), slotId: Id, body: z.string(), expectedRevision: Revision }),

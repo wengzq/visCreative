@@ -104,7 +104,7 @@ describe.skipIf(!existsSync(chromePath()))('Scene cards and explicit panel links
     for (const mode of ['current', 'dangling']) {
       await mount(mode)
       await page.getByRole('combobox', { name: 'Choose scene', exact: true }).waitFor()
-      expect(await page.getByRole('button', { name: 'Update', exact: true }).count()).toBe(0)
+      await expect.poll(() => page.getByRole('button', { name: 'Update', exact: true }).count()).toBe(0)
       expect(await page.getByRole('img', { name: 'Scene frame', exact: true }).isVisible()).toBe(true)
       expect(await events()).toEqual([])
     }

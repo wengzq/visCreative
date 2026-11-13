@@ -16,6 +16,17 @@ const finalNodes = (nodes: NodeView[], ops: CanvasOp[]) => nodes.map(node => ({
 const overlap = (a: NodeView, b: NodeView) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
 describe('Organize canvas by category', () => {
+  it('Keep media aspect ratios when unifying widths', () => {
+    const nodes = [
+      node('portrait', { category: '人物', w: 213, h: 320 }),
+      node('square', { category: '人物' }),
+      node('note', { category: '人物', kind: 'text', w: 200, h: 120 }),
+    ]
+    const placed = finalNodes(nodes, arrangeCanvas(nodes).ops)
+    expect(placed.map(({ w, h }) => ({ w, h }))).toEqual([{ w: 320, h: 481 }, { w: 320, h: 320 }, { w: 320, h: 120 }])
+    expect(placed.every((item, index) => placed.every((other, otherIndex) => index === otherIndex || !overlap(item, other)))).toBe(true)
+  })
+
   it('Create category frames and unify group widths while preserving content and relationships in a single layout batch', () => {
     const nodes = [node('small', { category: '人物', w: 250 }), node('wide', { category: '人物', w: 400 }), node('uncategorized')]
     const before = structuredClone(nodes)

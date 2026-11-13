@@ -28,7 +28,8 @@ export type GenerationTarget = z.infer<typeof GenerationTarget>
 // Binding targets after the server fills in defaults
 export const ResolvedTarget = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('slot'), nodeId: Id, slotId: Id, expectedRevision: Revision }),
-  z.object({ kind: z.literal('new_node'), nearNodeId: Id.optional() }),
+  // nodeId and slotId name the placeholder created at submit (RFC 0047); bindings from before it have neither.
+  z.object({ kind: z.literal('new_node'), nearNodeId: Id.optional(), nodeId: Id.optional(), slotId: Id.optional() }),
 ])
 export type ResolvedTarget = z.infer<typeof ResolvedTarget>
 
@@ -44,7 +45,7 @@ export const JobOutput = z.object({
 })
 export type JobOutput = z.infer<typeof JobOutput>
 
-// Delivery destination for each output: an existing slot or a new node (near nearNodeId; has nodeId after delivery).
+// Delivery destination for each output: an existing slot or a new node near nearNodeId, whose nodeId and slotId exist from submit (RFC 0047).
 export const JobTarget = z.object({
   outputIndex: z.int().nonnegative(),
   kind: z.enum(['slot', 'new_node']),
@@ -132,7 +133,7 @@ export const generation = {
     result: JobView,
   },
   regenerate: {
-    params: z.object({ requestId: RequestId, jobId: Id }),
+    params: z.object({ requestId: RequestId, jobId: Id, targetNodeId: Id.optional() }),
     result: z.object({ jobId: Id, status: z.literal('queued'), bindings: z.array(z.object({ bindingId: Id, outputIndex: z.int().nonnegative(), target: ResolvedTarget })) }),
   },
   usage: {

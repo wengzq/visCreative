@@ -2,31 +2,32 @@ import type { MediaKind } from '@vis/protocol'
 import { z } from 'zod'
 import { ProviderError } from '../types'
 
-const imageMode = z.enum(['auto', 'first_frame', 'first_last', 'reference']).default('auto')
+const imageMode = z.enum(['auto', 'first_frame', 'first_last', 'reference']).default('auto').meta({ 'x-vis-label': { zh: '参考图片模式', en: 'Reference image mode' }, 'x-vis-options': { 'auto': { zh: '自动', en: 'Auto' }, 'first_frame': { zh: '首帧', en: 'First frame' }, 'first_last': { zh: '首尾帧', en: 'First and last frames' }, 'reference': { zh: '参考图', en: 'Reference images' } } })
 const video3 = z.strictObject({
-  duration: z.int().min(3).max(15).default(5),
-  aspect_ratio: z.enum(['16:9', '9:16', '1:1']).default('16:9'),
-  resolution: z.enum(['720p', '1080p', '4k']).default('720p'),
-  audio: z.enum(['native', 'off']).default('off'),
+  duration: z.int().min(3).max(15).default(5).meta({ 'x-vis-label': { zh: '时长', en: 'Duration' } }),
+  aspect_ratio: z.enum(['16:9', '9:16', '1:1']).default('16:9').meta({ 'x-vis-label': { zh: '画幅', en: 'Aspect ratio' } }),
+  resolution: z.enum(['720p', '1080p', '4k']).default('720p').meta({ 'x-vis-label': { zh: '分辨率', en: 'Resolution' } }),
+  audio: z.enum(['native', 'off']).default('off').meta({ 'x-vis-label': { zh: '生成音频', en: 'Generate audio' }, 'x-vis-options': { 'native': { zh: '原生音频', en: 'Native audio' }, 'off': { zh: '关闭', en: 'Off' } } }),
   // The current API documents true and accepts plain prompts; shot_type/multi_prompt belong to the legacy API.
-  multi_shot: z.boolean().default(true),
+  multi_shot: z.boolean().default(true).meta({ 'x-vis-label': { zh: '多镜头', en: 'Multiple shots' } }),
   imageMode,
-  n: z.literal(1).default(1),
+  n: z.literal(1).default(1).meta({ 'x-vis-label': { zh: '数量', en: 'Count' } }),
 })
 const video4 = z.strictObject({
-  duration: z.int().min(3).max(30).optional(),
-  aspect_ratio: z.enum(['21:9', '16:9', '9:16', '1:1']).default('16:9'),
-  resolution: z.enum(['720p', '1080p']).default('1080p'),
+  duration: z.int().min(3).max(30).optional().meta({ 'x-vis-label': { zh: '时长', en: 'Duration' } }),
+  aspect_ratio: z.enum(['21:9', '16:9', '9:16', '1:1']).default('16:9').meta({ 'x-vis-label': { zh: '画幅', en: 'Aspect ratio' } }),
+  resolution: z.enum(['720p', '1080p']).default('1080p').meta({ 'x-vis-label': { zh: '分辨率', en: 'Resolution' } }),
   imageMode,
-  n: z.literal(1).default(1),
+  n: z.literal(1).default(1).meta({ 'x-vis-label': { zh: '数量', en: 'Count' } }),
 })
 const image3 = z.strictObject({
-  resolution: z.enum(['1k', '2k', '4k']).default('1k'),
-  aspect_ratio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9', 'auto']).default('auto'),
-  n: z.int().min(1).max(4).default(1),
+  resolution: z.enum(['1k', '2k', '4k']).default('1k').meta({ 'x-vis-label': { zh: '分辨率', en: 'Resolution' } }),
+  aspect_ratio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9', 'auto']).default('auto').meta({ 'x-vis-label': { zh: '画幅', en: 'Aspect ratio' } }),
+  n: z.int().min(1).max(9).default(1).meta({ 'x-vis-label': { zh: '数量', en: 'Count' } }),
 })
 
-// Official docs checked 2026-11:
+// Official docs rechecked 2026-11-08: exposed scalar settings still match.
+// Image n is corrected to the documented 1–9 range; result_type stays single to keep the billed count explicit.
 // https://kling.ai/document-api/api/video/3-0-omni/text-to-video (api-DMdB1qIu.js)
 // https://kling.ai/document-api/api/video/3-0-omni/image-to-video (api-BY1CXeMH.js)
 // https://kling.ai/document-api/api/video/3-0-omni/video-omni (api-Bbpu4g7H.js)
@@ -43,7 +44,7 @@ export const KLING_MODELS = [
   { id: 'kling-3.0', label: 'Kling VIDEO 3.0', kind: 'video', schema: video3, references: 0, inputBytes: 50_000_000, promptLength: 3072 },
   { id: 'kling-3.0-omni', label: 'Kling VIDEO 3.0 Omni', kind: 'video', schema: video3, references: 7, inputBytes: 50_000_000, promptLength: 3072 },
   // A conservative 11,000-character cap also satisfies the documented mixed-language weighted limit.
-  { id: 'kling-4.0', label: 'Kling VIDEO 4.0', kind: 'video', schema: video4, references: 10, inputBytes: 30_000_000, promptLength: 11000 },
+  { id: 'kling-4.0', label: 'Kling VIDEO 4.0', kind: 'video', schema: video4, references: 10, inputBytes: 300_000_000, imageInputBytes: 30_000_000, promptLength: 11000 },
   { id: 'kling-v3-omni', label: 'Kling IMAGE 3.0 Omni', kind: 'image', schema: image3, references: 10, inputBytes: 10_000_000, promptLength: 2500 },
 ] as const
 

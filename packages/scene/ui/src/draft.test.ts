@@ -56,6 +56,22 @@ it('preserves edits made during a save and recognizes its own event before the r
   controller.dispose()
 })
 
+it('recognizes its own write when the gateway stamps view protection metadata', async () => {
+  const host = makeHost()
+  const wide = { id: 'wide', name: 'Wide', camera: { position: [0, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 }, aspectRatio: '16:9', still: null, createdBy: 'agent', userTouched: false } satisfies SceneDoc['views'][number]
+  const untouched: SceneDoc = { ...initial, views: [wide] }
+  host.node = node(untouched)
+  const controller = createSceneDraft(host)
+  host.commit = async (doc, revision) => {
+    controller.updateHost({ ...host, node: node({ ...doc, views: doc.views.map(view => ({ ...view, createdBy: 'agent', userTouched: true })) }, revision + 1) })
+    return 'ok'
+  }
+  controller.getSnapshot().edit({ ...untouched, views: [{ ...wide, name: 'Wide by author', createdBy: 'user', userTouched: false }] }, true)
+  await controller.getSnapshot().flush()
+  expect(controller.getSnapshot()).toMatchObject({ saveState: 'saved', conflict: null, doc: { views: [{ name: 'Wide by author', createdBy: 'agent', userTouched: true }] } })
+  controller.dispose()
+})
+
 it('recognizes its own write when the gateway stamps object protection metadata', async () => {
   const host = makeHost()
   const untouched = { ...initial, objects: [{ ...figure, userTouched: false, createdBy: 'agent' as const }] }
@@ -134,4 +150,89 @@ it('recognizes a successful event even if the commit reply is lost and cancels t
   controller.dispose()
   await vi.advanceTimersByTimeAsync(1000)
   expect(host.commit).not.toHaveBeenCalled()
+})
+
+it('records one undo step for the edits of a run and saves it through the debounce', async () => {
+  vi.useFakeTimers()
+  const host = makeHost()
+  host.commit = vi.fn(async () => 'ok' as const)
+  const controller = createSceneDraft(host)
+  for (const name of ['One', 'Two', 'Three']) controller.getSnapshot().edit(rename(controller.getSnapshot().doc, name), false, 'run-1')
+  await vi.advanceTimersByTimeAsync(500)
+  expect(host.commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ objects: [expect.objectContaining({ name: 'Three' })] }), 1)
+  controller.getSnapshot().undo()
+  expect(controller.getSnapshot()).toMatchObject({ canUndo: false, doc: { objects: [{ name: 'Figure' }] } })
+  controller.dispose()
+})
+
+it('ends a run on a different run, a run-less edit or an undo', () => {
+  const controller = createSceneDraft(makeHost())
+  const edit = (name: string, run?: string) => controller.getSnapshot().edit(rename(controller.getSnapshot().doc, name), false, run)
+  const names = () => controller.getSnapshot().doc.objects[0]!.name
+  edit('A1', 'a'); edit('A2', 'a')
+  edit('B1', 'b'); edit('B2', 'b')
+  edit('Typed')
+  edit('A3', 'a'); edit('A4', 'a')
+  controller.getSnapshot().undo()
+  expect(names()).toBe('Typed')
+  edit('A5', 'a')
+  edit('A6', 'a')
+  controller.getSnapshot().undo()
+  expect(names()).toBe('Typed')
+  controller.getSnapshot().undo()
+  expect(names()).toBe('B2')
+  controller.getSnapshot().undo()
+  expect(names()).toBe('A2')
+  controller.getSnapshot().undo()
+  expect(names()).toBe('Figure')
+  expect(controller.getSnapshot().canUndo).toBe(false)
+  controller.dispose()
+})
+
+it('keeps a run going through the echo of its own save', async () => {
+  const host = makeHost()
+  const controller = createSceneDraft(host)
+  host.commit = async (doc, revision) => {
+    controller.updateHost({ ...host, node: node({ ...doc, objects: doc.objects.map(object => ({ ...object, userTouched: true })) }, revision + 1) })
+    return 'ok'
+  }
+  controller.getSnapshot().edit(rename(initial, 'Held 1'), false, 'held')
+  expect(await controller.getSnapshot().flush()).toBe(true)
+  controller.getSnapshot().edit(rename(controller.getSnapshot().doc, 'Held 2'), false, 'held')
+  controller.getSnapshot().undo()
+  expect(controller.getSnapshot()).toMatchObject({ canUndo: false, doc: { objects: [{ name: 'Figure' }] } })
+  controller.dispose()
+})
+
+it('adopts an explicit accepted revision after flushing and preserves edits made during resolution', async () => {
+  const host = makeHost()
+  const controller = createSceneDraft(host)
+  controller.getSnapshot().edit(rename(initial, 'Saved edit'))
+  await controller.getSnapshot().flush()
+  const revision = controller.getSnapshot().baseRevision
+  const accepted = rename(controller.getSnapshot().doc, 'Accepted')
+  controller.updateHost({ ...host, node: node(accepted, revision + 1) })
+  controller.getSnapshot().adopt(accepted, revision + 1, revision)
+  expect(controller.getSnapshot()).toMatchObject({ saveState: 'saved', conflict: null, canUndo: false, doc: accepted })
+  controller.getSnapshot().edit(rename(accepted, 'New local edit'))
+  controller.getSnapshot().adopt(rename(accepted, 'Another acceptance'), revision + 2, revision + 1)
+  expect(controller.getSnapshot().doc.objects[0]!.name).toBe('New local edit')
+  controller.dispose()
+})
+
+it('ignores acceptance older than a remote revision already held by the draft', async () => {
+  const host = makeHost()
+  const controller = createSceneDraft(host)
+  controller.getSnapshot().edit(rename(initial, 'Local saved'))
+  await controller.getSnapshot().flush()
+  const revision = controller.getSnapshot().baseRevision
+  const newer = rename(initial, 'Newer remote')
+  controller.updateHost({ ...host, node: node(newer, revision + 2) })
+  // A delayed host render must not erase knowledge of the newer event either.
+  controller.updateHost({ ...host, node: node(rename(initial, 'Accepted'), revision + 1) })
+  controller.getSnapshot().adopt(rename(initial, 'Accepted'), revision + 1, revision)
+  expect(controller.getSnapshot().conflict).toMatchObject({ theirs: newer, revision: revision + 2 })
+  controller.getSnapshot().loadTheirs()
+  expect(controller.getSnapshot()).toMatchObject({ doc: newer, baseRevision: revision + 2 })
+  controller.dispose()
 })

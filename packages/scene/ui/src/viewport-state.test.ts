@@ -28,7 +28,7 @@ it('falls back to the first view when the initial view was deleted, including wi
   const node: NodeView = {
     nodeId: 'scene', kind: 'scene', x: 0, y: 0, w: 300, h: 200, z: 1, layoutRevision: 1,
     slots: [{ slotId: 'main', slotKey: 'main', revision: 1, contentType: 'scene', content: { type: 'scene', doc: {
-      version: 1, rev: 0, objects: [], views: [{ id: 'first', name: 'First', aspectRatio: '16:9', still: null, camera: { position: [3, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 } }],
+      version: 1, rev: 0, objects: [], views: [{ id: 'first', name: 'First', aspectRatio: '16:9', still: null, createdBy: 'user', userTouched: false, camera: { position: [3, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 } }],
     } } }],
   }
   const controller = createSceneViewportController({ initialViewId: 'deleted', node })
@@ -74,6 +74,12 @@ it.each([
 it('fits an exact camera viewport into a larger stage without stretching', () => {
   expect(cameraViewport(1000, 1000, 16 / 9)).toEqual({ x: 0, y: 218.75, width: 1000, height: 562.5 })
   expect(cameraViewport(1600, 900, 1)).toEqual({ x: 350, y: 0, width: 900, height: 900 })
+})
+
+it('rounds the short edge to an even pixel count for MP4 output, including ultrawide views', () => {
+  expect(captureDimensions('21:9', 1920, 2)).toEqual({ width: 1920, height: 822 })
+  expect(captureDimensions('16:9', 1920, 2)).toEqual({ width: 1920, height: 1080 })
+  expect(captureDimensions('9:16', 1920, 2)).toEqual({ width: 1080, height: 1920 })
 })
 
 it('recognizes software renderer strings while allowing real GPU backends', () => {

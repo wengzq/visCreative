@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultRenderLibs } from './index'
-import { readRenderLibrary } from './render-libs'
+import { canInstallRenderLibrary, readRenderLibrary } from './render-libs'
 
 // Windows needs Developer Mode or elevation for file symlinks, and junctions cannot point at files.
 const canSymlinkFiles = (() => {
@@ -31,13 +31,28 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 describe('render libraries', () => {
   it('defaults to the anime.js browser global bundle with its copyright and MIT notice', () => {
     const libs = defaultRenderLibs()
-    expect(Object.keys(libs)).toEqual(['anime.js', 'rough.js', 'three.module.js', 'three.core.js'])
+    expect(Object.keys(libs)).toEqual(['anime.js', 'rough.js', 'three.module.js', 'three.core.js', 'vis-scene.js'])
     expect(libs).not.toHaveProperty('gsap.js')
     const script = readFileSync(libs['anime.js']!, 'utf8')
     expect(script).toContain('@version v4.5.0')
     expect(script).toContain('@license MIT')
     expect(script).toContain('@copyright 2026 - Julian Garnier')
     expect(script).toContain('.anime={}')
+  })
+
+  it('builds the shared scene module on demand and reserves its name case insensitively', async () => {
+    const libs = defaultRenderLibs()
+    const scene = (await readRenderLibrary('vis-scene.js', libs))?.toString()
+    expect(scene).toContain('from "three"')
+    expect(scene).toContain('buildScene')
+    expect(scene).toContain('sampleScene')
+    expect(scene).toContain('applySceneFrame')
+    expect(scene).toContain('GLTFLoader')
+    for (const name of ['vis-scene.js', 'VIS-SCENE.js']) {
+      expect(canInstallRenderLibrary(name)).toBe(false)
+      writeFileSync(join(userLibDir, name), 'window.authorOverride = true')
+      expect(await readRenderLibrary(name, {}, userLibDir)).toBeUndefined()
+    }
   })
 
   it('reads arbitrary direct author scripts on each request without a cached directory listing', async () => {

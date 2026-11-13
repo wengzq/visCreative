@@ -10,6 +10,15 @@ import { describeError } from './errors'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const directories = ['packages/domain', 'packages/storage/src/idempotency.ts', 'packages/storage/src/work-messages.ts', 'services', 'packages/canvas/core', 'packages/generation', 'packages/assets', 'packages/library/core', 'packages/workbench/core', 'apps/web/src/host', 'packages/ui-kit/src/errors.ts']
 
+it.each([
+  ['generation.prompt_required', 'This operation requires a prompt', '这个操作需要填写提示词'],
+  ['generation.prompt_unsupported', 'This operation does not accept a prompt', '这个操作不接受提示词'],
+] as const)('localizes the operation prompt rule %s', (reason, en, zh) => {
+  const error = { data: { code: 'invalid_params', reason } }
+  expect(describeError(error, 'en')).toBe(en)
+  expect(describeError(error, 'zh-CN')).toBe(zh)
+})
+
 function sources(dir: string): string[] {
   if (dir.endsWith('.ts')) return [dir]
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -20,6 +29,44 @@ function sources(dir: string): string[] {
 }
 
 describe('Backend error dictionary (0018)', () => {
+  it.each(['zh-CN', 'en'] as const)('keeps canvas reason keys sorted in %s', locale => {
+    const keys = Object.keys(reasons[locale]).filter(key => key.startsWith('canvas.'))
+    expect(keys).toEqual([...keys].sort())
+  })
+
+  it.each([
+    ['generation.audio_reference_count', { max: 10 }],
+    ['generation.audio_reference_duration', { minMs: 2000, maxMs: 30000 }],
+    ['generation.audio_reference_total_duration', { totalMs: 30000 }],
+    ['generation.video_reference_count', { max: 7 }],
+    ['generation.video_reference_duration', { minMs: 1250, maxMs: 18750 }],
+    ['generation.video_reference_total_duration', { totalMs: 41250 }],
+    ['generation.video_reference_size', { maxBytes: 64 * 1024 ** 2 }],
+    ['generation.video_reference_fps', { minFps: 12, maxFps: 120 }],
+    ['generation.video_reference_dimensions', { minAspect: 0.25, maxAspect: 4, minPixels: 123456, maxPixels: 9876543 }],
+  ] as const)('renders model-specific limits for %s in both languages', (reason, params) => {
+    for (const locale of ['en', 'zh-CN'] as const) {
+      const changed = Object.fromEntries(Object.entries(params).map(([key, value]) => [key, value * 2]))
+      const original = reasons[locale][reason](params)
+      expect(original).not.toContain('undefined')
+      expect(original).not.toContain('NaN')
+      expect(reasons[locale][reason](changed)).not.toBe(original)
+      for (const key of Object.keys(params)) {
+        expect(reasons[locale][reason]({ ...params, [key]: changed[key]! })).not.toBe(original)
+      }
+    }
+  })
+
+  it('renders hosting test failure without error params or a result step', () => {
+    for (const locale of ['en', 'zh-CN'] as const) {
+      const message = reasons[locale]['hosting.test_failed']({})
+      expect(message).not.toContain('undefined')
+      for (const step of ['upload', 'read', 'delete', 'config']) {
+        expect(reasons[locale]['hosting.test_failed']({ step })).toBe(message)
+      }
+    }
+  })
+
   it('every reason has Chinese and English functions that render with parameters', () => {
     expect(Object.keys(reasons.en).sort()).toEqual(Object.keys(reasons['zh-CN']).sort())
     const params: Params = new Proxy({}, { get: () => 2 })
@@ -156,4 +203,14 @@ it('localizes version errors retained in background media-task text fields', () 
   const error = { code: 'media.ffmpeg_version_unsupported', message: 'Found ffmpeg 6.1.2. Timeline export requires ffmpeg 7 or newer. Update ffmpeg and restart visCreative to export.' }
   expect(describeError(error, 'zh-CN')).toBe('检测到 ffmpeg 6.1.2，剪辑导出需要 ffmpeg 7 或更高版本，请更新 ffmpeg 并重启 visCreative')
   expect(describeError(error, 'en')).toBe(error.message)
+})
+
+
+it.each(['hosting.upload_failed', 'hosting.store_failed'] as const)('renders generic localized hosting failure %s without parameters', reason => {
+  for (const locale of ['en', 'zh-CN'] as const) {
+    const message = reasons[locale][reason]({})
+    expect(message).not.toContain('undefined')
+    expect(message).not.toContain('testSK')
+    expect(reasons[locale][reason]({ detail: 'testSK', url: 'https://private.invalid', accessKeyId: 'testAK' })).toBe(message)
+  }
 })

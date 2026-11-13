@@ -1,6 +1,7 @@
 import { defineMessages } from '@vis/ui-kit'
 
 export const sceneMessages = defineMessages({
+  proposals: (count: string) => `${count} 条待审建议`,
   create: '新建 3D 场景',
   scene: '3D 场景',
   open: '打开场景',
@@ -8,7 +9,9 @@ export const sceneMessages = defineMessages({
   noStill: '此视图尚未保存画面',
   views: (count: string) => `${count} 个视图`,
   label: (name: string, count: string) => `${name} · ${count} 个视图`,
+  duration: (seconds: string) => `${seconds} 秒`,
 }, {
+  proposals: (count: string) => `${count} pending proposals`,
   create: 'New 3D scene',
   scene: '3D scene',
   open: 'Open scene',
@@ -16,4 +19,5 @@ export const sceneMessages = defineMessages({
   noStill: 'No saved frame for this view',
   views: (count: string) => `${count} views`,
   label: (name: string, count: string) => `${name} · ${count} views`,
+  duration: (seconds: string) => `${seconds} s`,
 })

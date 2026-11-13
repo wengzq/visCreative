@@ -132,7 +132,13 @@ export function createGeminiProvider(opts: Options): ProviderAdapter {
     const params = parsed.data
     const body = req.kind === 'image' ? {
       contents: [{ role: 'user', parts: [{ text: req.prompt }, ...images.map(image => ({ inlineData: { mimeType: image.mime, data: image.data } }))] }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], ...(params.aspect_ratio || params.image_size ? { imageConfig: { ...(params.aspect_ratio ? { aspectRatio: params.aspect_ratio } : {}), ...(params.image_size ? { imageSize: params.image_size } : {}) } } : {}) },
+      generationConfig: {
+        responseModalities: ['TEXT', 'IMAGE'],
+        ...(params.seed !== undefined ? { seed: params.seed } : {}),
+        ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
+        ...(params.top_p !== undefined ? { topP: params.top_p } : {}),
+        ...(params.aspect_ratio || params.image_size ? { imageConfig: { ...(params.aspect_ratio ? { aspectRatio: params.aspect_ratio } : {}), ...(params.image_size ? { imageSize: params.image_size } : {}) } } : {}),
+      },
     } : {
       model: req.model, background: true, store: true,
       input: [...images.map(image => ({ type: 'image', mime_type: image.mime, data: image.data })), { type: 'text', text: req.prompt }],

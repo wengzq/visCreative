@@ -4,7 +4,10 @@ export const OPENAI_MAX_INPUT_BYTES = 50_000_000
 export const OPENAI_MAX_OUTPUT_BYTES = 50_000_000
 export const OPENAI_REFERENCE_LIMIT = 4
 
-// Docs checked 2026-11: https://developers.openai.com/api/docs/guides/image-generation
+// Docs checked 2026-11-08: https://developers.openai.com/api/docs/guides/image-generation
+// https://developers.openai.com/api/reference/resources/images/methods/generate
+// Moderation is optional so existing requests retain their vendor default.
+// n follows the documented 1–10 range. GIF/SVG, streaming, and transport/user fields are not composer controls.
 // Keep the four-image multipart example limit; the reference's 16-image limit describes JSON image references.
 // Transparency on GPT Image 2 and resolutions above 2560x1440 are documented as preview/experimental.
 export const OPENAI_MODELS = [
@@ -28,13 +31,14 @@ function validSize(value: string) {
 }
 
 const base = z.object({
-  size: z.string().refine(validSize, 'Invalid image dimensions').default('auto')
-    .meta({ examples: ['auto', '1024x1024', '1536x1024', '1024x1536'] }),
-  quality: z.enum(['low', 'medium', 'high', 'auto']).default('auto'),
-  n: z.int().min(1).max(4).default(1),
-  output_format: z.enum(['png', 'jpeg', 'webp']).default('png'),
-  output_compression: z.int().min(0).max(100).optional(),
-  background: z.enum(['transparent', 'opaque', 'auto']).default('auto'),
+  size: z.string().refine(validSize, 'Invalid image dimensions').default('auto').meta({ 'x-vis-label': { zh: '尺寸', en: 'Size' }, 'x-vis-options': { auto: { zh: '自动', en: 'Auto' } }, examples: ['auto', '1024x1024', '1536x1024', '1024x1536'] }),
+  quality: z.enum(['low', 'medium', 'high', 'auto']).default('auto').meta({ 'x-vis-label': { zh: '画质', en: 'Quality' }, 'x-vis-options': { 'low': { zh: '低', en: 'Low' }, 'medium': { zh: '中', en: 'Medium' }, 'high': { zh: '高', en: 'High' }, 'auto': { zh: '自动', en: 'Auto' } } }),
+  n: z.int().min(1).max(10).default(1).meta({ 'x-vis-label': { zh: '数量', en: 'Count' } }),
+  output_format: z.enum(['png', 'jpeg', 'webp']).default('png').meta({ 'x-vis-label': { zh: '输出格式', en: 'Output format' } }),
+  output_compression: z.int().min(0).max(100).optional().meta({ 'x-vis-label': { zh: '输出压缩率', en: 'Output compression' } }),
+  background: z.enum(['transparent', 'opaque', 'auto']).default('auto').meta({ 'x-vis-label': { zh: '背景', en: 'Background' }, 'x-vis-options': { 'transparent': { zh: '透明', en: 'Transparent' }, 'opaque': { zh: '不透明', en: 'Opaque' }, 'auto': { zh: '自动', en: 'Auto' } } }),
+  moderation: z.enum(['auto', 'low']).optional().meta({ 'x-vis-label': { zh: '内容审核', en: 'Content moderation' }, 'x-vis-options': { 'auto': { zh: '自动', en: 'Auto' }, 'low': { zh: '宽松', en: 'Low' } } }),
+  complexity: z.enum(['low', 'medium', 'high']).optional().meta({ 'x-vis-label': { zh: '规划复杂度', en: 'Planning complexity' }, 'x-vis-options': { 'low': { zh: '低', en: 'Low' }, 'medium': { zh: '中', en: 'Medium' }, 'high': { zh: '高', en: 'High' } } }),
 }).strict()
 
 function constrain(schema: typeof base | ReturnType<typeof extended>) {
@@ -48,7 +52,9 @@ function constrain(schema: typeof base | ReturnType<typeof extended>) {
   })
 }
 
-function extended() { return base.extend({ quality: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'auto']).default('auto') }) }
+function extended() { return base.extend({
+  quality: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'auto']).default('auto').meta({ 'x-vis-label': { zh: '画质', en: 'Quality' }, 'x-vis-options': { 'low': { zh: '低', en: 'Low' }, 'medium': { zh: '中', en: 'Medium' }, 'high': { zh: '高', en: 'High' }, 'xhigh': { zh: '超高', en: 'Extra high' }, 'max': { zh: '最高', en: 'Maximum' }, 'auto': { zh: '自动', en: 'Auto' } } }),
+}) }
 const standard = constrain(base)
 const enhanced = constrain(extended())
 

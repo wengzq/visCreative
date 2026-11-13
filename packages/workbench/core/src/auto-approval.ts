@@ -58,7 +58,10 @@ function canonical(path: string, allowMissing: boolean): string | undefined {
 }
 
 export function canAutoApprove(request: ApprovalRequest, context: { workDir: string; rootPath?: string }): boolean {
-  if (request.autoApprovalBlocked || (request.kind !== 'command' && request.kind !== 'file_write')) return false
+  if (request.autoApprovalBlocked) return false
+  // Shell commands in the workspace already reach the network unasked; asking only for native web reads protected nothing (RFC 0048).
+  if (request.kind === 'network') return request.webRead === true
+  if (request.kind !== 'command' && request.kind !== 'file_write') return false
   const paths = request.kind === 'command' ? [request.cwd] : request.paths
   if (!paths?.length) return false
   const roots = [context.workDir, context.rootPath].flatMap(root => {

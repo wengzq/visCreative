@@ -46,6 +46,86 @@ function seedBinding(id: string, target: { nodeId: string; slotId: string; expec
 const deliver = (input: { bindingId: string; assetVersionId: string }) => db.transaction(tx => canvas.deliverOutput(tx, input))
 const bindingStatus = (id: string) => db.select().from(s.deliveryBindings).where(eq(s.deliveryBindings.id, id)).get()!.status
 
+describe('generation delivery provenance', () => {
+  it('seeds a new node with authored markers, live ordered inputs and provider-only settings in its creation event', () => {
+    const created = canvas.apply(user, { requestId: 'refs', ops: [
+      { op: 'node.create', tempId: 'first', kind: 'text', content: { text: 'First' } },
+      { op: 'node.create', tempId: 'gone', kind: 'text', content: { text: 'Gone' } },
+    ] })
+    const refs = canvas.get({}).nodes
+    seedBinding('seeded', {})
+    const prompt = `Use {{ref:${created.idMap.first}}}`
+    db.update(s.generationJobs).set({ params: { prompt, resolvedPrompt: 'Use Image 1', actualPrompt: 'Sent', revisedPrompt: 'Rewritten', providerConfiguration: {}, frameRefs: {}, width: 128 } }).where(eq(s.generationJobs.id, 'job_seeded')).run()
+    db.insert(s.jobInputs).values(refs.map((node, ordinal) => ({ jobId: 'job_seeded', ordinal, slotId: node.slots[0]!.slotId, slotRevision: 1, fromSnapshot: false }))).run()
+    canvas.apply(user, { requestId: 'delete-ref', ops: [{ op: 'node.delete', nodeId: created.idMap.gone! }] })
+    const result = deliver({ bindingId: 'seeded', assetVersionId: seedAsset('seeded-output') })
+    if (result.status !== 'delivered') throw new Error('Not delivered')
+    const node = canvas.get({ nodeIds: [result.nodeId] }).nodes[0]!
+    expect(node.inputs).toEqual([created.idMap.first])
+    expect(node.generation).toEqual({ provider: 'mock', model: 'm', params: { width: 128 } })
+    expect(node.slots.find(slot => slot.slotKey === 'prompt')).toMatchObject({ content: { type: 'text', body: prompt }, writer: { actor: 'system' } })
+    expect(node.slots.find(slot => slot.slotKey === 'prompt')!.source).toBeUndefined()
+    expect(canvas.history({ slotId: node.slots.find(slot => slot.slotKey === 'prompt')!.slotId, limit: 50 }).versions[0]!.source).toBeUndefined()
+    expect(readEventsAfter(db, 0).find(event => event.type === 'node.created' && event.entityId === result.nodeId)?.payload).toEqual(node)
+  })
+
+  it('links an operation result only to its subject and seeds no prompt or generation choice', () => {
+    const subject = canvas.apply(user, { requestId: 'operation-subject', ops: [{ op: 'node.create', tempId: 'n', kind: 'image', content: { assetVersionId: seedAsset('operation-input') } }] })
+    const nodeId = subject.idMap.n!
+    const slotId = canvas.get({ nodeIds: [nodeId] }).nodes[0]!.slots[0]!.slotId
+    seedBinding('operation', { nearNodeId: nodeId })
+    db.update(s.generationJobs).set({ operation: 'image.upscale', params: { prompt: 'Sharper', scale: 2 } }).where(eq(s.generationJobs.id, 'job_operation')).run()
+    db.insert(s.jobInputs).values({ jobId: 'job_operation', ordinal: 0, slotId, slotRevision: 1, fromSnapshot: false }).run()
+    const result = deliver({ bindingId: 'operation', assetVersionId: seedAsset('operation-output') })
+    if (result.status !== 'delivered') throw new Error('Not delivered')
+    const node = canvas.get({ nodeIds: [result.nodeId] }).nodes[0]!
+    expect(node.inputs).toEqual([nodeId])
+    expect(node.generation).toBeUndefined()
+    expect(node.slots.map(slot => slot.slotKey)).toEqual(['main'])
+    expect(canvas.history({ slotId: result.slotId, limit: 50 }).versions[0]!.source).toMatchObject({
+      operation: 'image.upscale', params: { scale: 2 }, inputNodeIds: [nodeId],
+    })
+  })
+
+  it('does not create a prompt slot for an empty authored prompt', () => {
+    seedBinding('empty-prompt', {})
+    db.update(s.generationJobs).set({ params: { prompt: '' } }).where(eq(s.generationJobs.id, 'job_empty-prompt')).run()
+    const result = deliver({ bindingId: 'empty-prompt', assetVersionId: seedAsset('empty-output') })
+    if (result.status !== 'delivered') throw new Error('Not delivered')
+    expect(canvas.get({ nodeIds: [result.nodeId] }).nodes[0]!.slots.map(slot => slot.slotKey)).toEqual(['main'])
+  })
+
+  it('never changes the prompt, inputs or generation choice of an existing target', () => {
+    const { idMap } = canvas.apply(user, { requestId: 'existing-target', ops: [
+      { op: 'node.create', tempId: 'ref', kind: 'text', content: { text: 'Reference' } },
+      { op: 'node.create', tempId: 'target', kind: 'image', prompt: 'Author draft', generation: { provider: 'chosen', model: 'author-model', params: { size: 'large' } }, inputNodeIds: ['ref'] },
+    ] })
+    const before = canvas.get({ nodeIds: [idMap.target!] }).nodes[0]!
+    seedBinding('existing', { nodeId: before.nodeId, slotId: before.slots[0]!.slotId, expected: 0 })
+    db.update(s.generationJobs).set({ params: { prompt: 'Agent prompt', width: 256 } }).where(eq(s.generationJobs.id, 'job_existing')).run()
+    deliver({ bindingId: 'existing', assetVersionId: seedAsset('existing-output') })
+    const after = canvas.get({ nodeIds: [before.nodeId] }).nodes[0]!
+    expect(after.inputs).toEqual(before.inputs)
+    expect(after.generation).toEqual(before.generation)
+    expect(after.slots.find(slot => slot.slotKey === 'prompt')).toEqual(before.slots.find(slot => slot.slotKey === 'prompt'))
+  })
+
+  it.each([
+    [{ prompt: 'Authored', resolvedPrompt: 'Resolved', actualPrompt: 'Sent', revisedPrompt: 'Revised' }, 'Revised', 'revised'],
+    [{ prompt: 'Authored', resolvedPrompt: 'Resolved', actualPrompt: 'Sent' }, 'Sent', 'sent'],
+    [{ prompt: 'Authored', resolvedPrompt: 'Resolved' }, 'Resolved', 'resolved'],
+    [{ prompt: 'Authored' }, 'Authored', 'authored'],
+  ])('chooses the most direct used prompt from %j and hides internal params', (prompts, usedPrompt, usedPromptKind) => {
+    seedBinding('history-source', {})
+    db.update(s.generationJobs).set({ params: { ...prompts, width: 128, frameRefs: {}, providerConfiguration: {} } }).where(eq(s.generationJobs.id, 'job_history-source')).run()
+    const result = deliver({ bindingId: 'history-source', assetVersionId: seedAsset('history-output') })
+    if (result.status !== 'delivered') throw new Error('Not delivered')
+    expect(canvas.history({ slotId: result.slotId, limit: 50 }).versions[0]!.source).toMatchObject({ prompt: 'Authored', usedPrompt, usedPromptKind, params: { width: 128 } })
+    expect(canvas.history({ slotId: result.slotId, limit: 50 }).versions[0]!.source!.params).toEqual({ width: 128 })
+    expect(canvas.history({ slotId: result.slotId, limit: 50 }).versions[0]!.source).not.toHaveProperty('operation')
+  })
+})
+
 describe('canvas.apply', () => {
   it.each(['image', 'video', 'audio'] as const)('Create a %s generation node with main first and an initial revision even for an empty prompt', kind => {
     const r = canvas.apply(user, { requestId: 'prompt', ops: [{ op: 'node.create', tempId: 'n', kind, x: 0, y: 0, w: 320, h: 180, prompt: '' }] })
@@ -245,6 +325,44 @@ describe('deliverOutput', () => {
   })
 })
 
+describe('result placeholders (RFC 0047)', () => {
+  const reserve = (bindingId: string) => db.transaction(tx => canvas.reservePlaceholder(tx, { bindingId }))
+  const binding = (id: string) => db.select().from(s.deliveryBindings).where(eq(s.deliveryBindings.id, id)).get()!
+
+  it('sizes the placeholder from vendor ratio and size strings, else the kind default', () => {
+    const cases: [string, MediaKind, Record<string, unknown>, { w: number; h: number }][] = [
+      ['ratio', 'video', { ratio: '9:16' }, { w: 320, h: 569 }],
+      ['size', 'image', { size: '1536x1024' }, { w: 320, h: 213 }],
+      ['star', 'image', { size: '720*1280' }, { w: 180, h: 320 }],
+      ['adaptive', 'video', { ratio: 'adaptive' }, { w: 320, h: 180 }],
+      ['audio', 'audio', {}, { w: 360, h: 140 }],
+    ]
+    for (const [id, kind, params, size] of cases) {
+      seedBinding(id, {}, kind)
+      db.update(s.generationJobs).set({ params }).where(eq(s.generationJobs.id, `job_${id}`)).run()
+      reserve(id)
+      const placeholder = canvas.get({ nodeIds: [binding(id).createdNodeId!] }).nodes[0]!
+      expect(placeholder, id).toMatchObject({ kind, ...size, slots: [{ slotKey: 'main', revision: 0, content: { type: 'empty' } }] })
+      expect(binding(id), id).toMatchObject({ targetKind: 'new_node', nodeId: placeholder.nodeId, slotId: placeholder.slots[0]!.slotId, expectedContentRevision: 0 })
+    }
+  })
+
+  it('delivers into the placeholder and keeps a pre-placeholder binding on create-on-delivery', () => {
+    const { nodeId } = createImageNode()
+    seedBinding('placed', { nearNodeId: nodeId })
+    reserve('placed')
+    const placeholderId = binding('placed').createdNodeId!
+    expect(deliver({ bindingId: 'placed', assetVersionId: seedAsset('astv_p', 'image', { width: 1600, height: 900 }) })).toMatchObject({ status: 'delivered', nodeId: placeholderId })
+    expect(canvas.get({ nodeIds: [placeholderId] }).nodes[0]).toMatchObject({ h: 180, slots: [{ revision: 1, content: { assetVersionId: 'astv_p' } }] })
+    expect(binding('placed').createdNodeId).toBe(placeholderId)
+
+    seedBinding('legacy', { nearNodeId: nodeId })
+    const legacy = deliver({ bindingId: 'legacy', assetVersionId: seedAsset('astv_l') })
+    expect(legacy).toMatchObject({ status: 'delivered' })
+    expect(canvas.get({}).nodes).toHaveLength(3)
+  })
+})
+
 it('Deliver text input to a new result node with provenance; rendering code again writes a new version to the same slot', () => {
   const created = canvas.apply(user, { requestId: 'texts', ops: [
     { op: 'node.create', tempId: 'code', kind: 'text', format: 'code', content: { text: '<html>v1</html>' } },
@@ -420,4 +538,63 @@ it('creates readable bounded long-text cards without resizing existing notes on 
   const slot = get('short').slots[0]!
   canvas.apply(user, { requestId: 'grow-text-only', ops: [{ op: 'slot.setText', slotId: slot.slotId, expectedRevision: slot.revision, body: 'x'.repeat(10000) }] })
   expect(get('short')).toMatchObject({ w: 320, h: 200 })
+})
+
+describe('Fitting a grown media card', () => {
+  it('pushes the cards it newly reaches down its column, grows the frame, and undoes in one step', () => {
+    const { idMap } = canvas.apply(user, { requestId: 'layout', ops: [
+      { op: 'frame.create', tempId: 'f', title: 'Cast', x: 0, y: 0, w: 800, h: 900 },
+      { op: 'node.create', tempId: 'top', kind: 'image', x: 24, y: 56, w: 320, h: 180 },
+      { op: 'node.create', tempId: 'mid', kind: 'image', x: 24, y: 276, w: 320, h: 180 },
+      { op: 'node.create', tempId: 'low', kind: 'image', x: 24, y: 496, w: 320, h: 180 },
+      { op: 'node.create', tempId: 'beside', kind: 'image', x: 404, y: 276, w: 320, h: 180 },
+    ] })
+    const layout = () => Object.fromEntries(canvas.get({}).nodes.map(node => [node.nodeId, { y: node.y, h: node.h }]))
+    const before = layout()
+    const top = canvas.get({ nodeIds: [idMap.top!] }).nodes[0]!
+    canvas.apply(user, { requestId: 'portrait', ops: [{ op: 'slot.setAsset', slotId: top.slots[0]!.slotId, assetVersionId: seedAsset('astv_portrait', 'image', { width: 640, height: 960 }), expectedRevision: 0 }] })
+    const after = layout()
+    expect(after[idMap.top!]).toEqual({ y: 56, h: 480 })
+    expect(after[idMap.mid!]).toEqual({ y: 576, h: 180 })
+    expect(after[idMap.low!]).toEqual({ y: 796, h: 180 })
+    expect(after[idMap.beside!]).toEqual(before[idMap.beside!])
+    expect(after[idMap.f!]!.h).toBeGreaterThanOrEqual(796 + 180 + 40)
+    expect(canvas.get({ nodeIds: [idMap.low!] }).nodes[0]!.frameId).toBe(idMap.f)
+    canvas.undo({ requestId: 'undo' })
+    expect(layout()).toEqual(before)
+  })
+
+  const grow = (requestId: string, ops: Parameters<typeof canvas.apply>[1]['ops']) => {
+    const { idMap } = canvas.apply(user, { requestId, ops })
+    const top = canvas.get({ nodeIds: [idMap.top!] }).nodes[0]!
+    canvas.apply(user, { requestId: requestId + '_fit', ops: [{ op: 'slot.setAsset', slotId: top.slots[0]!.slotId, assetVersionId: seedAsset(requestId + '_asset', 'image', { width: 640, height: 960 }), expectedRevision: 0 }] })
+    return { idMap, y: (id: string) => canvas.get({ nodeIds: [idMap[id]!] }).nodes[0]!.y }
+  }
+
+  it('leaves cards alone when the growth still keeps a gap above them', () => {
+    const { y } = grow('loose', [
+      { op: 'frame.create', tempId: 'f', title: 'Loose', x: 0, y: 0, w: 800, h: 1400 },
+      { op: 'node.create', tempId: 'top', kind: 'image', x: 24, y: 56, w: 320, h: 180 },
+      { op: 'node.create', tempId: 'far', kind: 'image', x: 24, y: 700, w: 320, h: 180 },
+    ])
+    expect(y('far')).toBe(700)
+  })
+
+  it('does not push cards on the open canvas', () => {
+    const { y } = grow('open', [
+      { op: 'node.create', tempId: 'top', kind: 'image', x: 0, y: 0, w: 320, h: 180 },
+      { op: 'node.create', tempId: 'below', kind: 'image', x: 0, y: 220, w: 320, h: 180 },
+    ])
+    expect(y('below')).toBe(220)
+  })
+
+  it('leaves the layout to the author when a pushed card would land on a nested frame', () => {
+    const { y } = grow('nested', [
+      { op: 'frame.create', tempId: 'f', title: 'Outer', x: 0, y: 0, w: 1000, h: 1400 },
+      { op: 'node.create', tempId: 'top', kind: 'image', x: 24, y: 56, w: 320, h: 180 },
+      { op: 'node.create', tempId: 'below', kind: 'image', x: 24, y: 276, w: 320, h: 180 },
+      { op: 'frame.create', tempId: 'inner', title: 'Inner', x: 24, y: 560, w: 400, h: 300 },
+    ])
+    expect(y('below')).toBe(276)
+  })
 })

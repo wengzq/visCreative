@@ -4,9 +4,11 @@ import { issueAgentToken } from './auth'
 import type { AgentRuntimeFactory } from './space-host'
 
 /** Connect the Codex adapter to a space: tokens are issued per space, with a fixed working directory per session and capabilities exposed via vis mcp. */
-export function codexRuntime(opts: { socketPath: string; dataDir?: string; env?: NodeJS.ProcessEnv; visMcp: { command: string; args: string[] }; codexPath?: string; model?: string }): AgentRuntimeFactory {
+export function codexRuntime(opts: { socketPath: string; cliBinDir?: string; fallbackDirs?: readonly string[]; dataDir?: string; env?: NodeJS.ProcessEnv; visMcp: { command: string; args: string[] }; codexPath?: string; model?: string }): AgentRuntimeFactory {
   const factory: AgentRuntimeFactory = ({ spaceId, db, workDir, report, stream, requestApproval, forbiddenPaths }) => createCodexRuntime({ db, report, stream, requestApproval }, {
     socketPath: opts.socketPath,
+    ...(opts.cliBinDir ? { cliBinDir: opts.cliBinDir } : {}),
+    ...(opts.fallbackDirs ? { fallbackDirs: opts.fallbackDirs } : {}),
     ...(forbiddenPaths ? { forbiddenPaths } : {}),
     dataDir: opts.dataDir ?? dirname(dirname(opts.socketPath)),
     ...(opts.env ? { env: opts.env } : {}),

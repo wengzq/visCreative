@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
 import { cp } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildRenderScene } from './build-render-scene.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const studiod = join(root, 'services', 'studiod')
@@ -22,3 +23,4 @@ copyFileSync(join(generation, 'node_modules', 'roughjs', 'bundled', 'rough.js'),
 for (const name of ['three.module.js', 'three.core.js']) {
   copyFileSync(join(generation, 'node_modules', 'three', 'build', name), join(studiod, 'dist', 'lib', name))
 }
+await buildRenderScene(join(studiod, 'dist', 'lib', 'vis-scene.js'))

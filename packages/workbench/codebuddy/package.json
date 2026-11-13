@@ -1,0 +1,20 @@
+{
+  "name": "@vis/agent-codebuddy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CodeBuddy Agent adapter over the shared ACP runtime (RFC 0041).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@vis/workbench-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@vis/protocol": "workspace:*",
+    "@vis/storage": "workspace:*"
+  }
+}

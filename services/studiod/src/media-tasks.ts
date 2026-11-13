@@ -1,3 +1,4 @@
+import { refreshReviews } from './reviews'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { copyFile, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -285,6 +286,7 @@ export function createMediaTaskService(deps: { db: SpaceDb; assets: AssetStore; 
         const actor: Actor = task.sessionId ? { kind: 'agent', sessionId: task.sessionId } : { kind: 'user' }
         const applied = applyOps(tx, actor, { requestId: operationId, description: task.operation, ops }, now(),
           task.operation === 'timeline.export' ? { exportOf: { timelineNodeId: task.nodeId, timelineRevision: task.expectedRevision } } : undefined)
+        refreshReviews(tx, now())
         tx.update(s.mediaTasks).set({
           status: 'succeeded', progress: 1, assetVersionIds,
           nodeIds: replacing ? [] : Object.values(applied.idMap), operationId: task.sessionId ? null : operationId, updatedAt: now(),

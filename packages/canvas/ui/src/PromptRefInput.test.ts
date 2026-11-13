@@ -3,20 +3,22 @@ import { promptRef } from '@vis/protocol'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { PromptRefInput } from './PromptRefInput'
 
-const hooks = vi.hoisted(() => ({ refs: [] as { current: unknown }[], effect: undefined as (() => void) | undefined }))
+const hooks = vi.hoisted(() => ({ refs: [] as { current: unknown }[], effects: [] as (() => void)[] }))
 vi.mock('react', async importOriginal => ({
   ...await importOriginal<typeof import('react')>(),
   forwardRef: (render: unknown) => render,
   useRef: (current: unknown) => { const ref = { current }; hooks.refs.push(ref); return ref },
   useState: (initial: unknown) => [initial, vi.fn()],
+  useMemo: (factory: () => unknown) => factory(),
   useId: () => 'choices',
   useImperativeHandle() {},
-  useLayoutEffect: (effect: () => void) => { hooks.effect = effect },
+  useLayoutEffect: (effect: () => void) => { hooks.effects.push(effect) },
 }))
 vi.mock('@vis/ui-kit', async importOriginal => ({
   ...await importOriginal<typeof import('@vis/ui-kit')>(),
   useMessages: (dictionary: { en: unknown }) => dictionary.en,
   useFormat: () => ({ number: String }),
+  useLocale: () => ({ locale: 'en' }),
 }))
 
 class DomNode {
@@ -48,7 +50,7 @@ class DomNode {
   }
 }
 
-beforeEach(() => { hooks.refs = []; hooks.effect = undefined })
+beforeEach(() => { hooks.refs = []; hooks.effects = [] })
 afterEach(() => vi.unstubAllGlobals())
 
 function draw(kind: 'image' | 'video') {
@@ -69,7 +71,7 @@ function draw(kind: 'image' | 'video') {
     placeholder: '', readOnly: false, onChange() {}, onCommit() {}, onReset() {}, onComposing() {},
   })
   hooks.refs[0]!.current = editor
-  hooks.effect!()
+  for (const effect of hooks.effects) effect()
   return { chip: editor.childNodes[0]!, createElement }
 }
 

@@ -34,6 +34,10 @@ describe('provider endpoint paths', () => {
 })
 
 describe('providers', () => {
+  it('refuses render/scene as a default model because it needs a scene input', () => {
+    expect(ProviderConfigSchema.safeParse({ ...config, defaults: { video: { provider: 'render', model: 'html' } } }).success).toBe(true)
+    expect(ProviderConfigSchema.safeParse({ ...config, defaults: { video: { provider: 'render', model: 'scene' } } }).success).toBe(false)
+  })
   it('accepts open provider types and non-secret settings without adding fields to legacy entries', () => {
     const legacy = ProviderConfigSchema.parse(config)
     expect(ProviderConfigSchema.parse(legacy)).toEqual(legacy)
@@ -100,7 +104,7 @@ describe('providers', () => {
         type: 'object', properties: { size: { type: 'string', enum: ['2K', '4K'], default: '2K', description: '输出尺寸' } },
       } }],
     }
-    const result = { providerTypes: [], providers: [entry], defaults: config.defaults, limits: { maxConcurrent: 3, dailyImage: 50, dailyVideo: 10 } }
+    const result = { videoReferences: 'hosting_required', providerTypes: [], providers: [entry], defaults: config.defaults, limits: { maxConcurrent: 3, dailyImage: 50, dailyVideo: 10 } }
     expect(METHODS['providers.list'].result.parse(result)).toEqual({ ...result, limits: { ...result.limits, dailyAudio: 20 } })
     expect(METHODS['providers.list'].result.safeParse({ ...result, providers: [{ ...entry, apiKey: 'secret' }] }).success).toBe(false)
   })

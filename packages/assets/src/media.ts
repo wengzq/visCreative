@@ -9,6 +9,7 @@ import { LOCAL_OPERATION_PARAMS, operationKind, type LocalOperation, type MediaK
 import { probeSvg } from './svg'
 import { alphaDecoder, streamHasAlpha, type AlphaStream } from './alpha'
 import { videoFrameRate } from './frame-rate'
+import { detectVideoEncoder, SOFTWARE_FIRST_H264_ENCODERS, type EncoderRunner } from './encoders'
 
 const run = promisify(execFile)
 
@@ -40,7 +41,7 @@ export function mimeOf(path: string): string | undefined {
   return MIME_BY_EXT[extname(path).toLowerCase()]
 }
 
-export function createFfmpegMedia(opts: { ffmpegPath?: string; ffprobePath?: string } = {}): MediaTools {
+export function createFfmpegMedia(opts: { ffmpegPath?: string; ffprobePath?: string; encoderRunner?: EncoderRunner } = {}): MediaTools {
   const ffmpeg = opts.ffmpegPath ?? 'ffmpeg'
   const ffprobe = opts.ffprobePath ?? 'ffprobe'
 
@@ -101,9 +102,10 @@ export function createFfmpegMedia(opts: { ffmpegPath?: string; ffprobePath?: str
       const plans: { args: string[]; ext: string; durationMs?: number }[] = []
       const seconds = (ms: number) => (ms / 1000).toFixed(3)
       const crop = (x: number, y: number, w: number, h: number) => plans.push({ args: [...decoder, '-i', path, '-vf', `crop=${w}:${h}:${x}:${y}:exact=1`, '-frames:v', '1'], ext: 'png' })
-      const trim = (start: number, end: number, video: boolean) => {
+      const trim = async (start: number, end: number, video: boolean) => {
         range(start, end)
-        plans.push({ args: [...decoder, '-i', path, '-ss', seconds(start), '-t', seconds(end - start), ...(video ? ['-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac'] : ['-vn', '-c:a', 'pcm_s16le'])], ext: video ? 'mp4' : 'wav', durationMs: end - start })
+        const encoder = video ? await detectVideoEncoder({ ffmpegPath: ffmpeg, priority: SOFTWARE_FIRST_H264_ENCODERS, ...(opts.encoderRunner ? { exec: opts.encoderRunner } : {}) }) : undefined
+        plans.push({ args: [...(encoder?.inputArgs ?? []), ...decoder, '-i', path, '-ss', seconds(start), '-t', seconds(end - start), ...(video ? ['-map', '0:v:0', '-map', '0:a?', ...(encoder!.filter ? ['-vf', encoder!.filter] : []), '-c:v', encoder!.name, ...encoder!.args, '-c:a', 'aac'] : ['-vn', '-c:a', 'pcm_s16le'])], ext: video ? 'mp4' : 'wav', durationMs: end - start })
       }
       const clampEnd = (end: number) => end > durationMs && end <= durationMs + 50 ? durationMs : end
       switch (operation) {
@@ -122,8 +124,8 @@ export function createFfmpegMedia(opts: { ffmpegPath?: string; ffprobePath?: str
           }
           break
         }
-        case 'video.trim': trim(p.startMs, clampEnd(p.endMs), true); break
-        case 'audio.trim': trim(p.startMs, clampEnd(p.endMs), false); break
+        case 'video.trim': await trim(p.startMs, clampEnd(p.endMs), true); break
+        case 'audio.trim': await trim(p.startMs, clampEnd(p.endMs), false); break
         case 'video.frame': {
           const atMs = clampEnd(p.atMs)
           if (!durationMs || atMs > durationMs) throw mediaError('invalid_params', 'media.time_out_of_bounds', 'The frame time must be within the source duration')
@@ -150,7 +152,7 @@ export function createFfmpegMedia(opts: { ffmpegPath?: string; ffprobePath?: str
           break
         case 'audio.split': {
           const points = [0, ...p.pointsMs as number[], durationMs]
-          for (let i = 1; i < points.length; i++) trim(points[i - 1]!, points[i]!, false)
+          for (let i = 1; i < points.length; i++) await trim(points[i - 1]!, points[i]!, false)
           break
         }
         case 'audio.speed':

@@ -26,6 +26,7 @@ export function readJobView(tx: SpaceTx, jobId: string): JobView | undefined {
       if (b.slotId) target.slotId = b.slotId
     } else {
       if (b.createdNodeId) target.nodeId = b.createdNodeId
+      if (b.slotId) target.slotId = b.slotId
       const near = (b.placement as { nearNodeId?: string } | null)?.nearNodeId
       if (near) target.nearNodeId = near
     }

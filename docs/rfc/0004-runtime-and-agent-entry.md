@@ -120,6 +120,8 @@ MVP 采用更简单的方案：
 | 进程退出 | 回合未正常结束即判定 `interrupted` |
 | 工具权限 | 允许 `Bash(vis:*)` 与只读工具（Read / Glob / Grep）；其他工具默认拒绝。MVP 不做工具审批界面，因此不会出现 `waiting_user` |
 
+> Note ([RFC 0048](0048-agent-native-capabilities.md), 2026-11-12): this tool list is a gap of an adapter that is not yet wired into studiod and runs without the shared sandbox, not a decision about what Claude may do. Before wiring it, launch it through `prepareSandbox`, route tool permissions through the shared approval path, and only then widen `tools` to its native set.
+
 代价是每回合多 1–2 秒启动时间、不支持中途插话；MVP 本就不提供“立即发送”。SessionService 只经 `AgentRuntimePort`（`ensureReady` / `dispatchTurn` / `interruptTurn`）与运行时交互，以后升级为常驻进程只需替换适配器实现。
 
 

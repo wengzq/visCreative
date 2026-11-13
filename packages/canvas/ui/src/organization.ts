@@ -9,6 +9,10 @@ export type OrganizationGroup = Rect & { category: string, frameId: string, node
 
 const PADDING = 24
 const HEADER = 56
+// Unified widths would stretch media; scale their height with the width instead. Clamp like fitNodeToAsset.
+const fittedHeight = (node: NodeView, width: number) => node.kind === 'image' || node.kind === 'video'
+  ? Math.max(80, Math.min(4 * width, Math.round(node.h * width / node.w)))
+  : node.h
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
 const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w + NODE_GAP && b.x < a.x + a.w + NODE_GAP
   && a.y < b.y + b.h + NODE_GAP && b.y < a.y + a.h + NODE_GAP
@@ -78,7 +82,7 @@ export function arrangeCanvas(nodes: NodeView[], selectedIds?: ReadonlySet<strin
     const frame = frames.find(node => node.frame?.title === category)
       ?? (category === m.organizationUncategorized && !byCategory.has(otherUncategorized) ? frames.find(node => node.frame?.title === otherUncategorized) : undefined)
     const width = Math.ceil(Math.max(320, ...members.map(node => node.w)))
-    const height = Math.max(...members.map(node => node.h))
+    const height = Math.max(...members.map(node => fittedHeight(node, width)))
     const columns = members.length < 4 ? 1 : 2
     const w = Math.max(frame?.w ?? FRAME_MIN_SIZE.w, columns * width + (columns - 1) * NODE_GAP + 2 * PADDING)
     let frameId = frame?.nodeId
@@ -143,7 +147,7 @@ export function arrangeCanvas(nodes: NodeView[], selectedIds?: ReadonlySet<strin
         position = {
           x: x + PADDING + column * (group.width + NODE_GAP),
           y: y + HEADER + Math.floor(cell / group.columns) * (group.height + NODE_GAP),
-          w: group.width, h: node.h,
+          w: group.width, h: fittedHeight(node, group.width),
         }
         const collisions = obstacles.filter(obstacle => overlaps(position, obstacle))
         if (!collisions.length) break
@@ -200,8 +204,8 @@ export function arrangeCanvas(nodes: NodeView[], selectedIds?: ReadonlySet<strin
   }
   // Place frames first and write node positions last; the server computes frameId from final center points.
   for (const group of groups) for (const node of group.members) {
-    const { x, y, w } = placements.get(node.nodeId)!
-    if (node.x !== x || node.y !== y || node.w !== w) ops.push({ op: 'node.layout', nodeId: node.nodeId, x, y, w })
+    const { x, y, w, h } = placements.get(node.nodeId)!
+    if (node.x !== x || node.y !== y || node.w !== w || node.h !== h) ops.push({ op: 'node.layout', nodeId: node.nodeId, x, y, w, ...(node.h !== h ? { h } : {}) })
   }
   ops.push(...removals)
   if (ops.length > 200) throw new RangeError(m.organizationLimit(formatter(locale).number(ops.length)))

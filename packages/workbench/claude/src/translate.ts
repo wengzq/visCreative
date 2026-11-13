@@ -1,4 +1,4 @@
-import { skillReceipt } from '@vis/workbench-core'
+import { toolReceipts } from '@vis/workbench-core'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 
 export type TranslatedItem = {
@@ -34,7 +34,7 @@ export function translate(msg: SDKMessage): TranslatedItem[] {
         itemId: `${msg.uuid}:${i}`,
         revision: 1,
         kind: 'tool_result',
-        payload: { toolUseId: block.tool_use_id, isError: block.is_error ?? false, text: truncate(text), ...(!block.is_error ? skillReceipt(text) : {}) },
+        payload: { toolUseId: block.tool_use_id, isError: block.is_error ?? false, text: truncate(text), ...(!block.is_error ? toolReceipts(text) : {}) },
       })
     })
     return items

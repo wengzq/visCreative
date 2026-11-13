@@ -1,6 +1,7 @@
 import { defineMessages } from '@vis/ui-kit'
 
 export const sceneHostMessages = defineMessages({
+  saveBeforeAccept: '请先解决场景保存冲突，再接受建议。',
   scene: '3D 场景',
   loading: '正在打开场景…',
   close: '关闭场景',
@@ -9,6 +10,7 @@ export const sceneHostMessages = defineMessages({
   imageOnly: '场景画面必须是图片',
   modelOnly: '请选择 GLB 模型文件',
 }, {
+  saveBeforeAccept: 'Resolve the scene save conflict before accepting a proposal.',
   scene: '3D scene',
   loading: 'Opening scene…',
   close: 'Close scene',

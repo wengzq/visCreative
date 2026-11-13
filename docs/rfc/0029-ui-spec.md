@@ -4,6 +4,8 @@ Date: 2026-11-04
 
 > Render library copy follow-up (2026-11-07): built-in service settings describe anime.js, rough.js, three.js and optional author-managed `render-libs` scripts. Missing libraries use `render.lib_missing` with a filename and localized folder guidance in Chinese and English. This does not change the panel or blockout interactions below.
 
+> Blockout backdrop fix (2026-11-09): in the full-screen editor a panel's backdrop is `underlay ?? blockout`. A panel holding only a blockout frame now shows that frame under the drawing surface instead of an empty page, and a stroke flattens the sketch over it, so the saved `image` no longer hides the frame behind white. `blockout` itself is untouched and still drives composition (`blockout ?? image`). A later extraction still changes only `blockout`; the flattened picture keeps the frame it was drawn on until the next stroke or ratio change.
+
 Revises the step b and c scope of [RFC 0029](0029-shot-previz.md). Generation happens on the canvas; the full-screen editor stays for drawing. Copy below is indicative: final strings go in `messages.ts` in both languages.
 
 ## Principles

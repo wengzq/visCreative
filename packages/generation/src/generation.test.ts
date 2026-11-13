@@ -8,7 +8,7 @@ import { type CanvasDeliveryPort, VisError } from '@vis/domain'
 import { eq, openSpaceDb, spaceSchema as s, type SpaceDb, type SpaceTx } from '@vis/storage'
 import { createMockProvider, type MockProviderOptions } from './providers/mock'
 import { createArkProvider } from './providers/ark'
-import { ProviderError, type ProviderAdapter, type ProviderRequest } from './providers/types'
+import { operationSpecOf, paramsSchemaOf, ProviderError, type ProviderAdapter, type ProviderInputMetadata, type ProviderRequest } from './providers/types'
 import { stageSyncOutput } from './providers/sync'
 import { readActiveJobViews } from './view'
 import type { GenerationQuota } from './quota'
@@ -90,6 +90,26 @@ async function runToEnd(service: GenerationService, jobId: string, stepMs = 1000
 const job = (id: string) => db.select().from(s.generationJobs).where(eq(s.generationJobs.id, id)).get()!
 const attempts = (id: string) => db.select().from(s.generationAttempts).where(eq(s.generationAttempts.jobId, id)).all()
 
+it('stores bounded vendor rewrites without leaking them or a previous sent prompt into provider or regenerate parameters', async () => {
+  const revisedPrompt = `  ${'Revised '.repeat(3000)}  `
+  const { service, provider, submits } = setup({ revisedPrompt })
+  provider.prepareRequest = request => ({ ...request, prompt: `${request.prompt} prepared` })
+  const first = service.submit(agent, { requestId: 'provenance-first', kind: 'image', prompt: 'Authored' })
+  expect(await runToEnd(service, first.jobId)).toBe('succeeded')
+  expect(job(first.jobId).params).toMatchObject({ prompt: 'Authored', actualPrompt: 'Authored prepared', revisedPrompt: revisedPrompt.trim().slice(0, 20_000) })
+  const next = service.regenerate(agent, { requestId: 'provenance-next', jobId: first.jobId })
+  expect(job(next.jobId).params).not.toHaveProperty('revisedPrompt')
+  expect(job(next.jobId).params).not.toHaveProperty('actualPrompt')
+  // Stale internal fields on recovered jobs must also be stripped by buildRequest.
+  db.update(s.generationJobs).set({ params: { ...(job(next.jobId).params as object), revisedPrompt: 'Previous vendor text', actualPrompt: 'Previous sent text' } }).where(eq(s.generationJobs.id, next.jobId)).run()
+  expect(await runToEnd(service, next.jobId)).toBe('succeeded')
+  expect(submits.map(request => request.prompt)).toEqual(['Authored prepared', 'Authored prepared'])
+  for (const request of submits) {
+    expect(request.params).not.toHaveProperty('revisedPrompt')
+    expect(request.params).not.toHaveProperty('actualPrompt')
+  }
+})
+
 it('rejects a missing generation default before writing jobs or reserving quota', () => {
   const reserve = vi.fn()
   const quota: GenerationQuota = { reserve, rollback: vi.fn(), tryStart: vi.fn(() => true), release: vi.fn(), usage: () => ({ date: 'today', image: 0, video: 0, audio: 0, agent: { image: 0, video: 0, audio: 0 } }) }
@@ -98,6 +118,24 @@ it('rejects a missing generation default before writing jobs or reserving quota'
     .toThrow(expect.objectContaining({ message: 'No default generation service is available for image', details: { reason: 'generation.default_provider_unavailable', params: { kind: 'image' } } }))
   expect(reserve).not.toHaveBeenCalled()
   expect(db.select().from(s.generationJobs).all()).toEqual([])
+})
+
+it('runs cleanup after unknown settlement and retries it on startup with the unknown status', async () => {
+  const { service, provider, make } = setup({ faults: { lostSubmitResponse: 1 } }, { withoutFind: true })
+  const cleanup = vi.fn(async () => {})
+  provider.cleanup = cleanup
+  const { jobId } = service.submit(agent, { requestId: 'unknown-cleanup', kind: 'video', prompt: 'Uncertain' })
+  expect(await runToEnd(service, jobId)).toBe('unknown')
+  const idempotencyKey = attempts(jobId)[0]!.id
+  expect(cleanup).toHaveBeenCalledWith({ idempotencyKey, status: 'unknown' })
+  cleanup.mockClear()
+  await service.stop()
+  const restarted = make()
+  try {
+    restarted.start()
+    await restarted.pump()
+    expect(cleanup).toHaveBeenCalledWith({ idempotencyKey, status: 'unknown' })
+  } finally { await restarted.stop() }
 })
 
 it('cleans sync bytes only after durable delivery and retries cleanup after restart without changing outcomes', async () => {
@@ -307,6 +345,153 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe('Generation operations and prompt references', () => {
+  it('defaults a declared operation without a spec to strict empty settings and no prompt', async () => {
+    const { service, provider } = setup()
+    delete provider.operationSpecFor
+    const spec = operationSpecOf(provider, 'image', 'mock-image-1', 'image.upscale')
+    expect(spec.prompt).toBe('none')
+    expect(spec.paramsSchema.parse({})).toEqual({})
+    expect(spec.paramsSchema.safeParse({ width: 64 }).success).toBe(false)
+    const subject = await seedImageSlot('no-operation-spec')
+    await subject.revise('Subject')
+    const inputs = [{ slotId: subject.slotId }]
+    const result = service.submit(agent, { requestId: 'empty-operation-spec', kind: 'image', operation: 'image.upscale', prompt: '', inputs })
+    expect(job(result.jobId).params).toEqual({ prompt: '' })
+    expect(() => service.submit(agent, { requestId: 'no-spec-settings', kind: 'image', operation: 'image.upscale', prompt: '', inputs, params: { scale: 2 } }))
+      .toThrow(expect.objectContaining({ code: 'invalid_params', details: expect.objectContaining({ reason: 'generation.invalid_params' }) }))
+    expect(() => service.submit(agent, { requestId: 'no-spec-prompt', kind: 'image', operation: 'image.upscale', prompt: 'Enlarge', inputs }))
+      .toThrow(expect.objectContaining({ code: 'invalid_params', details: { reason: 'generation.prompt_unsupported', params: {} } }))
+    expect(db.select().from(s.generationJobs).all()).toHaveLength(1)
+  })
+
+  it('keeps generate parameter defaults and saved draft settings without consulting operation specs', async () => {
+    const { service, provider, submits } = setup()
+    provider.operationSpecFor = vi.fn(() => { throw new Error('Generate must not consult operation specs') })
+    expect(operationSpecOf(provider, 'image', 'mock-image-1', 'generate')).toEqual({ paramsSchema: paramsSchemaOf(provider, 'image', 'mock-image-1'), prompt: 'required' })
+    const subject = await seedImageSlot('generate-draft')
+    db.update(s.nodes).set({ generation: { provider: 'mock', model: 'mock-image-1', params: { width: 128, height: 64 } } }).where(eq(s.nodes.id, subject.nodeId)).run()
+    const result = service.submit(agent, { requestId: 'generate-saved-draft', kind: 'image', prompt: 'Author draft', targets: [{ outputIndex: 0, kind: 'slot', slotId: subject.slotId }] })
+    expect(job(result.jobId).params).toEqual({ prompt: 'Author draft', n: 1, width: 128, height: 64 })
+    expect(await runToEnd(service, result.jobId)).toBe('succeeded')
+    expect(submits[0]).toMatchObject({ operation: 'generate', params: { n: 1, width: 128, height: 64 } })
+    expect(provider.operationSpecFor).not.toHaveBeenCalled()
+  })
+
+  it.each([{ width: 64, height: 64 }, { scale: 3 }, { scale: 2, n: 2 }])('rejects invalid operation settings %j before job creation', async params => {
+    const { service } = setup()
+    const subject = await seedImageSlot('invalid-operation-settings')
+    await subject.revise('Subject')
+    expect(() => service.submit(agent, { requestId: 'invalid-operation-settings', kind: 'image', operation: 'image.upscale', prompt: '', inputs: [{ slotId: subject.slotId }], params }))
+      .toThrow(expect.objectContaining({ code: 'invalid_params', details: expect.objectContaining({ reason: 'generation.invalid_params' }) }))
+    expect(db.select().from(s.generationJobs).all()).toEqual([])
+  })
+
+  it('fills operation defaults without using saved generate parameters even for an explicit slot target', async () => {
+    const { service, submits } = setup()
+    const subject = await seedImageSlot('operation-draft')
+    await subject.revise('Subject')
+    const generation = { provider: 'mock', model: 'mock-image-1', params: { width: 128, height: 64, scale: 4 } }
+    db.update(s.nodes).set({ generation }).where(eq(s.nodes.id, subject.nodeId)).run()
+    const result = service.submit(agent, {
+      requestId: 'ignore-saved-operation-settings', kind: 'image', operation: 'image.upscale', prompt: '',
+      inputs: [{ slotId: subject.slotId }], targets: [{ outputIndex: 0, kind: 'slot', slotId: subject.slotId }],
+    })
+    expect(job(result.jobId).params).toEqual({ prompt: '', scale: 2 })
+    expect(await runToEnd(service, result.jobId)).toBe('succeeded')
+    expect(submits[0]!.params).toEqual({ scale: 2 })
+    expect(db.select().from(s.nodes).where(eq(s.nodes.id, subject.nodeId)).get()!.generation).toEqual(generation)
+  })
+
+  it.each([
+    { operation: 'image.upscale', kind: 'image', prompt: 'Enlarge', reason: 'generation.prompt_unsupported' },
+    { operation: 'video.reshoot', kind: 'video', prompt: '', reason: 'generation.prompt_required' },
+    { operation: 'video.reshoot', kind: 'video', prompt: ' \t\n ', reason: 'generation.prompt_required' },
+  ] as const)('enforces $operation prompt rules before global quota reservations or job writes: $prompt', ({ operation, kind, prompt, reason }) => {
+    const provider = { ...createMockProvider(), type: 'volcengine-ark' }
+    const reserve = vi.fn(() => { throw new Error('Quota must not be reserved') })
+    const quota: GenerationQuota = {
+      reserve, rollback: vi.fn(), tryStart: () => true, release: vi.fn(),
+      usage: () => ({ date: '', image: 0, video: 0, audio: 0, agent: { image: 0, video: 0, audio: 0 } }),
+    }
+    const service = createGenerationService({
+      db, assets, delivery: fakeDelivery(), providers: [provider], now, quota,
+      defaults: { image: { provider: 'mock' }, video: { provider: 'mock' } },
+    })
+    expect(() => service.submit(agent, { requestId: 'operation-prompt-global-quota', kind, operation, prompt, inputs: [{ slotId: 'not-read' }] }))
+      .toThrow(expect.objectContaining({ code: 'invalid_params', details: { reason, params: {} } }))
+    expect(reserve).not.toHaveBeenCalled()
+    expect(quota.rollback).not.toHaveBeenCalled()
+    expect(service.usage()).toMatchObject({ image: 0, video: 0, agent: { image: 0, video: 0 } })
+    expect(db.select().from(s.generationJobs).all()).toEqual([])
+    expect(db.select().from(s.deliveryBindings).all()).toEqual([])
+    expect(db.select().from(s.jobInputs).all()).toEqual([])
+  })
+
+  it('validates operation prompts before an exhausted local Agent quota without consuming more quota', () => {
+    const provider = { ...createMockProvider(), type: 'volcengine-ark' }
+    const service = createGenerationService({
+      db, assets, delivery: fakeDelivery(), providers: [provider], now,
+      defaults: { image: { provider: 'mock' }, video: { provider: 'mock' } },
+      limits: { maxConcurrent: 3, dailyImage: 1, dailyVideo: 1, dailyAudio: 1 },
+    })
+    const caller = { ...agent, sessionId: 'operation-agent' }
+    db.insert(s.sessions).values({ id: caller.sessionId, agentKind: 'codex', title: 'Operations', createdAt: clock }).run()
+    for (const kind of ['image', 'video'] as const) {
+      service.submit(caller, { requestId: `fill-${kind}-operation-quota`, kind, prompt: 'Generate' })
+      expect(() => service.submit(caller, { requestId: `exhausted-${kind}-operation-quota`, kind, prompt: 'Generate again' }))
+        .toThrow(expect.objectContaining({ code: 'quota_exceeded' }))
+    }
+    expect(() => service.submit(caller, { requestId: 'unsupported-before-local-quota', kind: 'image', operation: 'image.upscale', prompt: 'Enlarge', inputs: [{ slotId: 'not-read' }] }))
+      .toThrow(expect.objectContaining({ code: 'invalid_params', details: { reason: 'generation.prompt_unsupported', params: {} } }))
+    expect(() => service.submit(caller, { requestId: 'required-before-local-quota', kind: 'video', operation: 'video.reshoot', prompt: ' \t ', inputs: [{ slotId: 'not-read' }] }))
+      .toThrow(expect.objectContaining({ code: 'invalid_params', details: { reason: 'generation.prompt_required', params: {} } }))
+    expect(db.select().from(s.generationJobs).all()).toHaveLength(2)
+    expect(service.usage()).toMatchObject({ image: 1, video: 1, agent: { image: 1, video: 1 } })
+  })
+
+  it('accepts optional operation prompts and resolves subject references with operation settings', async () => {
+    const { service, submits } = setup()
+    const subject = await seedImageSlot('outpaint-subject')
+    await subject.revise('Subject')
+    for (const [index, prompt] of ['', `Expand {{ref:${subject.nodeId}}}`].entries()) {
+      const result = service.submit(agent, { requestId: `optional-operation-prompt-${index}`, kind: 'image', operation: 'image.outpaint', prompt, inputs: [{ slotId: subject.slotId }] })
+      expect(job(result.jobId).params).toMatchObject({ prompt, ratio: '16:9' })
+      expect(await runToEnd(service, result.jobId)).toBe('succeeded')
+    }
+    expect(submits.map(request => request.prompt)).toEqual(['', 'Expand 图片 1'])
+    expect(submits.map(request => request.params)).toEqual([{ ratio: '16:9' }, { ratio: '16:9' }])
+  })
+
+  it('accepts a required reshoot prompt and duration defaults while retaining the mock video placeholder', async () => {
+    const { service, submits } = setup()
+    const subject = await seedMediaSlot('reshoot-subject', 'video')
+    await subject.revise('Subject video')
+    const result = service.submit(agent, { requestId: 'required-operation-prompt', kind: 'video', operation: 'video.reshoot', prompt: 'Film from above', inputs: [{ slotId: subject.slotId }] })
+    expect(job(result.jobId).params).toEqual({ prompt: 'Film from above', duration: 5 })
+    expect(await runToEnd(service, result.jobId)).toBe('succeeded')
+    expect(submits[0]).toMatchObject({ operation: 'video.reshoot', prompt: 'Film from above', params: { duration: 5 }, inputs: [{ kind: 'video' }] })
+    const output = (await service.get({ jobId: result.jobId })).outputs[0]!
+    const version = assets.getVersion(db, output.assetVersionId)!
+    expect(version).toMatchObject({ mime: 'video/mp4', durationMs: 1000, width: 128, height: 128 })
+    expect((await readFile(assets.blobPath(version.blobHash))).includes(Buffer.from('video.reshoot'))).toBe(true)
+  }, 20_000)
+
+  it('regenerates an operation with unchanged stored settings, prompt and subject revision after its spec changes', async () => {
+    const { service, provider, submits } = setup()
+    const subject = await seedImageSlot('regenerate-operation')
+    await subject.revise('Original subject')
+    const result = service.submit(agent, { requestId: 'original-operation', kind: 'image', operation: 'image.upscale', prompt: '', inputs: [{ slotId: subject.slotId }], params: { scale: 4 } })
+    expect(await runToEnd(service, result.jobId)).toBe('succeeded')
+    await subject.revise('Later subject')
+    provider.operationSpecFor = vi.fn(() => { throw new Error('Regenerate must reuse stored settings without consulting the current spec') })
+    const next = service.regenerate(agent, { requestId: 'repeat-operation', jobId: result.jobId })
+    expect(job(next.jobId).params).toEqual({ prompt: '', scale: 4 })
+    expect(await runToEnd(service, next.jobId)).toBe('succeeded')
+    expect(submits).toHaveLength(2)
+    expect(submits[1]).toEqual(submits[0])
+    expect(provider.operationSpecFor).not.toHaveBeenCalled()
+  })
+
   it('rejects undeclared frame modes before resolving inputs or reserving quota', () => {
     const provider = { ...createMockProvider(), type: 'volcengine-ark' as const, frameModesFor: () => [] }
     const reserve = vi.fn()
@@ -419,11 +604,11 @@ describe('Generation operations and prompt references', () => {
     await subject.revise('image contents')
     const result = service.submit(agent, {
       requestId: 'upscale', kind: 'image', operation: 'image.upscale', prompt: '',
-      inputs: [{ slotId: subject.slotId }], params: { width: 64, height: 64 },
+      inputs: [{ slotId: subject.slotId }], params: { scale: 4 },
     })
     expect(result.bindings[0]!.target).toEqual({ kind: 'new_node', nearNodeId: subject.nodeId })
     expect(await runToEnd(service, result.jobId)).toBe('succeeded')
-    expect(submits[0]).toMatchObject({ operation: 'image.upscale', prompt: '', inputs: [{ type: 'asset', kind: 'image' }] })
+    expect(submits[0]).toMatchObject({ operation: 'image.upscale', prompt: '', params: { scale: 4 }, inputs: [{ type: 'asset', kind: 'image' }] })
     expect(await service.get({ jobId: result.jobId })).toMatchObject({ operation: 'image.upscale' })
     const output = db.select().from(s.generationOutputs).get()!
     const version = assets.getVersion(db, output.assetVersionId)!
@@ -470,7 +655,7 @@ describe('Generation operations and prompt references', () => {
       .toThrow(expect.objectContaining({ details: { reason: 'generation.prompt_reference_missing', params: { nodeId: a.nodeId } } }))
   })
 
-  it('numbers image, video and audio references in one input order and uses the first occurrence of a duplicated node', async () => {
+  it('numbers image, video and audio references per type and uses the first occurrence of a duplicated node', async () => {
     const { service, submits } = setup()
     db.insert(s.sessions).values({ id: 'reference-agent', agentKind: 'codex', title: 'References', createdAt: clock }).run()
     const inputs: { slotId: string }[] = []
@@ -489,7 +674,7 @@ describe('Generation operations and prompt references', () => {
       inputs: [...inputs, inputs[0]!],
     })
     await service.pump()
-    expect(submits[0]!.prompt).toBe('音频 3 图片 1 视频 2')
+    expect(submits[0]!.prompt).toBe('音频 1 图片 1 视频 1')
   })
 
   it('rejects a text or wrong-kind first input for a generation operation', async () => {
@@ -503,15 +688,19 @@ describe('Generation operations and prompt references', () => {
 
 /** Creates an image slot with content and returns slotId; revisions can be appended afterward */
 async function seedImageSlot(id: string) {
-  db.insert(s.operations).values({ id: `op_${id}`, actorKind: 'user', createdAt: clock }).onConflictDoNothing().run()
-  db.insert(s.nodes).values({ id: `node_${id}`, kind: 'image', x: 0, y: 0, w: 1, h: 1, z: 0, createdAt: clock }).run()
-  db.insert(s.slots).values({ id: `slot_${id}`, nodeId: `node_${id}`, slotKey: 'main', contentType: 'image' }).run()
-  return { nodeId: `node_${id}`, slotId: `slot_${id}`, revise: (content: string) => addRevision(`slot_${id}`, content, `op_${id}`) }
+  return seedMediaSlot(id, 'image')
 }
 
-async function addRevision(slotId: string, content: string, operationId: string) {
+async function seedMediaSlot(id: string, kind: 'image' | 'video') {
+  db.insert(s.operations).values({ id: `op_${id}`, actorKind: 'user', createdAt: clock }).onConflictDoNothing().run()
+  db.insert(s.nodes).values({ id: `node_${id}`, kind, x: 0, y: 0, w: 1, h: 1, z: 0, createdAt: clock }).run()
+  db.insert(s.slots).values({ id: `slot_${id}`, nodeId: `node_${id}`, slotKey: 'main', contentType: kind }).run()
+  return { nodeId: `node_${id}`, slotId: `slot_${id}`, revise: (content: string) => addRevision(`slot_${id}`, content, `op_${id}`, kind) }
+}
+
+async function addRevision(slotId: string, content: string, operationId: string, kind: 'image' | 'video' = 'image') {
   const staged = await assets.stageBytes(new TextEncoder().encode(content))
-  const v = assets.registerVersion(db, { staged, kind: 'image', mime: 'image/png', origin: 'import' })
+  const v = assets.registerVersion(db, { staged, kind, mime: kind === 'image' ? 'image/png' : 'video/mp4', origin: 'import' })
   const slot = db.select().from(s.slots).where(eq(s.slots.id, slotId)).get()!
   const revision = slot.currentRevision + 1
   db.insert(s.slotRevisions).values({ slotId, revision, assetVersionId: v.assetVersionId, operationId, createdAt: clock }).run()
@@ -528,6 +717,40 @@ describe('generation.submit', () => {
         code: 'invalid_params', message: 'Provider-specific rejection',
         details: { reason: 'generation.invalid_params', params: { detail: 'Provider-specific rejection' } },
       }))
+    expect(db.select().from(s.generationJobs).all()).toHaveLength(0)
+  })
+
+  it.each(['direct', 'slot'] as const)('passes pinned %s video metadata to validation before quota and to the runner', async source => {
+    const slot = await seedMediaSlot('metadata', 'video')
+    const staged = await assets.stageBytes(new Uint8Array([1, 2, 3, 4]))
+    const metadata = { width: 1280, height: 720, fps: 29.97, durationMs: 3000 }
+    const version = assets.registerVersion(db, { staged, kind: 'video', mime: 'video/mp4', ...metadata, origin: 'import' })
+    db.insert(s.slotRevisions).values({ slotId: slot.slotId, revision: 1, assetVersionId: version.assetVersionId, operationId: 'op_metadata', createdAt: clock }).run()
+    db.update(s.slots).set({ currentRevision: 1 }).where(eq(s.slots.id, slot.slotId)).run()
+    const { service, provider, submits } = setup()
+    const validate = vi.fn<(kind: string, model: string, inputs: ProviderInputMetadata[]) => void>()
+    provider.validateInputs = validate
+    service.submit(agent, { requestId: 'metadata', kind: 'video', prompt: 'Move', inputs: [source === 'direct' ? { assetVersionId: version.assetVersionId } : { slotId: slot.slotId }] })
+    expect(validate).toHaveBeenCalledWith('video', 'mock-video-1', [{ kind: 'video', mime: 'video/mp4', bytes: 4, ...metadata }], expect.anything(), 'generate')
+    await service.pump()
+    expect(submits[0]!.inputs).toEqual([{ type: 'asset', kind: 'video', mime: 'video/mp4', path: assets.blobPath(staged.hash), bytes: 4, ...metadata }])
+  })
+
+  it.each(['direct', 'slot'] as const)('rejects invalid %s Ark video metadata before quota reservation', async source => {
+    const slot = await seedMediaSlot('invalid-video', 'video')
+    const staged = await assets.stageBytes(new Uint8Array([1]))
+    const version = assets.registerVersion(db, { staged, kind: 'video', mime: 'video/mp4', width: 1280, height: 720, fps: 10, durationMs: 3000, origin: 'import' })
+    db.insert(s.slotRevisions).values({ slotId: slot.slotId, revision: 1, assetVersionId: version.assetVersionId, operationId: 'op_invalid-video', createdAt: clock }).run()
+    db.update(s.slots).set({ currentRevision: 1 }).where(eq(s.slots.id, slot.slotId)).run()
+    const reserve = vi.fn()
+    const getKey = vi.fn(async () => 'fake-key')
+    const upload = vi.fn(async () => 'https://example.invalid')
+    const provider = createArkProvider({ id: 'ark', dataDir: dir, baseUrl: 'http://127.0.0.1:1', imageModels: [], videoModels: [{ id: 'doubao-seedance-2-5-260628', label: 'Video' }], getKey, hosted: { configured: true, url: upload, release: async () => {}, redact: text => text } })
+    const service = createGenerationService({ db, assets, delivery: fakeDelivery(), providers: [provider], now, defaults: { video: { provider: 'ark' } }, quota: { reserve, rollback: vi.fn(), tryStart: () => true, release: vi.fn(), usage: () => ({ date: '', image: 0, video: 0, audio: 0, agent: { image: 0, video: 0, audio: 0 } }) } })
+    expect(() => service.submit(agent, { requestId: 'invalid-video', kind: 'video', prompt: 'Move', inputs: [source === 'direct' ? { assetVersionId: version.assetVersionId } : { slotId: slot.slotId }] })).toThrow(expect.objectContaining({ details: { reason: 'generation.video_reference_fps', params: { minFps: 24, maxFps: 60 } } }))
+    expect(reserve).not.toHaveBeenCalled()
+    expect(getKey).not.toHaveBeenCalled()
+    expect(upload).not.toHaveBeenCalled()
     expect(db.select().from(s.generationJobs).all()).toHaveLength(0)
   })
 
@@ -640,8 +863,8 @@ describe('generation.submit', () => {
     await outside.revise('b-v3')
     await service.pump()
     expect(submits[0]!.inputs).toEqual([
-      { type: 'asset', kind: 'image', mime: 'image/png', path: assets.blobPath(v1.hash) },
-      { type: 'asset', kind: 'image', mime: 'image/png', path: assets.blobPath(b2.hash) },
+      { type: 'asset', kind: 'image', mime: 'image/png', bytes: 4, path: assets.blobPath(v1.hash) },
+      { type: 'asset', kind: 'image', mime: 'image/png', bytes: 4, path: assets.blobPath(b2.hash) },
     ])
   })
 
@@ -1058,7 +1281,101 @@ describe('Cancellation and regeneration', () => {
     expect(db.select().from(s.jobInputs).where(eq(s.jobInputs.jobId, next.jobId)).get()).toMatchObject({ slotId: input.slotId, slotRevision: v1.revision })
     expect(db.select().from(s.slots).where(eq(s.slots.id, target.slotId)).get()!.acceptedBindingId).toBe(next.bindings[0]!.bindingId)
     await service.pump()
-    expect(submits[1]!.inputs).toEqual([{ type: 'asset', kind: 'image', mime: 'image/png', path: assets.blobPath(v1.hash) }])
+    expect(submits[1]!.inputs).toEqual([{ type: 'asset', kind: 'image', mime: 'image/png', bytes: 8, path: assets.blobPath(v1.hash) }])
+  })
+
+  it.each(['image', 'video', 'audio'] as const)('regenerates a single %s into the chosen main slot with fresh revision checks and idempotent receipts', async kind => {
+    const { service, submits } = setup()
+    const target = await seedImageSlot('chosen')
+    db.update(s.nodes).set({ kind }).where(eq(s.nodes.id, target.nodeId)).run()
+    db.update(s.slots).set({ contentType: kind }).where(eq(s.slots.id, target.slotId)).run()
+    const first = service.submit(agent, { requestId: 'first', kind, prompt: 'Original settings', params: { n: 1 } })
+    expect(await runToEnd(service, first.jobId)).toBe('succeeded')
+    const request = { requestId: 'chosen-retry', jobId: first.jobId, targetNodeId: target.nodeId }
+    const next = service.regenerate(agent, request)
+    expect(service.regenerate(agent, request)).toEqual(next)
+    expect(db.select().from(s.generationJobs).all()).toHaveLength(2)
+    expect(next.bindings).toEqual([{
+      bindingId: expect.any(String), outputIndex: 0,
+      target: { kind: 'slot', nodeId: target.nodeId, slotId: target.slotId, expectedRevision: 0 },
+    }])
+    expect(job(next.jobId)).toMatchObject({ kind, provider: job(first.jobId).provider, model: job(first.jobId).model, params: job(first.jobId).params })
+    expect(await runToEnd(service, next.jobId)).toBe('succeeded')
+    expect(submits[1]).toEqual(submits[0])
+  })
+
+  it('regenerates only the chosen node from a multi-output job, preserving all settings and pinned inputs except count', async () => {
+    const { service, submits } = setup()
+    const reference = await seedImageSlot('reference')
+    await reference.revise('Original reference')
+    const targets = await Promise.all(['one', 'two', 'three'].map(seedImageSlot))
+    const first = service.submit(agent, {
+      requestId: 'multi', kind: 'image', prompt: `Use {{ref:${reference.nodeId}}}`,
+      params: { n: 3, width: 128, height: 256 }, inputs: [{ slotId: reference.slotId, revision: 1 }],
+      targets: targets.map((target, outputIndex) => ({ outputIndex, kind: 'slot', slotId: target.slotId })),
+    })
+    expect(await runToEnd(service, first.jobId)).toBe('succeeded')
+    await reference.revise('Changed reference')
+    const before = targets.map(target => db.select().from(s.slots).where(eq(s.slots.id, target.slotId)).get()!)
+    const chosen = targets[1]!
+    const next = service.regenerate(agent, { requestId: 'only-two', jobId: first.jobId, targetNodeId: chosen.nodeId })
+    expect(next.bindings).toEqual([{
+      bindingId: expect.any(String), outputIndex: 0,
+      target: { kind: 'slot', nodeId: chosen.nodeId, slotId: chosen.slotId, expectedRevision: 0 },
+    }])
+    expect(job(first.jobId).params).toMatchObject({ n: 3 })
+    expect(job(next.jobId).params).toEqual({ ...(job(first.jobId).params as Record<string, unknown>), n: 1 })
+    const pinned = (jobId: string) => db.select().from(s.jobInputs).where(eq(s.jobInputs.jobId, jobId)).all().map(({ jobId: _jobId, ...input }) => input)
+    expect(pinned(next.jobId)).toEqual(pinned(first.jobId))
+    expect(await runToEnd(service, next.jobId)).toBe('succeeded')
+    expect(submits[1]).toEqual({ ...submits[0], params: { ...submits[0]!.params, n: 1 } })
+    expect((await service.get({ jobId: next.jobId })).outputs).toHaveLength(1)
+    expect(db.select().from(s.slots).where(eq(s.slots.id, targets[0]!.slotId)).get()).toEqual(before[0])
+    expect(db.select().from(s.slots).where(eq(s.slots.id, targets[2]!.slotId)).get()).toEqual(before[2])
+  })
+
+  it('keeps pinned first and last frames when regenerating into a chosen video node', async () => {
+    const { service, submits } = setup()
+    const firstFrame = await seedImageSlot('first-frame')
+    const lastFrame = await seedImageSlot('last-frame')
+    await firstFrame.revise('First')
+    await lastFrame.revise('Last')
+    const target = await seedImageSlot('video-target')
+    db.update(s.nodes).set({ kind: 'video' }).where(eq(s.nodes.id, target.nodeId)).run()
+    db.update(s.slots).set({ contentType: 'video' }).where(eq(s.slots.id, target.slotId)).run()
+    const first = service.submit(agent, {
+      requestId: 'video', kind: 'video', prompt: 'Original motion',
+      frames: { first: { slotId: firstFrame.slotId }, last: { slotId: lastFrame.slotId } },
+    })
+    expect(await runToEnd(service, first.jobId)).toBe('succeeded')
+    await firstFrame.revise('Changed first')
+    await lastFrame.revise('Changed last')
+    const next = service.regenerate(agent, { requestId: 'video-retry', jobId: first.jobId, targetNodeId: target.nodeId })
+    expect(job(next.jobId).params).toEqual(job(first.jobId).params)
+    expect(await runToEnd(service, next.jobId)).toBe('succeeded')
+    expect(submits[1]).toEqual(submits[0])
+  })
+
+  it.each([
+    ['missing', 'generation.regenerate_node_missing'],
+    ['deleted', 'generation.regenerate_node_missing'],
+    ['wrong-kind', 'generation.regenerate_kind_mismatch'],
+    ['no-main', 'generation.regenerate_main_missing'],
+    ['deleted-main', 'generation.regenerate_main_missing'],
+  ])('rejects a %s regeneration target without creating a job or changing bindings', async (state, reason) => {
+    const { service } = setup()
+    const first = service.submit(agent, { requestId: 'first', kind: 'image', prompt: 'Original' })
+    expect(await runToEnd(service, first.jobId)).toBe('succeeded')
+    const target = state === 'missing' ? { nodeId: 'missing', slotId: 'missing' } : await seedImageSlot('invalid')
+    if (state === 'deleted') db.update(s.nodes).set({ deletedAt: clock }).where(eq(s.nodes.id, target.nodeId)).run()
+    if (state === 'wrong-kind') db.update(s.nodes).set({ kind: 'video' }).where(eq(s.nodes.id, target.nodeId)).run()
+    if (state === 'no-main') db.update(s.slots).set({ slotKey: 'prompt' }).where(eq(s.slots.id, target.slotId)).run()
+    if (state === 'deleted-main') db.update(s.slots).set({ deletedAt: clock }).where(eq(s.slots.id, target.slotId)).run()
+    const before = db.select().from(s.deliveryBindings).all()
+    expect(() => service.regenerate(agent, { requestId: 'invalid', jobId: first.jobId, targetNodeId: target.nodeId }))
+      .toThrow(expect.objectContaining({ code: 'invalid_params', details: { reason, params: expect.objectContaining({ nodeId: target.nodeId }) } }))
+    expect(db.select().from(s.generationJobs).all()).toHaveLength(1)
+    expect(db.select().from(s.deliveryBindings).all()).toEqual(before)
   })
 
   it('sessions are isolated and successful jobs cannot be cancelled; reconnect retains failures only for current bindings', async () => {

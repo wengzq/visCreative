@@ -2,6 +2,43 @@ import { describe, expect, it } from 'vitest'
 import { METHODS, capabilities, commandOf, describeCapability, listCapabilities, model } from './index'
 
 describe('capabilities', () => {
+  it('keeps all hosting methods UI-only and refuses agent capability descriptions', () => {
+    const ui = listCapabilities('ui').map(capability => capability.method)
+    const agent = listCapabilities('agent').map(capability => capability.method)
+    for (const method of ['hosting.get', 'hosting.update', 'hosting.setSecret', 'hosting.clearSecret', 'hosting.test'] as const) {
+      expect(METHODS[method].callers).toEqual(['ui'])
+      expect(ui).toContain(method)
+      expect(agent).not.toContain(method)
+      expect(describeCapability(method, 'agent')).toBeUndefined()
+      expect(describeCapability(method, 'ui')).toBeDefined()
+    }
+    expect(describeCapability('hosting.setSecret', 'ui')?.result).toMatchObject({
+      properties: { hasSecret: { type: 'boolean' } },
+      additionalProperties: false,
+    })
+    expect(describeCapability('hosting.setSecret', 'ui')?.result).not.toHaveProperty('properties.secret')
+    expect(METHODS['generation.submit'].description).toContain('referenceInputs.video')
+    expect(METHODS['generation.submit'].description).toContain('videoReferences must be ready')
+    expect(METHODS['generation.submit'].description).toContain('only for models whose referenceInputs.video.requiresHosting is true')
+  })
+
+  it('keeps regeneration UI-only even when targeting one node', () => {
+    expect(METHODS['generation.regenerate'].callers).toEqual(['ui'])
+    expect(listCapabilities('agent').map(capability => capability.method)).not.toContain('generation.regenerate')
+    expect(describeCapability('generation.regenerate', 'agent')).toBeUndefined()
+    expect(describeCapability('generation.regenerate', 'ui')?.params).toMatchObject({
+      required: ['requestId', 'jobId'],
+      properties: { targetNodeId: { type: 'string', minLength: 1, maxLength: 64 } },
+    })
+  })
+
+  it('keeps the prompt-slot creation operation out of agent capability schemas', () => {
+    expect(JSON.stringify(describeCapability('canvas.apply', 'agent')?.params)).not.toContain('node.setPrompt')
+    expect(JSON.stringify(describeCapability('canvas.apply', 'ui')?.params)).toContain('node.setPrompt')
+    const op = { op: 'node.setPrompt', nodeId: 'image', body: '{{ref:source}}', expectedRevision: 0 }
+    expect(METHODS['canvas.apply'].params.parse({ requestId: 'restore', ops: [op] }).ops).toEqual([op])
+    expect(METHODS['canvas.apply'].params.safeParse({ requestId: 'restore', ops: [{ ...op, expectedRevision: undefined }] }).success).toBe(false)
+  })
   it('lists project models only for the UI and exposes model versions through the public contract', () => {
     expect(METHODS['model.list'].callers).toEqual(['ui'])
     expect(model.list.params.parse({})).toEqual({})
@@ -31,7 +68,7 @@ describe('capabilities', () => {
     const agent = listCapabilities('agent')
     expect(agent.map(capability => capability.method)).toEqual([
       'asset.list', 'asset.label', 'library.state',
-      'text.requestDelete', 'text.propose', 'text.proposal.list', 'series.textList', 'series.textRead',
+      'text.requestDelete', 'scene.propose', 'scene.proposal.list', 'text.propose', 'text.proposal.list', 'series.textList', 'series.textRead',
       'session.setTitle',
       'generation.submit', 'generation.cancel', 'generation.recheck', 'generation.get', 'providers.list', 'canvas.apply', 'canvas.get', 'asset.get', 'asset.importFile', 'asset.extractFrames', 'media.process', 'media.get', 'script.batch.plan', 'script.batch.start', 'script.batch.get', 'script.batch.list', 'script.batch.cancel', 'media.analyze', 'font.list',
       // The gateway additionally checks work item API permissions by workspace relationships.
@@ -153,6 +190,7 @@ describe('capabilities', () => {
 
     const description = describeCapability('generation.submit', 'agent')!
     expect(description.description).toBe(METHODS['generation.submit'].description)
+    expect(description.description).toContain('operationSpecs in providers.list')
     // 0021: prompt defaults to an empty string; generate still requires it (a refine, not in the JSON Schema); other operations may omit it
     expect(description.params).toMatchObject({
       required: ['requestId', 'kind'],
@@ -193,4 +231,13 @@ describe('capabilities', () => {
       properties: { waitMs: { type: 'integer', minimum: 0, maximum: 30_000 } },
     })
   })
+})
+
+
+it('exposes scene proposals to Agents but reserves all resolutions for the author', () => {
+  expect(METHODS['scene.propose'].callers).toEqual(['agent'])
+  expect(METHODS['scene.proposal.list'].callers).toEqual(['ui', 'agent'])
+  expect(METHODS['scene.proposal.resolve'].callers).toEqual(['ui'])
+  expect(describeCapability('scene.proposal.resolve', 'agent')).toBeUndefined()
+  expect(describeCapability('scene.propose', 'agent')?.params).toMatchObject({ required: ['requestId', 'slotId', 'baseRevision', 'summary', 'changes'] })
 })

@@ -203,6 +203,8 @@ describe.skipIf(!ready)('Transparent local video', () => {
       { id: 'overlay', kind: 'overlay', muted: false, volume: 1, clips: [{ ...clip('alpha', { nodeId: video.nodeId, assetVersionId }), overlay: { x: 0.5, y: 0.5, width: 1, opacity: 1 } }] },
     ] } }] })
     await page.getByRole('button', { name: 'Fit canvas', exact: true }).click()
+    // The earlier test leaves the video selected; its prompt panel stays docked and may cover the timeline card below.
+    await page.locator('.react-flow__pane').click({ position: { x: 20, y: 20 } })
     await page.getByRole('region', { name: /^Timeline Alpha overlay cut,/ }).dblclick()
     const editor = page.getByRole('dialog', { name: 'Alpha overlay cut', exact: true })
     const frame = editor.locator('.vis-tl-output-frame')

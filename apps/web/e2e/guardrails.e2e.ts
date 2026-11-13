@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 // Real studiod + web host + Chrome; Mock and a local fake Ark service cover cancellation, retries, and agent-only quotas.
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import type { Server } from 'node:http'
 import { join } from 'node:path'
 import { type Browser, chromium, type Page } from 'playwright-core'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -13,6 +13,7 @@ import { createMemorySecretStore } from '../../../services/studiod/src/secret-st
 import { startStudiod, type Studiod } from '../../../services/studiod/src/studiod'
 import { createWebHost, type WebHost } from '../src/host/server'
 import { openStudiodLink, type StudiodLink } from '../src/host/studiod-link'
+import { createIsolatedHttpServer } from '../../../scripts/testing/isolated-http'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const CHROME = chromePath()
@@ -79,7 +80,7 @@ describe.skipIf(!ready)('Generation job guardrails', () => {
         return mock.getTask(id, options)
       },
     }
-    server = createServer(async (request, response) => {
+    const isolated = createIsolatedHttpServer(async (request, response) => {
       if (request.url === '/image.png') {
         response.setHeader('Content-Type', 'image/png')
         response.end(PNG)
@@ -95,10 +96,9 @@ describe.skipIf(!ready)('Generation job guardrails', () => {
       }
       response.writeHead(404).end('{}')
     })
+    server = isolated.server
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('Local fake Ark service has not started')
-    origin = `http://127.0.0.1:${address.port}`
+    origin = isolated.baseUrl
     studiod = await startStudiod({
       dataDir: dir, studiodVersion: 'e2e', runtimes: {}, secretStore: createMemorySecretStore(),
       providers: [provider], defaults: { image: { provider: 'mock' }, video: { provider: 'mock' }, audio: { provider: 'mock' } },

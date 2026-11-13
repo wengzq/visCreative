@@ -3,6 +3,7 @@ import { mainSlot, previzDoc, scriptDoc, timelineDoc, type EpisodeSnapshot } fro
 import { manuscriptCheck } from './manuscript-checks'
 import { authorCheck } from './author-checks'
 import { scanFinalReplies } from './reply-checks'
+import { sceneCheck } from './scene-checks'
 
 export type Check = { id: string; result: 'pass' | 'fail' | 'review'; detail: string }
 export type ToolCall = { name: string; input: any; seq: number; turnId: string | null; toolUseId: string; hasResult: boolean; error: boolean; output: string; expectedRefusal?: string }
@@ -104,6 +105,7 @@ export function runChecks(ids: string[], e: Evidence): Check[] {
   return ids.map(id => {
     if (/^(directions_|child_|cleanup_|skill_)/.test(id)) return authorCheck(id, e, calls)
     if (id.startsWith('writing_')) return manuscriptCheck(id, e, calls)
+    if (id.startsWith('scene_')) return sceneCheck(id, e, calls)
     switch (id) {
       case 'final_reply_internals': {
         const matches = scanFinalReplies(e.transcript, e.prompts ?? [])

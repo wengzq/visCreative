@@ -1,5 +1,5 @@
 import { writingCardSize } from '@vis/protocol'
-import { VisError } from '@vis/domain'
+import { newId, VisError } from '@vis/domain'
 import type { CanvasOp, ExportOf, MethodParams, MethodResult, RevisionConflict, ShotLink } from '@vis/protocol'
 import { and, appendEvent, currentSeq, eq, isNull, spaceSchema as s, type SpaceTx } from '@vis/storage'
 import { previousInputs, previousSlot, recordUndo, type UndoStep } from './undo'
@@ -176,6 +176,26 @@ export function applyOps(tx: SpaceTx, actor: Actor, params: ApplyParams, now: nu
         inverse.push({ kind: 'generation', nodeId: node.id, generation: node.generation })
         tx.update(s.nodes).set({ generation: op.generation ?? null, layoutRevision: node.layoutRevision + 1 }).where(eq(s.nodes.id, node.id)).run()
         appendEvent(tx, { type: 'node.updated', entityType: 'node', entityId: node.id, payload: readNodes(tx, [node.id])[0], operationId }, now)
+        break
+      }
+      case 'node.setPrompt': {
+        const node = liveNode(resolveNode(op.nodeId))
+        if (!['image', 'video', 'audio'].includes(node.kind)) throw VisError.of('invalid_params', 'canvas.prompt_unsupported', {}, 'Only image, video, and audio nodes support prompts')
+        let slot = tx.select().from(s.slots).where(and(eq(s.slots.nodeId, node.id), eq(s.slots.slotKey, 'prompt'), isNull(s.slots.deletedAt))).get()
+        if ((slot && op.expectedRevision === 0) || (slot?.currentRevision ?? 0) !== op.expectedRevision) {
+          conflicts.push({ slotId: slot?.id ?? `${node.id}:prompt`, expectedRevision: op.expectedRevision, currentRevision: slot?.currentRevision ?? 0 })
+          break
+        }
+        const created = !slot
+        if (!slot) {
+          const slotId = newId('slot')
+          tx.insert(s.slots).values({ id: slotId, nodeId: node.id, slotKey: 'prompt', contentType: 'text' }).run()
+          slot = tx.select().from(s.slots).where(eq(s.slots.id, slotId)).get()!
+        }
+        // Undo keeps the newly created slot empty, matching an initially empty text slot.
+        inverse.push(previousSlot(tx, slot.id))
+        slotRevisions[slot.id] = writeSlotRevision(tx, slot.id, slot.currentRevision, { text: op.body }, operationId, now)
+        if (created) appendEvent(tx, { type: 'node.updated', entityType: 'node', entityId: node.id, payload: readNodes(tx, [node.id])[0], operationId }, now)
         break
       }
       case 'node.delete': {

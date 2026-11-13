@@ -52,7 +52,7 @@ export const capabilities = {
 } as const
 
 // Agent guides (RFC 0026): specialist instructions an agent reads on demand instead of carrying them every turn.
-export const GuideTopic = z.enum(['script', 'timeline', 'code-render', 'media', 'generation', 'canvas', 'library', 'previz', 'writing'])
+export const GuideTopic = z.enum(['script', 'timeline', 'code-render', 'media', 'generation', 'canvas', 'library', 'previz', 'writing', 'scene'])
 export type GuideTopic = z.infer<typeof GuideTopic>
 export const GuideSummary = z.object({ topic: GuideTopic, title: z.string(), when: z.string() })
 export type GuideSummary = z.infer<typeof GuideSummary>

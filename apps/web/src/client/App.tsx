@@ -1,10 +1,12 @@
+import { useSceneProposals, useSceneProposalsForNode, resolveSceneProposal } from './scene-proposals'
 import { useWritingProposals } from './writing-proposals'
 import { describeError, useLocale, useMessages, useFormat, type Locale } from '@vis/ui-kit'
 import { mySkillsMessages, messages } from './messages'
 import { RpcError } from './rpc'
+import { pickDirectory } from './desktop-bridge'
 import { localizedProvider } from './providerLabels'
 import { CanvasView, GenerationSettingsContext, latestTimelineExport, previzMessages, timelineSummary } from '@vis/canvas-ui'
-import type { AgentKind, ApprovalDecision, MethodResult, NodeView, TranscriptItem } from '@vis/protocol'
+import type { AgentKind, ApprovalDecision, MethodResult, NodeView, SceneChangeRef, SceneProposal, TranscriptItem } from '@vis/protocol'
 import { AgentsContext, EMPTY_AGENTS, agentLabel, type MentionNode, type RefChip, type RefPreview, type SkillOption, type WorkspaceInput, SessionPanel, ProjectSwitcher, SkillManager, type SkillManagerActions, useAttachments } from '@vis/workbench-ui'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type Notice } from './actions'
@@ -99,7 +101,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
   const view = useSpaceView(conn)
   const viewError = view.error ? describeSpaceError(view.error, locale) : null
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsSection, setSettingsSection] = useState<'guardrails' | 'mySkills'>()
+  const [settingsSection, setSettingsSection] = useState<'guardrails' | 'mySkills' | 'hosting'>()
   const [settingsDraft, setSettingsDraft] = useState<string>()
   const skillDraftHost = useMemo(() => ({
     state: (draftId: string) => conn.rpc.call<MethodResult<'skill.draftState'>>('skill.draftState', { draftId }),
@@ -117,7 +119,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
   const [writingId, setWritingId] = useState<string | null>(null)
   const [writingImportAt, setWritingImportAt] = useState<{ x: number; y: number } | null>(null)
   const [previzId, setPrevizId] = useState<string | null>(null)
-  const [sceneRequest, setSceneRequest] = useState<{ nodeId: string; viewId?: string; target?: ScenePanelTarget } | null>(null)
+  const [sceneRequest, setSceneRequest] = useState<{ nodeId: string; viewId?: string; target?: ScenePanelTarget; proposalId?: string } | null>(null)
   const [timelineId, setTimelineId] = useState<string | null>(null)
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -136,7 +138,10 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
   const running = [...view.state.jobs.values()].filter(j => !['succeeded', 'failed', 'unknown', 'cancelled'].includes(j.status)).length
   const sessions = useMemo(() => [...view.state.sessions.values()].filter(session => !session.workItemId || !view.work.deletedIds.has(session.workItemId)).sort((a, b) => a.createdAt - b.createdAt), [view.state.sessions, view.work.deletedIds])
   const spaceId = view.space?.spaceId
-  const generationSettings = useMemo(() => ({ catalog: providers, spaceId: spaceId ?? '', onManage: () => setSettingsOpen(true) }), [providers, spaceId])
+  const generationSettings = useMemo(() => ({ catalog: providers, spaceId: spaceId ?? '', onManage: (section?: 'hosting') => {
+    setSettingsSection(section)
+    setSettingsOpen(true)
+  } }), [providers, spaceId])
   useEffect(() => {
     if (!view.ready) { setUsage(null); return }
     let current = true
@@ -258,10 +263,19 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
     })
   }, [])
   useEffect(() => { setTimelineId(null); setPrevizId(null); setSceneRequest(null); setWritingId(null); setWritingImportAt(null) }, [spaceId])
+  const scenes = useSceneProposals(conn, view.space?.spaceId, view.ready)
+  const sceneProposalHost = useMemo(() => ({
+    state: (proposalId: string) => scenes.byId.get(proposalId),
+    resolve: async (slotId: string, action: 'accept' | 'reject', changes: SceneChangeRef[]) => {
+      if (spaceId) scenes.update(await resolveSceneProposal(conn, spaceId, locale, slotId, action, changes))
+    },
+    open: (proposal: SceneProposal) => setSceneRequest({ nodeId: proposal.nodeId, proposalId: proposal.proposalId }),
+  }), [conn, spaceId, locale, scenes.update, scenes.byId])
   const writing = useWritingProposals(conn, view.space?.spaceId, view.ready)
   const writingNode = writingId ? view.state.nodes.get(writingId) : undefined
   const previzNode = previzId ? view.state.nodes.get(previzId) : undefined
   const sceneNode = sceneRequest ? view.state.nodes.get(sceneRequest.nodeId) : undefined
+  const sceneEditorProposals = useSceneProposalsForNode(scenes.proposals, sceneNode?.nodeId)
   useEffect(() => { if (sceneRequest && view.ready && !sceneNode) closeScene() }, [sceneRequest, view.ready, sceneNode, closeScene])
   const timelineNode = timelineId ? view.state.nodes.get(timelineId) : undefined
   const [sessionRefs, setSessionRefs] = useState<Record<string, string[]>>({})
@@ -296,7 +310,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
       },
       projects: async () => (await conn.rpc.call<MethodResult<'space.list'>>('space.list', {})).spaces ?? [],
       folder: async () => {
-        const result = await conn.rpc.call<MethodResult<'fs.pickDirectory'>>('fs.pickDirectory', {})
+        const result = await pickDirectory(conn.rpc)
         if (result.unsupported) throw new Error(m.unsupportedFolder)
         if (!result.path) return
         return normalizeStage(await conn.rpc.call<MethodResult<'skill.stage'>>('skill.stage', { spaceId: target, path: result.path }))
@@ -402,9 +416,13 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
       const previous = result.get(proposal.nodeId) ?? { running: 0, problems: [] }
       result.set(proposal.nodeId, { ...previous, writingEdits: (previous.writingEdits ?? 0) + proposal.edits.filter(edit => edit.status === 'pending' || edit.status === 'stale').length })
     }
+    for (const proposal of scenes.proposals) {
+      const previous = result.get(proposal.nodeId) ?? { running: 0, problems: [] }
+      if (proposal.changes.some(change => change.status === 'pending')) result.set(proposal.nodeId, { ...previous, sceneProposals: (previous.sceneProposals ?? 0) + 1 })
+    }
     if (scriptShot) result.set(scriptShot.nodeId, { ...(result.get(scriptShot.nodeId) ?? { running: 0, problems: [] }), scriptShot })
     return result
-  }, [scriptDecorations, writing.proposals, scriptShot])
+  }, [scriptDecorations, writing.proposals, scriptShot, scenes.proposals])
   const timelineWriterTitle = timelineWriter?.actor === 'agent' && timelineWriter.sessionId ? view.state.sessions.get(timelineWriter.sessionId)?.title : undefined
   const timelineHost = useMemo(() => timelineNode && view.ready ? timelineEditorHost({
     conn, node: timelineNode, nodes: timelineNodes, actions, locale,
@@ -488,7 +506,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
     if (agentKind) await onCreate({ spaceId: project.spaceId, agentKind }).catch(fail(() => currentMessages.current.firstWorkspace))
   }
   const onPickDirectory = useCallback(async (defaultPath?: string) => {
-    const result = await conn.rpc.call<{ path?: string; cancelled: boolean; unsupported: boolean }>('fs.pickDirectory', { ...(defaultPath ? { defaultPath } : {}) })
+    const result = await pickDirectory(conn.rpc, defaultPath)
     if (result.unsupported) notify({ kind: 'info', text: m.enterFolder })
     return result.path
   }, [conn, notify, m])
@@ -576,7 +594,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
         {assetLibraryHost && libraryPreference.projectId === spaceId && libraryPreference.open ? <LibraryPanel key={spaceId} host={assetLibraryHost} tab={libraryPreference.tab} onTabChange={tab => changeLibrary({ tab })}
           settingsHeader={<SettingsHeader host={assetLibraryHost} runControls={<LibraryRunControls host={assetLibraryHost} kind="merge" />} />}
           renderGroupIntoSetting={(assetIds, close) => <GroupIntoSettingDialog host={assetLibraryHost} assetIds={assetIds} onClose={close} onGrouped={close} />} /> : null}
-        <SessionPanel skillDraftHost={skillDraftHost}
+        <SessionPanel sceneProposalHost={sceneProposalHost} skillDraftHost={skillDraftHost}
           showProjectSwitcher={false}
           workTree={work.tree}
           projectAttention={new Set(view.work.inboxCounts?.bySpace.filter(project => project.unresolved > 0).map(project => project.spaceId))}
@@ -647,7 +665,7 @@ export function App({ conn, localePreference, onLocaleChange }: { conn: SpaceCon
         />
       </main>
       {previzNode && view.ready ? <GenerationSettingsContext.Provider value={generationSettings}><PrevizEditorMount key={previzNode.nodeId} conn={conn} node={previzNode} initialPanelId={previzPanelId} nodes={nodes} close={closePreviz} openScene={(nodeId, viewId, panelId) => { setPrevizId(null); setSceneRequest({ nodeId, viewId, target: { nodeId: previzNode.nodeId, panelId } }) }} render={() => { setPrevizId(null); actions.onPrevizDraft?.(previzNode.nodeId, pm.renderDraft) }} /></GenerationSettingsContext.Provider> : null}
-      {sceneNode && view.ready ? <SceneEditorMount key={sceneNode.nodeId} conn={conn} node={sceneNode} nodes={nodes} initialViewId={sceneRequest?.viewId} initialTarget={sceneRequest?.target} close={closeScene} /> : null}
+      {sceneNode && view.ready ? <SceneEditorMount key={sceneNode.nodeId} conn={conn} node={sceneNode} nodes={nodes} initialViewId={sceneRequest?.viewId} initialTarget={sceneRequest?.target} initialProposalId={sceneRequest?.proposalId} proposals={sceneEditorProposals} updateProposals={scenes.update} close={closeScene} /> : null}
       {writingNode && writingNode.format !== 'code' && view.ready ? <WritingEditorMount key={writingNode.nodeId} conn={conn} node={writingNode} nodes={nodes} sourceQuote={writingQuote} openShot={async shot => { setWritingId(null); setScriptShot(previous => ({ nodeId: shot.scriptNodeId, shotId: shot.shotId, seq: (previous?.seq ?? 0) + 1 })); setFocusRequest(previous => ({ nodeId: shot.scriptNodeId, seq: (previous?.seq ?? 0) + 1 })) }} close={closeWriting} proposals={writing.proposals.filter(proposal => proposal.nodeId === writingNode.nodeId)} {...(openSessionId && view.state.sessions.get(openSessionId) ? { session: view.state.sessions.get(openSessionId)! } : {})} update={writing.update} /> : null}
       {writingImportAt && view.ready ? <CanvasWritingImport key={spaceId} conn={conn} at={writingImportAt} close={closeWritingImport} created={nodeId => { setWritingImportAt(null); setWritingQuote(undefined); setWritingId(nodeId); timelineReturnFocus.current = nodeId; setFocusRequest(previous => ({ nodeId, seq: (previous?.seq ?? 0) + 1 })) }} /> : null}
       {timelineHost ? <TimelineEditor key={timelineHost.node.nodeId} host={timelineHost} /> : null}

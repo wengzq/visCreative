@@ -2,7 +2,7 @@ import { crc32, inflateSync } from 'node:zlib'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { paramsSchemaOf, ProviderError } from '../types'
+import { operationSpecOf, paramsSchemaOf, ProviderError } from '../types'
 import type { ProviderAdapter, ProviderOutputRef, ProviderRequest } from '../types'
 import { createMockProvider } from './index'
 
@@ -56,6 +56,37 @@ function expectValidPng(data: Uint8Array, width: number, height: number) {
 }
 
 describe('mock provider', () => {
+  it('declares local video references and accepts them without hosting', async () => {
+    const provider = createMockProvider({ latencyMs: 0 })
+    expect(provider.referenceLimitsFor?.('video', 'mock-video-1')).toEqual({ image: 9, video: { max: 3, minMs: 1, maxMs: 30000, totalMs: 30000 }, audio: { max: 3, minMs: 1, maxMs: 30000, totalMs: 30000 } })
+    const request: ProviderRequest = { ...imageRequest, kind: 'video', model: 'mock-video-1', inputs: [{ type: 'asset', kind: 'video', mime: 'video/mp4', path: '/local.mp4', durationMs: 3000 }] }
+    await expect(provider.submit(request, { idempotencyKey: 'local-video' })).resolves.toHaveProperty('externalTaskId')
+    await expect(provider.submit({ ...request, inputs: [{ type: 'asset', kind: 'audio', mime: 'audio/wav', path: '/local.wav', durationMs: 1 }] }, { idempotencyKey: 'local-audio' })).resolves.toHaveProperty('externalTaskId')
+  })
+
+  it.each([
+    { operation: 'image.upscale', kind: 'image', model: 'mock-image-1', defaults: { scale: 2 }, prompt: 'none', valid: { scale: 4 }, invalid: [{ scale: 1 }, { scale: 3 }] },
+    { operation: 'image.outpaint', kind: 'image', model: 'mock-image-1', defaults: { ratio: '16:9' }, prompt: 'optional', valid: { ratio: '1:1' }, invalid: [{ ratio: 'invalid' }] },
+    { operation: 'image.matting', kind: 'image', model: 'mock-image-1', defaults: {}, prompt: 'none', valid: {}, invalid: [{ scale: 2 }] },
+    { operation: 'image.multiview', kind: 'image', model: 'mock-image-1', defaults: { views: 4 }, prompt: 'none', valid: { views: 2 }, invalid: [{ views: 1 }, { views: 5 }, { views: 2.5 }] },
+    { operation: 'video.upscale', kind: 'video', model: 'mock-video-1', defaults: { scale: 2 }, prompt: 'none', valid: { scale: 4 }, invalid: [{ scale: 3 }] },
+    { operation: 'video.removeSubtitles', kind: 'video', model: 'mock-video-1', defaults: {}, prompt: 'none', valid: {}, invalid: [{ scale: 2 }] },
+    { operation: 'video.reshoot', kind: 'video', model: 'mock-video-1', defaults: { duration: 5 }, prompt: 'required', valid: { duration: 10 }, invalid: [{ duration: 0 }, { duration: 11 }, { duration: 1.5 }] },
+  ] as const)('$operation has independent settings with defaults and its prompt rule', async ({ operation, kind, model, defaults, prompt, valid, invalid }) => {
+    const provider = createMockProvider({ latencyMs: 0 })
+    const spec = operationSpecOf(provider, kind, model, operation)
+    expect(spec.prompt).toBe(prompt)
+    expect(spec.paramsSchema.parse({})).toEqual(defaults)
+    expect(spec.paramsSchema.parse(valid)).toEqual(valid)
+    expect(spec.paramsSchema.safeParse({ width: 64, height: 64 }).success).toBe(false)
+    for (const params of invalid) expect(spec.paramsSchema.safeParse(params).success).toBe(false)
+    const request: ProviderRequest = { operation, kind, model, prompt: prompt === 'required' ? 'Film again' : '', params: {}, inputs: [] }
+    const { externalTaskId } = await provider.submit(request, { idempotencyKey: operation })
+    expect(await outputsOf(provider, externalTaskId)).toEqual([{ outputIndex: 0, ref: externalTaskId }])
+    await expectProviderError(provider.submit({ ...request, params: { n: 2 } }, { idempotencyKey: `${operation}-generate-settings` }), 'rejected')
+    await expect(provider.findTaskByIdempotencyKey!(`${operation}-generate-settings`)).resolves.toBeNull()
+  })
+
   it('uses default parameters and 1500ms delay; clock rollback never makes progress negative', async () => {
     let now = 1000
     const provider = createMockProvider({ clock: () => now })

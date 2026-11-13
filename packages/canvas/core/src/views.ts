@@ -1,7 +1,7 @@
 import { VisError } from '@vis/domain'
 import { projectScriptsEntities } from '@vis/library-core'
 import type { MethodParams, MethodResult, NodeView, SlotContent, SlotView } from '@vis/protocol'
-import { and, desc, eq, inArray, isNull, lt, ne, spaceSchema as s, type SpaceTx } from '@vis/storage'
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, spaceSchema as s, type SpaceTx } from '@vis/storage'
 
 /** Read current content of undeleted nodes and their slots */
 export function readNodes(tx: SpaceTx, nodeIds?: string[]): NodeView[] {
@@ -31,7 +31,7 @@ export function readNodes(tx: SpaceTx, nodeIds?: string[]): NodeView[] {
     })
     .from(s.slots)
     .leftJoin(s.slotRevisions, and(eq(s.slotRevisions.slotId, s.slots.id), eq(s.slotRevisions.revision, s.slots.currentRevision)))
-    .leftJoin(s.deliveryBindings, eq(s.deliveryBindings.deliveredOperationId, s.slotRevisions.operationId))
+    .leftJoin(s.deliveryBindings, and(eq(s.deliveryBindings.deliveredOperationId, s.slotRevisions.operationId), isNotNull(s.slotRevisions.assetVersionId)))
     .leftJoin(s.assetVersions, eq(s.assetVersions.id, s.slotRevisions.assetVersionId))
     .leftJoin(s.operations, eq(s.operations.id, s.slotRevisions.operationId))
     .where(and(isNull(s.slots.deletedAt), inArray(s.slots.nodeId, nodeRows.map(n => n.id))))
@@ -76,7 +76,7 @@ export function readSlotHistory(tx: SpaceTx, params: MethodParams<'slot.history'
   }).from(s.slotRevisions)
     .innerJoin(s.operations, eq(s.operations.id, s.slotRevisions.operationId))
     .leftJoin(s.assetVersions, eq(s.assetVersions.id, s.slotRevisions.assetVersionId))
-    .leftJoin(s.deliveryBindings, eq(s.deliveryBindings.deliveredOperationId, s.slotRevisions.operationId))
+    .leftJoin(s.deliveryBindings, and(eq(s.deliveryBindings.deliveredOperationId, s.slotRevisions.operationId), isNotNull(s.slotRevisions.assetVersionId)))
     .leftJoin(s.generationJobs, eq(s.generationJobs.id, s.deliveryBindings.jobId))
     .where(and(eq(s.slotRevisions.slotId, params.slotId), params.beforeRevision !== undefined ? lt(s.slotRevisions.revision, params.beforeRevision) : undefined))
     .orderBy(desc(s.slotRevisions.revision)).limit(params.limit + 1).all()
@@ -84,13 +84,15 @@ export function readSlotHistory(tx: SpaceTx, params: MethodParams<'slot.history'
   const inputsByJob = readJobInputNodes(tx, [...new Set(page.flatMap(r => r.job ? [r.job.id] : []))])
   return {
     versions: page.map(r => {
-      const { resolvedPrompt: _resolvedPrompt, ...visibleParams } = (r.job?.params ?? {}) as Record<string, unknown>
-      const jobParams = r.job ? visibleParams : undefined
+      const { prompt, resolvedPrompt, actualPrompt, revisedPrompt, frameRefs: _frameRefs, providerConfiguration: _configuration, ...visibleParams } = (r.job?.params ?? {}) as Record<string, unknown>
+      const used = ([['revised', revisedPrompt], ['sent', actualPrompt], ['resolved', resolvedPrompt], ['authored', prompt]] as const).find(([, value]) => typeof value === 'string' && value.length > 0)
       return {
         revision: r.revision, content: contentOf(r), createdAt: r.createdAt, actor: r.actor, isCurrent: r.revision === slot.currentRevision,
         ...(r.job ? { source: {
-          jobId: r.job.id, provider: r.job.provider, model: r.job.model, params: jobParams!,
-          ...(typeof jobParams?.prompt === 'string' ? { prompt: jobParams.prompt } : {}),
+          jobId: r.job.id, provider: r.job.provider, model: r.job.model, params: visibleParams,
+          ...(r.job.operation !== 'generate' ? { operation: r.job.operation } : {}),
+          ...(typeof prompt === 'string' ? { prompt } : {}),
+          ...(used ? { usedPromptKind: used[0], usedPrompt: used[1] as string } : {}),
           inputNodeIds: [...(inputsByJob.get(r.job.id) ?? [])].filter(id => id !== slot.nodeId),
         } } : {}),
       }
@@ -157,7 +159,7 @@ function readNodeInputs(tx: SpaceTx, nodeIds: string[]): Map<string, string[]> {
   return inputs
 }
 
-function readJobInputNodes(tx: SpaceTx, jobIds: string[]): Map<string, Set<string>> {
+export function readJobInputNodes(tx: SpaceTx, jobIds: string[]): Map<string, Set<string>> {
   // Include slots of deleted nodes; deduplicate by ordinal to preserve provenance order.
   const inputs = jobIds.length ? tx.select({ jobId: s.jobInputs.jobId, nodeId: s.slots.nodeId })
     .from(s.jobInputs)

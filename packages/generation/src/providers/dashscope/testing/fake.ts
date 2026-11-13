@@ -1,4 +1,3 @@
-import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +6,7 @@ import type { ContractScenario } from '../../contract'
 import type { ProviderRequest } from '../../types'
 import { createDashScopeProvider, DASHSCOPE_REGIONS } from '../index'
 import { DASHSCOPE_MODELS } from '../models'
+import { createIsolatedHttpServer } from '../../../../../../scripts/testing/isolated-http'
 
 export const SECRET = 'dashscope-fixture-key/never-real'
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64')
@@ -37,12 +37,13 @@ export async function fakeDashScope(scenario: ContractScenario = 'normal', kind:
     outputBytes: kind === 'video' ? mp4 : PNG,
     outputStatus: 200,
     queryStatus: 200,
+    actualPrompt: undefined as unknown,
   }
   let origin = ''
   let calls = 0
   let outputCalls = 0
   let outputAuthenticated = false
-  const server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const send = (body: unknown, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
     if (req.url?.startsWith('/output')) {
       outputCalls++
@@ -90,20 +91,20 @@ export async function fakeDashScope(scenario: ContractScenario = 'normal', kind:
       task_status: !task || controls.hideTask ? 'UNKNOWN' : controls.status,
       ...(controls.taskCode ? { code: controls.taskCode, message: controls.taskMessage } : {}),
       ...(task?.kind === 'video' ? { video_url: url } : { choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: [{ type: 'image', image: url }] } }] }),
+      ...(controls.actualPrompt !== undefined ? { actual_prompt: controls.actualPrompt } : {}),
       ...(controls.partialModeration ? { results: [{ url }, { code: 'DataInspectionFailed', message: 'Output data may contain inappropriate content.' }] } : {}),
     } })
   })
+  const { server } = isolated
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Fake DashScope server did not start')
-  origin = `http://127.0.0.1:${address.port}`
+  origin = isolated.baseUrl
   const fetcher: typeof fetch = (input, init) => {
     const url = new URL(String(input))
     if (DASHSCOPE_REGIONS.some(region => new URL(region.baseUrl).origin === url.origin)) {
       routedHosts.push(url.origin)
       return fetch(`${origin}${url.pathname}${url.search}`, init)
     }
-    if (url.origin === origin) return fetch(input, init)
+    if (url.origin === new URL(origin).origin) return fetch(input, init)
     throw new Error('Fake DashScope transport refuses external requests')
   }
   const options = {

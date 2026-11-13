@@ -24,6 +24,8 @@ import { isEditing } from './VideoPlayer'
 import { useGenerationChoice } from './ModelPicker'
 import { PromptPanel } from './PromptPanel'
 import type { GenerationChoice } from './params'
+import type { OperationRequest } from './operation-panel'
+import { isOperationSource } from './generation-provenance'
 import { extensionPosition, freePosition, inputEdges, nodeSize, FRAME_COLORS, FRAME_MIN_SIZE, frameMembers, frameMoveOps } from './graph'
 import { useNodeVersions, VersionMedia } from './VersionStrip'
 import { WRITING_LIMITS, writingWordCount, LocalOperation } from '@vis/protocol'
@@ -50,7 +52,7 @@ import { moveFlowNodes, selectFlowNodes, toFlowNode, type VisNode, type VisNodeD
 import { shallowEqual, useShallowValue, useStableCallback } from './render-state'
 import { nodeTitleNumbers } from './node-title'
 import { MarkdownBody } from './MarkdownBody'
-import { lowTextDetail, markdownOpening, textSummary } from './text-detail'
+import { lowTextDetail, markdownOpening, textOverview } from './text-detail'
 import { zoomedViewport } from './viewport'
 import { frameRunningStates } from './frame-running'
 import { historySelection, type CanvasHistorySource } from './history-state'
@@ -99,6 +101,7 @@ export type CanvasActions = ScriptActions & {
   onGenerate(nodeId: string, choice?: GenerationChoice): Promise<void>
   onCancelGeneration?(jobId: string): Promise<void>
   onRegenerate?(jobId: string): Promise<void>
+  onRegenerateNode?(nodeId: string, jobId: string): Promise<void>
   /** Jobs with unknown results keep querying the original external job rather than resubmitting */
   onRecheck?(jobId: string): Promise<void>
   onClone(nodes: NodeView[], at: { x: number; y: number }): Promise<string[]>
@@ -123,7 +126,7 @@ export type CanvasActions = ScriptActions & {
   /** Silence detection (media.analyze audio.silence); returns candidate split points */
   onMediaAnalyze?(nodeId: string, slotId: string): Promise<{ durationMs: number; pointsMs: number[] }>
   /** Generation operation (generation.submit with operation); uses the node main slot as input and creates a new node for the result */
-  onRunOperation?(nodeId: string, operation: GenerationOperation): Promise<void>
+  onSubmitOperation?(nodeId: string, request: OperationRequest): Promise<void>
   /** Generation operations declared by configured providers, per media kind; the toolbar shows entries from this */
   generationOperations?: Partial<Record<MediaKind, readonly GenerationOperation[]>>
   /** Import local files and add them as reference inputs of nodeId (the input panel "Upload") */
@@ -139,6 +142,7 @@ export type JobProblem = { jobId: string; message: string; muted?: boolean; rech
 /** Generation status on a node, computed by the host from job events */
 export type NodeDecoration = {
   scriptShot?: { shotId: string; seq: number }
+  sceneProposals?: number
   writingEdits?: number
   /** Number of active jobs targeting this node (or placing new results beside it) */
   running: number
@@ -799,7 +803,7 @@ const Canvas = memo(function Canvas({ nodes: allNodes, nodeViews, decorations, o
 
   return (
     <Ctx.Provider value={ctx}>
-      <div ref={wrapper} tabIndex={-1} className={`vis-canvas-wrap${pickingId ? ' is-picking-reference' : ''}`} onKeyDownCapture={event => {
+      <div ref={wrapper} tabIndex={-1} className={`vis-canvas-wrap${pickingId ? ' is-picking-reference' : ''}${lowTextDetail(zoom) ? ' is-low-detail' : ''}`} style={lowTextDetail(zoom) ? { '--vis-zoom': Math.max(zoom, 0.2) } as CSSProperties : undefined} onKeyDownCapture={event => {
         if (suspended) { event.stopPropagation(); return }
         const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key]
         if (!direction || isEditing(event.target) || !(event.target instanceof Element) || !event.target.matches('.react-flow__node')) return
@@ -1115,7 +1119,7 @@ function assetOf(slot: SlotView | undefined) {
   return slot?.content.type === 'asset' ? slot.content : null
 }
 
-function useTextDraft(slot: SlotView | undefined) {
+function useTextDraft(slot: SlotView | undefined, missingPromptNodeId?: string) {
   const actions = useCanvasActions()
   const body = slot?.content.type === 'text' ? slot.content.body : ''
   // Capture the revision when editing starts; blur and the generate button share the same submission
@@ -1139,13 +1143,15 @@ function useTextDraft(slot: SlotView | undefined) {
 
   const commit = (): Promise<boolean> => {
     if (committing.current) return committing.current
-    if (!draft || !slot) return Promise.resolve(true)
-    if (draft.text === body && draft.baseRevision === slot.revision) {
+    if (!draft || (!slot && (!missingPromptNodeId || !actions.onApply))) return Promise.resolve(true)
+    if (draft.text === body && draft.baseRevision === (slot?.revision ?? 0)) {
       setDraft(null)
       return Promise.resolve(true)
     }
     setSaving(true)
-    committing.current = actions.onTextCommit(slot.slotId, draft.text, draft.baseRevision)
+    const write = slot ? actions.onTextCommit(slot.slotId, draft.text, draft.baseRevision)
+      : actions.onApply!([{ op: 'node.setPrompt', nodeId: missingPromptNodeId!, body: draft.text, expectedRevision: draft.baseRevision }]).then(() => 'ok' as const)
+    committing.current = write
       .then(result => {
         if (result === 'ok' && (latest.current.revision ?? 0) <= draft.baseRevision && latest.current.body !== draft.text) saved.current = draft
         else setDraft(current => current === draft ? null : current)
@@ -1176,7 +1182,8 @@ const TextNode = memo(function TextNode({ id, data, selected }: NodeProps<VisNod
   return (
     <NodeFrame id={id} data={data} selected={selected}>
       <div className="vis-text-card-content">
-        {!code && actions.onOpenWriting ? <div className="vis-writing-card-bar nodrag nopan"><span>{m.writingWords(f.number(words))}{data.deco?.writingEdits ? ` · ${m.writingReviewCount(f.number(data.deco.writingEdits))}` : ''}</span><button onClick={() => actions.onOpenWriting?.(id)}>{m.openWriting}</button></div> : null}
+        {/* The bar is where people grab the card, so only its button opts out of dragging. */}
+        {!code && actions.onOpenWriting ? <div className="vis-writing-card-bar"><span>{m.writingWords(f.number(words))}{data.deco?.writingEdits ? ` · ${m.writingReviewCount(f.number(data.deco.writingEdits))}` : ''}</span><button className="nodrag nopan" onClick={() => actions.onOpenWriting?.(id)}>{m.openWriting}</button></div> : null}
         {code ? <CodeRender nodeId={id} revision={slot?.revision ?? 0} edited={Boolean(draft && draft.text !== body)} actions={actions} commit={commit} /> : null}
         {draft
           ? (
@@ -1209,7 +1216,7 @@ const TextNode = memo(function TextNode({ id, data, selected }: NodeProps<VisNod
                 else setDraft({ text: body, baseRevision: slot.revision })
               }}
             >
-              {body ? code ? body : long ? <TextDisplay body={opening} /> : <TextDisplay body={body} /> : <span className="vis-node-placeholder">{m.editHint}</span>}
+              {body ? code ? body : <TextDisplay body={long ? opening : body} title={data.view.title} /> : <span className="vis-node-placeholder">{m.editHint}</span>}
             </div>
           )}
       </div>
@@ -1217,20 +1224,22 @@ const TextNode = memo(function TextNode({ id, data, selected }: NodeProps<VisNod
   )
 })
 
-const TextDisplay = memo(function TextDisplay({ body }: { body: string }) {
-  const summary = useStore(textDetailSelector)
-  const plain = useMemo(() => summary ? textSummary(body) : '', [body, summary])
-  return summary ? <span className="vis-node-text-summary">{plain}</span> : <MarkdownBody body={body} />
+const TextDisplay = memo(function TextDisplay({ body, title }: { body: string; title?: string | null | undefined }) {
+  const low = useStore(textDetailSelector)
+  const overview = useMemo(() => low ? textOverview(body, title) : null, [body, title, low])
+  return overview
+    ? <span className="vis-node-text-summary">{overview.title ? <span className="vis-node-text-overview-title">{overview.title}</span> : null}{overview.summary ? <span>{overview.summary}</span> : null}</span>
+    : <MarkdownBody body={body} />
 })
 
-function PromptEditor({ view, slot }: { view: NodeView; slot: SlotView }) {
+function PromptEditor({ view, slot, source, operation }: { view: NodeView; slot: SlotView | undefined; source: SlotVersionView['source']; operation?: { operation: GenerationOperation; onClose(): void } | undefined }) {
   const { actions, nodes, assetUrl, posterUrl, visible, picking, setPickingId } = useCanvasSelector(state => ({
-    actions: state.actions, nodes: state.selectedId === view.nodeId ? state.nodes : EMPTY_NODES, assetUrl: state.assetUrl, posterUrl: state.posterUrl,
+    actions: state.actions, nodes: state.selectedId === view.nodeId ? state.allNodes : EMPTY_NODES, assetUrl: state.assetUrl, posterUrl: state.posterUrl,
     visible: state.selectedId === view.nodeId, picking: state.pickingId === view.nodeId, setPickingId: state.setPickingId,
   }), [view.nodeId])
   const { nodeId } = view
   const generation = useGenerationChoice(view, actions.onSetGeneration)
-  const { body, draft, setDraft, commit, saving } = useTextDraft(slot)
+  const { body, draft, setDraft, commit, saving } = useTextDraft(slot, isOperationSource(source) ? nodeId : undefined)
   useEffect(() => {
     // Deselecting can unmount the overlay without a browser blur event.
     if (!visible) void commit()
@@ -1238,9 +1247,9 @@ function PromptEditor({ view, slot }: { view: NodeView; slot: SlotView }) {
   // Hidden React Flow toolbars still subscribe to every viewport update and scan the node list.
   if (!visible) return null
   return <NodeToolbar nodeId={nodeId} isVisible={visible} position={Position.Bottom} offset={16}>
-    <PromptPanel view={view} nodes={nodes} text={draft?.text ?? body} saving={saving} generation={generation} actions={actions} assetUrl={assetUrl} posterUrl={posterUrl}
+    <PromptPanel view={view} nodes={nodes} text={draft?.text ?? body} saving={saving} generation={generation} actions={actions} assetUrl={assetUrl} posterUrl={posterUrl} source={source} operation={operation} editingDraft={draft !== null} expectedPromptRevision={draft?.baseRevision ?? slot?.revision ?? 0}
       picking={picking} onPick={() => setPickingId(picking ? null : nodeId)}
-      onChange={text => setDraft({ text, baseRevision: draft?.baseRevision ?? slot.revision })}
+      onChange={text => setDraft({ text, baseRevision: draft?.baseRevision ?? slot?.revision ?? 0 })}
       onCommit={commit} onReset={() => setDraft(null)} />
   </NodeToolbar>
 }
@@ -1292,7 +1301,7 @@ const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeProps<Vi
 function ScriptPromptEditor({ view, slot, parts, expanded }: { view: NodeView; slot: SlotView; parts: ScriptPartProps; expanded: boolean }) {
   const m = useMessages(scriptMessages)
   const { actions, nodes, assetUrl, posterUrl, visible, picking, setPickingId } = useCanvasSelector(state => ({
-    actions: state.actions, nodes: state.selectedId === view.nodeId ? state.nodes : EMPTY_NODES, assetUrl: state.assetUrl, posterUrl: state.posterUrl,
+    actions: state.actions, nodes: state.selectedId === view.nodeId ? state.allNodes : EMPTY_NODES, assetUrl: state.assetUrl, posterUrl: state.posterUrl,
     visible: state.selectedId === view.nodeId, picking: state.pickingId === view.nodeId, setPickingId: state.setPickingId,
   }), [view.nodeId])
   const { body, draft, setDraft, commit, saving } = useTextDraft(slot)
@@ -1322,7 +1331,7 @@ function ScriptPromptEditor({ view, slot, parts, expanded }: { view: NodeView; s
       </div>
       {references.length ? <ReferenceStrip references={references} assetUrl={assetUrl} posterUrl={posterUrl} onInsert={id => input.current?.insert(id)}
         onRemove={id => void actions.onSetInputs(view.nodeId, (view.inputs ?? []).filter(input => input !== id)).catch(() => {})} /> : null}
-      <PromptRefInput ref={input} value={draft?.text ?? body} references={references} assetUrl={assetUrl} posterUrl={posterUrl} placeholder={m.promptInput} readOnly={saving}
+      <PromptRefInput ref={input} value={draft?.text ?? body} references={references} canvas={{ nodeId: view.nodeId, nodes, allKinds: true, attach: nodeId => actions.onSetInputs(view.nodeId, [...new Set([...(view.inputs ?? []), nodeId])]) }} assetUrl={assetUrl} posterUrl={posterUrl} placeholder={m.promptInput} readOnly={saving}
         onChange={text => setDraft({ text, baseRevision: draft?.baseRevision ?? slot.revision })} onCommit={() => void commit()} onReset={() => setDraft(null)} onComposing={() => {}} />
       <div onClickCapture={event => {
         const target = event.target instanceof Element ? event.target.closest('button') : null
@@ -1353,8 +1362,12 @@ const MediaNode = memo(function MediaNode({ id, data, selected }: NodeProps<VisN
   const asset = history.content.type === 'asset' ? history.content : null
   const main = data.view.slots.find(s => s.slotKey === 'main')
   const prompt = data.view.slots.find(s => s.slotKey === 'prompt')
+  // Provenance identifies whether an unseeded node needs legacy Restore or can start a fresh generate draft.
+  const versionSource = versions?.find(version => version.source?.jobId === history.source?.jobId && version.content.type === 'asset' && asset?.assetVersionId === version.content.assetVersionId)?.source
   const [exporting, setExporting] = useState(false)
   const [active, setActive] = useState<(ToolbarEntry & { operation: LocalOperation }) | null>(null)
+  const [operation, setOperation] = useState<GenerationOperation | null>(null)
+  const closeOperation = useCallback(() => setOperation(null), [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const task = data.deco?.mediaTask
@@ -1362,6 +1375,7 @@ const MediaNode = memo(function MediaNode({ id, data, selected }: NodeProps<VisN
   const kind = data.view.kind === 'audio' ? 'audio' : data.view.kind === 'video' ? 'video' : 'image'
   const Panel = active ? OPERATION_PANELS[active.operation] : undefined
   useEffect(() => { setActive(null); setError(null) }, [singleSelected, main?.revision])
+  useEffect(() => { if (!singleSelected) closeOperation() }, [singleSelected, closeOperation])
   useEffect(() => {
     if (!active || busy || suspended) return
     const key = (event: KeyboardEvent) => {
@@ -1386,15 +1400,19 @@ const MediaNode = memo(function MediaNode({ id, data, selected }: NodeProps<VisN
   const run = (entry: ToolbarEntry) => {
     setError(null)
     const local = LocalOperation.safeParse(entry.operation)
-    if (local.success && OPERATION_PANELS[local.data]) { setActive({ ...entry, operation: local.data }); return }
+    if (!local.success) { setActive(null); setOperation(entry.operation as GenerationOperation); return }
+    closeOperation()
+    if (OPERATION_PANELS[local.data]) { setActive({ ...entry, operation: local.data }); return }
     setBusy(true)
-    void (local.success ? submit(local.data, {}) : actions.onRunOperation?.(id, entry.operation as GenerationOperation) ?? Promise.resolve())
-      .catch(setError).finally(() => setBusy(false))
+    void submit(local.data, {}).catch(setError).finally(() => setBusy(false))
   }
   return (
     <>
       {singleSelected ? <NodeOperationsToolbar nodeId={id} nodes={nodes} kind={kind} generation={generationOperations?.[kind]}
         disabled={!asset || busy || processing || history.previewing} onOperation={run}
+        sourceJobId={versionSource?.jobId} running={Boolean(data.deco?.running)}
+        regenerateDisabled={!asset || busy || processing}
+        onRegenerate={actions.onRegenerateNode ? jobId => actions.onRegenerateNode!(id, jobId).catch(setError) : undefined}
         {...(actions.onCreateTimelineFrom && canCreateTimeline([data.view]) ? { onCreateTimeline: () => { void actions.onCreateTimelineFrom!([id]).then(selectNode).catch(setError) } } : {})}
         onDownload={() => actions.onDownload([data.view])} onExportMov={kind === 'video' && actions.onMediaProcess && actions.onResolveAsset && actions.onMediaCancel && actions.onMediaDismiss && actions.onMediaDownload ? () => setExporting(true) : undefined} onFullscreen={() => openPreview(id)} /> : null}
       {exporting && asset && main ? <MovExportDialog key={asset.assetVersionId} node={data.view} slot={main} assetVersionId={asset.assetVersionId} actions={actions} task={task} onClose={() => setExporting(false)} /> : null}
@@ -1409,7 +1427,8 @@ const MediaNode = memo(function MediaNode({ id, data, selected }: NodeProps<VisN
         </div>
       </NodeFrame>
       {!active ? history.toolbar : null}
-      {prompt ? <PromptEditor view={data.view} slot={prompt} /> : null}
+      {prompt || versionSource || operation ? <PromptEditor view={data.view} slot={prompt} source={versionSource}
+        operation={operation ? { operation, onClose: closeOperation } : undefined} /> : null}
     </>
   )
 })
@@ -1423,7 +1442,8 @@ const FrameNode = memo(function FrameNode({ id, data, selected }: NodeProps<VisN
   return <div className={`vis-frame${selected ? ' is-selected' : ''}${running ? ' is-generating' : ''}`} style={{ '--frame-color': FRAME_COLORS[data.view.frame?.color ?? 'gray'] } as CSSProperties}>
     <NodeResizer isVisible={selected} minWidth={FRAME_MIN_SIZE.w} minHeight={FRAME_MIN_SIZE.h} color="var(--vis-accent)"
       onResizeEnd={(_, p) => onResize(id, { x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.width), h: Math.round(p.height) })} />
-    <div className="vis-frame-header" style={zoom < 0.35 ? { transform: `scale(${1 / zoom})`, width: 'max-content', background: 'var(--vis-panel)' } : undefined}>
+    {/* Grow the enlarged title upward, out of the frame: member cards render above frames and would hide its lower part. */}
+    <div className="vis-frame-header" style={zoom < 0.35 ? { transform: `scale(${1 / zoom})`, transformOrigin: 'bottom left', width: 'max-content', maxWidth: data.view.w * zoom, background: 'var(--vis-panel)' } : undefined}>
       <strong>{data.view.frame?.title ?? m.frame}</strong>
     </div>
   </div>
@@ -1440,13 +1460,13 @@ const SceneNode = memo(function SceneNode({ id, data, selected }: NodeProps<VisN
   return <NodeFrame id={id} data={data} selected={selected}>
     <section className="vis-scene-card" aria-label={m.label(name, f.number(views.length))} onDoubleClick={event => { event.stopPropagation(); actions.onOpenScene?.(id) }}>
       <div className="vis-scene-picture">{first?.still ? <img src={thumbnailUrl(first.still)} alt={first.name} draggable={false} loading="lazy" /> : <div className="vis-scene-empty"><Icon kind="scene" size={36} /><p>{views.length ? m.noStill : m.empty}</p></div>}</div>
-      <footer><div><strong>{name}</strong><span>{m.views(f.number(views.length))}</span></div><button className="nodrag nopan" disabled={!actions.onOpenScene} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={() => actions.onOpenScene?.(id)}>{m.open}</button></footer>
+      <footer><div><strong>{name}</strong>{data.deco?.sceneProposals ? <span>{m.proposals(f.number(data.deco.sceneProposals))}</span> : null}<span>{m.views(f.number(views.length))}{content?.type === 'scene' && content.doc.durationS !== undefined ? <span className="vis-scene-duration">{m.duration(f.number(content.doc.durationS))}</span> : null}</span></div><button className="nodrag nopan" disabled={!actions.onOpenScene} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={() => actions.onOpenScene?.(id)}>{m.open}</button></footer>
     </section>
   </NodeFrame>
 })
 const NODE_CONTENTS = { frame: FrameNode, text: TextNode, script: ScriptNode, timeline: TimelineNode, previz: PrevizNode, scene: SceneNode, image: MediaNode, video: MediaNode, audio: MediaNode }
 const EMPTY_NODE_VIEWS: ReadonlyMap<string, NodeView> = new Map()
-function selectCanvasNode(state: CanvasContext, history: SlotVersionView[] | undefined, id: string) {
+export function selectCanvasNode(state: CanvasContext, history: SlotVersionView[] | undefined, id: string) {
   const view = state.nodeViews.get(id)
   if (!view) return null
   const kind = view.kind
@@ -1459,7 +1479,8 @@ function selectCanvasNode(state: CanvasContext, history: SlotVersionView[] | und
     setPickingId: state.setPickingId, pickImage: state.pickImage, extend: state.extend, onResize: state.onResize,
     onDismissJobs: state.onDismissJobs, onDismissMediaTask: state.onDismissMediaTask,
     nodes: selected || kind === 'script' || kind === 'timeline' || kind === 'previz' ? state.nodes : EMPTY_NODES,
-    allNodes: kind === 'timeline' || kind === 'script' || kind === 'previz' ? state.allNodes : EMPTY_NODES,
+    // Attached references remain valid when their source nodes are hidden.
+    allNodes: selected || kind === 'timeline' || kind === 'script' || kind === 'previz' ? state.allNodes : EMPTY_NODES,
     selectedId: selected ? id : null,
     pickingId: kind === 'script' || state.pickingId === id ? state.pickingId : null,
     extendingId: selected ? state.extendingId : null,

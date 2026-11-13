@@ -42,7 +42,7 @@ Agent 显式给了位置且不重叠时尊重它；重叠时挪开。用户显�
 
 **整理画布。** 画布工具栏加「整理」按钮（带确认预览）：
 
-- 按类别分组，每组一个竖向的框：没有对应框就新建，框标题为类别名；框内节点按网格排列、宽度统一；
+- 按类别分组，每组一个竖向的框：没有对应框就新建，框标题为类别名；框内节点按网格排列、宽度统一； (note 2026-11-09: images and videos scale their height with the unified width so their aspect ratio is kept) (note 2026-11-10: when a media card later grows to fit its asset, such as a placeholder organized before its image arrived, cards it newly reaches below it in the same frame are pushed down by the growth, cascading down the column, in the same undo step; cards on the open canvas, and pushes that would land on a nested frame, are left to the author)
 - 组与组之间从左到右排列，使有连线的上游（人物、场景、道具）在左、下游（镜头）在右，尽量减少连线交叉；
 - 用户手动调整过的框大小保留，只调整框内节点与超出的框；
 - 一次整理是一个可撤销批次（沿用现有撤销 / 重做），只生成 `node.layout` / `frame.*` 操作，不改内容与类别；
@@ -142,3 +142,9 @@ Agent 之间的 md 传话进画布，产生大量干扰。两层处理：
 ## Real-use tidy correction (2026-11-05)
 
 The tidy plan now includes frames left with no members, including frames that were already empty. Category targets remain. The preview lists candidate frame titles under a checked-by-default removal option; unchecking it keeps those frames. Selected-only tidy considers only frames whose members it actually moved, preserving unrelated empty frames and any frame with unselected or working descendants. Frame-only `node.delete` operations follow placement in the same undoable `canvas.apply` batch; member nodes and their content are never deleted.
+
+## Agent media visibility
+
+For agents, `purpose: 'working'` is for text, script and timeline documents such as discussions, plans and drafts. Images, videos and audio are results the author is waiting for and must remain visible: agent `canvas.apply` batches that create these media kinds with `purpose: 'working'`, or change existing media from `artifact` to `working`, are rejected atomically with `forbidden` and reason `canvas.working_media_forbidden`. Error params identify the `tempId` on creation or the `nodeId` on metadata changes, including a batch-local tempId. Agents should leave purpose unset so media defaults to `artifact`; changing a working media node back to `artifact` is allowed. Setting `working` on media that is already working is also allowed, including alongside other metadata edits. The check tracks purpose changes in batch order, so changing a working node to artifact and then back to working in the same batch is refused.
+
+The gateway supplies a server-only authorization callback to canvas application: `runIdempotent` first replays an identical successful request or rejects a requestId reused with different content, then invokes the callback only for new requests inside the write transaction. Previously successful requests remain replayable even if the new policy would refuse their operations today. The guard uses the protocol media-kind helper, reads existing kinds and purposes once per batch in that transaction, and tracks earlier node and frame tempIds in operation order. The author can still mark any node as working through the UI. Existing working media nodes are retained because they may reflect an author's choice; generation delivery does not override their purpose.

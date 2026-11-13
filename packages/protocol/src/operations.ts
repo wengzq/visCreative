@@ -165,14 +165,18 @@ export type MediaPreview = z.infer<typeof media.preview.result>
 
 // Reference markers in prompts (0021 §8): store node IDs; numbers are computed from the current input order when shown and submitted
 export const PROMPT_REF_PATTERN = /\{\{ref:([^{}\s]{1,64})\}\}/g
-/** Number unique media nodes with assets, excluding text and empty inputs. */
+/** Number unique media nodes with assets separately per media type, in input order. */
 export function numberReferences(inputs: readonly { nodeId: string; kind: string; hasAsset: boolean }[]): { nodeId: string; kind: MediaKind; number: number }[] {
   const seen = new Set<string>()
+  const counts = new Map<MediaKind, number>()
   const references: { nodeId: string; kind: MediaKind; number: number }[] = []
   for (const input of inputs) {
     if (!input.hasAsset || !MediaKind.options.includes(input.kind as MediaKind) || seen.has(input.nodeId)) continue
     seen.add(input.nodeId)
-    references.push({ nodeId: input.nodeId, kind: input.kind as MediaKind, number: references.length + 1 })
+    const kind = input.kind as MediaKind
+    const number = (counts.get(kind) ?? 0) + 1
+    counts.set(kind, number)
+    references.push({ nodeId: input.nodeId, kind, number })
   }
   return references
 }

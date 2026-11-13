@@ -48,6 +48,34 @@ function databaseSnapshot() {
 }
 
 describe('Canvas undo and redo', () => {
+  it.each(['image', 'video', 'audio'] as const)('creates and edits a %s prompt with optimistic checks and undoable author writes', kind => {
+    const nodeId = seed({ op: 'node.create', tempId: 'legacy', kind }).idMap.legacy!
+    expect(() => apply({ op: 'node.setPrompt', nodeId, body: 'Stale', expectedRevision: 1 })).toThrow(expect.objectContaining({ code: 'revision_conflict' }))
+    apply({ op: 'node.setPrompt', nodeId, body: 'Original {{ref:source}}', expectedRevision: 0 })
+    const prompt = () => node(nodeId).slots.find(slot => slot.slotKey === 'prompt')!
+    expect(prompt()).toMatchObject({ revision: 1, content: { type: 'text', body: 'Original {{ref:source}}' }, writer: { actor: 'user' } })
+    expect(readEventsAfter(db, 0).slice(-2)).toMatchObject([
+      { type: 'slot.revised', payload: { nodeId, slot: prompt() } },
+      { type: 'node.updated', payload: { nodeId, slots: [{ slotKey: 'main' }, { slotKey: 'prompt', revision: 1 }] } },
+    ])
+    expect(() => apply({ op: 'node.setPrompt', nodeId, body: 'Duplicate', expectedRevision: 0 })).toThrow(expect.objectContaining({ code: 'revision_conflict' }))
+    undo()
+    expect(prompt().content).toEqual({ type: 'empty' })
+    redo()
+    expect(prompt()).toMatchObject({ revision: 3, content: { type: 'text', body: 'Original {{ref:source}}' } })
+    apply({ op: 'node.setPrompt', nodeId, body: 'Edited', expectedRevision: 3 })
+    undo()
+    expect(prompt().content).toEqual({ type: 'text', body: 'Original {{ref:source}}' })
+    redo()
+    expect(prompt().content).toEqual({ type: 'text', body: 'Edited' })
+  })
+
+  it.each(['text', 'script', 'timeline', 'previz', 'scene'] as const)('rejects prompt creation on a %s node without events', kind => {
+    const nodeId = seed({ op: 'node.create', tempId: 'invalid', kind }).idMap.invalid!
+    const before = readEventsAfter(db, 0)
+    expect(() => apply({ op: 'node.setPrompt', nodeId, body: 'Invalid', expectedRevision: 0 })).toThrow(expect.objectContaining({ code: 'invalid_params' }))
+    expect(readEventsAfter(db, 0)).toEqual(before)
+  })
   it('Empty history writes no operations or events; empty results are also idempotent by requestId', () => {
     const params = { requestId: rid() }
     expect(canvas.undo(params)).toEqual({ nothing: true })

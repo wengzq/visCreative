@@ -82,6 +82,7 @@
 
 ## 第二期：火山 Seed-Audio
 
+<!-- privacy-allow: public speech API domain in vendor examples -->
 维护者选择优先接火山 Seed-Audio 1.0（豆包音频生成模型）。截至 2026-10-29，它的 API 在方舟邀测，公开资料里的接口地址、鉴权、同步还是异步、参考音频字段都不完整，有的示例使用 `openspeech.bytedance.com` 而不是方舟域名。因此：
 
 - 第二期在维护者拿到邀测资格和官方接口文档后再写适配器，不按二手资料猜接口。

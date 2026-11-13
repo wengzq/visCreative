@@ -1,4 +1,3 @@
-import { createServer } from 'node:http'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +5,7 @@ import { createFfmpegMedia } from '@vis/assets'
 import type { ContractScenario } from '../../contract'
 import type { ProviderRequest } from '../../types'
 import { createKlingProvider, KLING_REGIONS } from '../index'
+import { createIsolatedHttpServer } from '../../../../../../scripts/testing/isolated-http'
 
 export const SECRET = 'kling-fixture-key/never-real'
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=', 'base64')
@@ -39,7 +39,7 @@ export async function fakeKling(scenario: ContractScenario = 'normal', kind: 'im
   let outputAuthenticated = false
   let createCalls = 0
   let outputCalls = 0
-  const server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const url = new URL(req.url!, 'http://localhost')
     const send = (data: unknown, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)) }
     if (url.pathname === '/output') {
@@ -87,14 +87,13 @@ export async function fakeKling(scenario: ContractScenario = 'normal', kind: 'im
       task_info: { external_task_id: task.external }, task_result: { images: [{ url: output }, { url: output }] },
     } : controls.videoTaskShape === 'object' ? video : [video] })
   })
+  const { server } = isolated
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Fake Kling server did not start')
-  origin = `http://127.0.0.1:${address.port}`
+  origin = isolated.baseUrl
   const fetcher: typeof fetch = (input, init) => {
     const url = new URL(String(input))
     if (KLING_REGIONS.some(region => region.baseUrl === url.origin)) return fetch(`${origin}${url.pathname}${url.search}`, init)
-    if (url.origin === origin) return fetch(input, init)
+    if (url.origin === new URL(origin).origin) return fetch(input, init)
     throw new Error('Fake Kling transport refuses external requests')
   }
   const options = {

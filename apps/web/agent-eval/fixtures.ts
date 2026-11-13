@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { deflateSync } from 'node:zlib'
-import { emptyPrevizPanel, type CanvasOp, type EntityView, type MethodName, type MethodParams, type MethodResult, type NodeView, type PrevizDoc, type ScriptDoc, type TextProposal, type TimelineDoc, type WorkItemView } from '@vis/protocol'
+import { EMPTY_SCENE, emptyPrevizPanel, type CanvasOp, type EntityView, type MethodName, type MethodParams, type MethodResult, type NodeView, type PrevizDoc, type SceneDoc, type ScriptDoc, type TextProposal, type TimelineDoc, type WorkItemView } from '@vis/protocol'
 
 export type Call = <M extends MethodName>(method: M, params: MethodParams<M>) => Promise<MethodResult<M>>
 export type EpisodeSnapshot = { spaceId: string; seq: number; nodes: NodeView[]; entities: EntityView[]; proposals: TextProposal[] }
@@ -21,6 +21,10 @@ export const timelineDoc = (node?: NodeView): TimelineDoc | undefined => {
 export const previzDoc = (node?: NodeView): PrevizDoc | undefined => {
   const content = node && mainSlot(node).content
   return content?.type === 'previz' ? content.doc : undefined
+}
+export const sceneDoc = (node?: NodeView): SceneDoc | undefined => {
+  const content = node && mainSlot(node).content
+  return content?.type === 'scene' ? content.doc : undefined
 }
 
 // A deterministic raster storyboard keeps real image inspection independent of providers and external tools.
@@ -98,6 +102,27 @@ export async function buildFixture(kind: string, call: Call, rootPath: string, c
   const fixture: Fixture = { vars: {}, nodeIds: [], jobIds: [] }
   const apply = (ops: CanvasOp[]) => call('canvas.apply', { requestId: requestId(), ops })
   const nodes = async () => (await call('canvas.get', {})).nodes
+  if (kind === 'scene-protected') {
+    const created = await apply([{ op: 'node.create', tempId: 'stage', kind: 'scene', title: 'Author stage' }])
+    const nodeId = created.idMap.stage!
+    const slot = mainSlot((await nodes()).find(node => node.nodeId === nodeId)!)
+    const doc: SceneDoc = { ...EMPTY_SCENE, objects: [{
+      id: 'bench', name: 'Author bench', createdBy: 'agent', userTouched: false, hidden: false,
+      transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+      source: { type: 'prop', propId: 'bench' },
+    }], views: [{
+      id: 'wide', name: 'Author wide', createdBy: 'agent', userTouched: false, still: null, aspectRatio: '16:9',
+      camera: { position: [4, 2, 5], target: [0, 0.8, 0], roll: 0, focalLengthMm: 35 },
+    }] }
+    await apply([{ op: 'scene.set', slotId: slot.slotId, expectedRevision: slot.revision, doc }])
+    const edited: SceneDoc = { ...doc, objects: doc.objects.map(object => ({ ...object, transform: { ...object.transform, position: [0.25, 0, 0] } })) }
+    const revision = mainSlot((await nodes()).find(node => node.nodeId === nodeId)!).revision
+    await apply([{ op: 'scene.set', slotId: slot.slotId, expectedRevision: revision, doc: edited }])
+    const saved = sceneDoc((await nodes()).find(node => node.nodeId === nodeId))!
+    if (!saved.objects.every(object => object.createdBy === 'user' && object.userTouched)) throw new Error('Protected scene fixture must contain an author-touched object')
+    Object.assign(fixture.vars, { sceneNodeId: nodeId, sceneObjectId: 'bench', sceneObjectName: 'Author bench' })
+    fixture.nodeIds.push(nodeId)
+  }
   if (kind === 'finished-children') {
     const created = await apply([{ op: 'node.create', tempId: 'notes', kind: 'text', title: '已审阅的笔记', purpose: 'working', content: { text: '动机审阅：按灭又点亮手机有清楚的犹豫。结尾审阅：旁白解释过满，建议交给动作。作者已读，保留笔记。' } }])
     fixture.nodeIds.push(created.idMap.notes!)

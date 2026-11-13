@@ -86,3 +86,5 @@ dialog.provider-settings { width: 768px; max-width: calc(100vw - 32px); max-heig
 .provider-settings-unverified { color: var(--vis-warn); }
 .provider-settings-model-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .provider-settings input[type="checkbox"] { width: auto; align-self: flex-start; }
+
+.provider-settings-hosting-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }

@@ -2,6 +2,12 @@
 
 Open problems we have seen and chosen to handle later. Remove an entry once its fix has been validated on the affected platform. Windows entries remain open after macOS-only fixes.
 
+## Maintainer to-do: manual and paid acceptance
+
+Checks that only the maintainer can run, because they need real Agents, real keys or paid services. Each paid run needs explicit approval, an isolated data directory and tightened daily limits in `providers.json` (see AGENTS.md). Tick an item by removing it here and recording the result in its RFC.
+
+- [ ] **RFC 0028 real-API acceptance** for Kling, OpenAI Images, Alibaba Wan and Gemini with the maintainer's keys; MiniMax passed on 2026-11-08.
+
 ## Windows validation
 
 **Status on 2026-11-07:** the failure that blocked stability acceptance is fixed. `queue()` built full views of every work item twice per event flush, which blocked the event loop; it now reads only queued items, and recall to next-item start fell from 800–1073 ms to about 310 ms. On Windows, `563d249` passed `pnpm check`, build and two consecutive full e2e rounds, after four clean rounds at four workers on the timing fix. The results below are the history that led here. GitHub's `windows-2022` runner is a separate matter: it still fails three unit tests at `563d249` (Gemini `content_blocked`, the render provider's local Chrome and ffmpeg case, and Claude process-tree cleanup).
@@ -164,3 +170,19 @@ A video node keeps or mounts a live video while its poster is not ready, so it n
 ## Project roots that contain the app data directory
 
 Auto-approval (RFC 0015) trusts the session work directory and project directory. If an author picks a root that contains the app data directory, an Agent's auto-approved writes also reach the databases, tokens and `render-libs`. Default locations keep them apart, and the READMEs tell authors to keep app data outside project folders. Excluding the data directory from auto-approval needs its own change.
+
+## Video reference fetch timing not measured
+
+RFC 0043 (merged 2026-11-10): a real Seedance job with a TOS-hosted video reference succeeded on 2026-11-11 (see RFC 0043 §9), so Ark's video task endpoint does read a TOS presigned GET URL. Still unmeasured: how soon after submission Ark fetches it. Native macOS Keychain writes passed on 2026-11-11 (see RFC 0043 §9). Windows PasswordVault writes were checked by hand on 2026-11-10 against the `vis-creative.hosting.test` entry (absent, set, read back with quotes, `$( )`, backticks and Han characters, overwrite, delete, repeat delete). The 6 h default task window is a guess until that run. Deleting the hosting secret outside the app stays undetected until the next upload, which then fails with `hosting.upload_failed`.
+
+## Media hidden before the working-purpose guard
+
+Since 2026-11-10 the gateway refuses agent writes that mark image, video or audio nodes as `working` (RFC 0016), because such media only appeared after **Locate**. Media an agent hid this way earlier is not migrated; find it with **Locate** and ask an agent to set its purpose back to artifact, which the guard allows.
+
+## Native image view not in the transcript
+
+RFC 0037 closed on 2026-11-11. When Codex says it inspected a rendered image or extracted frames, the product transcript cannot confirm it, because Codex's native image viewer does not emit a tool event the adapter records. Authors should check renders themselves rather than rely on an Agent's report that it looked. Recording native viewer activity needs adapter support.
+
+## Gemini Omni 1.1 routes to 1.2 from 2026-12-03
+
+Found while checking RFC 0045 links on 2026-11-11: Google's Omni guide says requests to `gemini-omni-1.1-flash` route to `gemini-omni-1.2-flash` from 2026-12-03, and the guide documents 1.2. The Gemini adapter registers only 1.1, whose parameter schema was checked against the 1.1 docs. Before that date, add 1.2 from its official documentation and check whether the 1.1 schema still holds; Gemini also still awaits real-API acceptance (RFC 0028).

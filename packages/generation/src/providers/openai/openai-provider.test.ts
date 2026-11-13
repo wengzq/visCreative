@@ -43,6 +43,18 @@ providerContract('OpenAI Images', async scenario => {
 })
 
 describe('OpenAI request translation and capabilities', () => {
+  it('serializes documented moderation and planning complexity in JSON and multipart requests', async () => {
+    const h = await harness()
+    try {
+      const path = join(h.dataDir, 'reference.png')
+      await writeFile(path, PNG)
+      const { externalTaskId } = await h.adapter.submit({ ...request, params: { n: 10, moderation: 'low', complexity: 'high' } }, { idempotencyKey: 'copy-json' })
+      await h.adapter.submit({ ...request, params: { moderation: 'auto', complexity: 'medium' }, inputs: [{ type: 'asset', kind: 'image', mime: 'image/png', path }] }, { idempotencyKey: 'copy-multipart' })
+      expect(h.requests[0]?.fields).toMatchObject({ n: 10, moderation: 'low', complexity: 'high' })
+      expect(await h.adapter.getTask(externalTaskId)).toMatchObject({ state: 'succeeded', outputs: expect.arrayContaining([{ outputIndex: 9, ref: externalTaskId }]) })
+      expect(h.requests[1]?.fields).toMatchObject({ moderation: 'auto', complexity: 'medium' })
+    } finally { await h.close() }
+  })
   it('sends generation to an overridden path and refuses paths that could leave the base URL', async () => {
     const h = await harness()
     try {
@@ -142,7 +154,7 @@ describe('OpenAI parameter schemas', () => {
   it.each(['auto', '1024x1024', '1536x1024', '1024x1536', '1536x864', '3840x2160', '2160x3840'])('accepts documented size %s', size => {
     expect(openaiParamsSchema(request.model).safeParse({ size }).success).toBe(true)
   })
-  it.each([{ size: '1025x1024' }, { size: '512x512' }, { size: '4096x2048' }, { size: '3840x3840' }, { size: '3072x768' }, { n: 5 }, { n: 0 }, { output_compression: 10 }, { output_format: 'jpeg', background: 'transparent' }, { input_fidelity: 'high' }, { moderation: 'low' }, { output_format: 'webp', output_compression: 101 }])('rejects invalid parameters %j', params => {
+  it.each([{ size: '1025x1024' }, { size: '512x512' }, { size: '4096x2048' }, { size: '3840x3840' }, { size: '3072x768' }, { n: 11 }, { n: 0 }, { output_compression: 10 }, { output_format: 'jpeg', background: 'transparent' }, { input_fidelity: 'high' }, { moderation: 'invalid' }, { complexity: 'invalid' }, { output_format: 'webp', output_compression: 101 }])('rejects invalid parameters %j', params => {
     expect(openaiParamsSchema(request.model).safeParse(params).success).toBe(false)
   })
 })

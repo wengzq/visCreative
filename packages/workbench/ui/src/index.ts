@@ -24,3 +24,5 @@ export type { SeriesProjectHost, ProjectSeriesInput } from './series-model'
 
 export { SkillCopyBadges } from './SkillCopyBadges'
 export type { SkillDraftHost } from './SkillDraftCard'
+
+export type { SceneProposalHost } from './SceneProposalCard'

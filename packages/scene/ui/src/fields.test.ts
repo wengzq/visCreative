@@ -17,14 +17,14 @@ vi.mock('react', async original => ({
 }))
 afterEach(() => { hooks.state = []; hooks.refs = []; hooks.effects = [] })
 
-function field(value = 0) {
+function field(value = 0, deferEffects = false) {
   const onChange = vi.fn()
   let props: ComponentProps<'input'>
   const render = () => {
     hooks.stateIndex = hooks.refIndex = 0
     const element = NumberField({ label: 'Joint rotation', value, disabled: false, min: -180, max: 180, commitOnBlur: true, onChange })
     props = (element.props.children[1] as ReactElement<ComponentProps<'input'>>).props
-    hooks.effects.splice(0).forEach(effect => effect())
+    if (!deferEffects) hooks.effects.splice(0).forEach(effect => effect())
   }
   const input = {
     value: '', valueAsNumber: 0, validity: { valid: true },
@@ -41,7 +41,12 @@ function field(value = 0) {
     onChange,
     focus() { props.onFocus!({} as FocusEvent<HTMLInputElement>); render(); Object.assign(input, { value: String(props.value), valueAsNumber: Number(props.value) }) },
     type,
-    blur: input.blur,
+    blur() { input.blur(); render() },
+    flushEffects() { hooks.effects.splice(0).forEach(effect => effect()); render() },
+    enter() {
+      props.onKeyDown!({ key: 'Enter', currentTarget: input, preventDefault: vi.fn() } as unknown as KeyboardEvent<HTMLInputElement>)
+      render()
+    },
     escape() {
       props.onKeyDown!({ key: 'Escape', currentTarget: input, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as KeyboardEvent<HTMLInputElement>)
       render()
@@ -70,4 +75,21 @@ it('commits changed joint text once on blur and cancels typed text on Escape', (
   input.escape()
   expect(input.onChange).not.toHaveBeenCalled()
   expect(input.text()).toBe('-10')
+})
+
+it('preserves a refocused key-time draft after the previous blur rejected a collision', () => {
+  const input = field(3, true)
+  input.flushEffects()
+  input.focus()
+  input.type('0')
+  input.blur()
+  expect(input.onChange).toHaveBeenCalledExactlyOnceWith(0)
+  expect(input.text()).toBe('3')
+  // The parent keeps time 3 after rejecting the collision; refocusing can beat passive effects.
+  input.focus()
+  input.type('2')
+  input.flushEffects()
+  expect(input.text()).toBe('2')
+  input.enter()
+  expect(input.onChange.mock.calls).toEqual([[0], [2]])
 })

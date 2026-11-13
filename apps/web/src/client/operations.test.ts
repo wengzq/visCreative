@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MediaTaskView, NodeView, SpaceEvent } from '@vis/protocol'
 import type { ProviderCatalog } from '@vis/canvas-ui'
 import { canvasActions } from './actions'
-import { generationOperations, operationChoice } from './operations'
+import { generationOperations } from './operations'
 import { applyEvent, applyMediaProgress, dismissMediaTask, emptyState, fromSnapshot, nodeDecorations, recordMediaTask } from './store'
 import type { SpaceConnection } from './space'
 
@@ -10,7 +10,7 @@ const node: NodeView = { nodeId: 'image', kind: 'image', x: 500, y: 100, w: 320,
   generation: { provider: 'mock', model: 'preferred', params: { scale: 4 } },
   slots: [{ slotId: 'main', slotKey: 'main', contentType: 'image', revision: 7, content: { type: 'asset', assetVersionId: 'asset', mime: 'image/png' } }],
 }
-const catalog: ProviderCatalog = { providerTypes: [], providers: [{ id: 'mock', type: 'mock', needsKey: false, available: true, hasKey: false, label: 'Mock', models: [
+const catalog: ProviderCatalog = { videoReferences: 'hosting_required', providerTypes: [], providers: [{ id: 'mock', type: 'mock', needsKey: false, available: true, hasKey: false, label: 'Mock', models: [
   { id: 'legacy', label: 'Legacy', kind: 'image', paramsSchema: {} },
   { id: 'first', label: 'First', kind: 'image', operations: ['generate', 'image.upscale', 'image.outpaint'], paramsSchema: { properties: { scale: { type: 'integer', default: 2, enum: [2, 4] } } } },
   { id: 'preferred', label: 'Preferred', kind: 'image', operations: ['image.upscale'], paramsSchema: { properties: { scale: { type: 'integer', default: 2, enum: [2, 4] } } } },
@@ -49,25 +49,59 @@ describe('Provider operation routing', () => {
     expect(generationOperations(null)).toEqual({ image: [], video: [], audio: [] })
     expect(generationOperations(catalog)).toEqual({ image: ['image.upscale', 'image.outpaint'], video: [], audio: [] })
   })
-  it('prefers the current model when capable and otherwise uses the first capable model and its defaults', () => {
-    expect(operationChoice(catalog, node, 'image.upscale')).toEqual({ provider: 'mock', model: 'preferred', params: { scale: 4 } })
-    expect(operationChoice(catalog, node, 'image.outpaint')).toEqual({ provider: 'mock', model: 'first', params: { scale: 2 } })
-    expect(operationChoice(catalog, node, 'video.upscale')).toBeNull()
+  it('hides toolbar operations declared only by unavailable or unconfigured providers', () => {
+    const provider = catalog.providers[0]!
+    expect(generationOperations({ ...catalog, providers: [{ ...provider, available: false }] }).image).toEqual([])
+    expect(generationOperations({ ...catalog, providers: [{ ...provider, needsKey: true, hasKey: false }] }).image).toEqual([])
+    expect(generationOperations({ ...catalog, providers: [{ ...provider, needsKey: true, hasKey: true }] }).image).toEqual(['image.upscale', 'image.outpaint'])
   })
-  it('pins the current main revision and creates a new result node with a fresh request ID per call', async () => {
+  it('submits the explicit operation settings, pins the current subject and creates a new node without writing the draft', async () => {
     const { actions, call } = setup()
-    await actions.onRunOperation!(node.nodeId, 'image.upscale')
-    await actions.onRunOperation!(node.nodeId, 'image.upscale')
+    const request = { operation: 'image.outpaint' as const, provider: 'mock', model: 'first', params: { ratio: '16:9' }, prompt: 'Extend {{ref:image}}' }
+    await actions.onSubmitOperation!(node.nodeId, request)
+    await actions.onSubmitOperation!(node.nodeId, request)
     const submits = call.mock.calls.filter(([method]) => method === 'generation.submit')
-    expect(submits[0]).toEqual(['generation.submit', expect.objectContaining({
-      operation: 'image.upscale', kind: 'image', provider: 'mock', model: 'preferred', params: { scale: 4 },
+    expect(submits[0]).toEqual(['generation.submit', {
+      requestId: expect.any(String), kind: 'image', ...request,
       inputs: [{ slotId: 'main', revision: 7 }], targets: [{ outputIndex: 0, kind: 'new_node', nearNodeId: 'image' }],
-    })])
+    }])
+    expect(call.mock.calls.map(([method]) => method)).toEqual(['canvas.get', 'generation.submit', 'canvas.get', 'generation.submit'])
     expect((submits[0]![1] as any).requestId).not.toBe((submits[1]![1] as any).requestId)
   })
-  it('rejects unsupported operations before submitting or billing', async () => {
-    const { actions, call } = setup(null)
-    await expect(actions.onRunOperation!(node.nodeId, 'image.upscale')).rejects.toThrow('No model supports')
+  it('coalesces simultaneous operation presses until the receipt returns', async () => {
+    const { actions, call } = setup()
+    const request = { operation: 'image.upscale' as const, provider: 'mock', model: 'preferred', params: { scale: 2 }, prompt: '' }
+    await Promise.all([actions.onSubmitOperation!(node.nodeId, request), actions.onSubmitOperation!(node.nodeId, request)])
+    expect(call.mock.calls.filter(([method]) => method === 'generation.submit')).toHaveLength(1)
+  })
+  it('keeps distinct explicit operation requests separate while another receipt is pending', async () => {
+    const { actions, call } = setup()
+    const request = { operation: 'image.upscale' as const, provider: 'mock', model: 'preferred', params: { scale: 2 }, prompt: '' }
+    await Promise.all([actions.onSubmitOperation!(node.nodeId, request), actions.onSubmitOperation!(node.nodeId, { ...request, params: { scale: 4 } })])
+    expect(call.mock.calls.filter(([method]) => method === 'generation.submit').map(([, payload]) => (payload as any).params)).toEqual([{ scale: 2 }, { scale: 4 }])
+  })
+  it('rereads the current subject revision and reports submission errors through the existing notice path', async () => {
+    const { actions, call, notify } = setup()
+    const request = { operation: 'image.upscale' as const, provider: 'mock', model: 'preferred', params: { scale: 2 }, prompt: '' }
+    call.mockResolvedValueOnce({ nodes: [{ ...node, slots: [{ ...node.slots[0]!, revision: 9 }] }] })
+    await actions.onSubmitOperation!(node.nodeId, request)
+    expect(call).toHaveBeenCalledWith('generation.submit', expect.objectContaining({ inputs: [{ slotId: 'main', revision: 9 }] }))
+    call.mockResolvedValueOnce({ nodes: [node] }).mockRejectedValueOnce(new Error('Submission failed'))
+    await expect(actions.onSubmitOperation!(node.nodeId, request)).rejects.toThrow('Submission failed')
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', text: expect.stringContaining('Submission failed') }))
+  })
+  it.each([null, { ...catalog, providers: [{ ...catalog.providers[0]!, needsKey: true, hasKey: false }] }])('rejects an unusable explicit choice without switching models or submitting', async providers => {
+    const { actions, call, notify } = setup(providers)
+    await expect(actions.onSubmitOperation!(node.nodeId, { operation: 'image.upscale', provider: 'mock', model: 'preferred', params: {}, prompt: '' })).rejects.toThrow('No model supports')
+    expect(call.mock.calls.some(([method]) => method === 'generation.submit')).toBe(false)
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error' }))
+  })
+  it('rejects models that do not declare the operation and mismatched media kinds', async () => {
+    const { actions, call } = setup()
+    for (const request of [
+      { operation: 'image.outpaint' as const, provider: 'mock', model: 'preferred', params: {}, prompt: '' },
+      { operation: 'video.upscale' as const, provider: 'mock', model: 'first', params: {}, prompt: '' },
+    ]) await expect(actions.onSubmitOperation!(node.nodeId, request)).rejects.toThrow('No model supports')
     expect(call.mock.calls.some(([method]) => method === 'generation.submit')).toBe(false)
   })
 })

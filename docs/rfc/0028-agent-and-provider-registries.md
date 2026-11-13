@@ -102,6 +102,8 @@ type ProviderType = {
 
 **Output URLs.** Several services return short-lived URLs (MiniMax time-limited with a fresh URL on requery, DashScope task and URL 24 hours). Adapters download as soon as a task succeeds; DashScope's `UNKNOWN` status after expiry maps to `unknown`, never to failed or safe-to-resubmit.
 
+**Model documentation (added by [RFC 0045](0045-model-doc-links.md), 2026-11-11).** `knownModels[].docs` links each model to its vendor's official prompt guide and API reference, and `modelDocs` gives per-kind pages for IDs outside `knownModels`. `providers.list` returns them on each model as `docs`, and Agents open them before writing a prompt.
+
 ### 3. Settings: generation services
 
 The page title becomes 生成服务 / Generation services. Layout stays a list on the left and a form on the right.
@@ -124,7 +126,7 @@ UI spec details (spacing, states, empty page) are written with step c's task, fo
 | Regions | Beijing and Singapore hosts | Beijing and Singapore (key bound to region); US and EU deferred, see second-wave notes | China and international hosts | not mainland China, Hong Kong, Macau | not mainland China, Hong Kong, Macau |
 
 - **Kling** first: its client task id gives real `findTaskByIdempotencyKey`, which exercises the full recovery path. API-key auth (the AK/SK JWT is legacy).
-- **DashScope:** `wan2.7-*` models, `X-DashScope-Async: enable`, poll about every 15 s. Region chooses the host.
+- **DashScope:** `wan2.7-*` and `wan3.0-video(-prime)` models, `X-DashScope-Async: enable`, poll about every 15 s. Region chooses the host; Wan3.0 is served only from workspace hosts, entered as a custom URL.
 - **MiniMax:** the v2 API (`MiniMax-H3` family) only; v1 Hailuo has no listing, cancel or recovery. `image-01` is synchronous.
 - **OpenAI:** `gpt-image-2.5-*` and `gpt-image-2` through the Images API; base64 output, no URLs. Background mode through the Responses API is a later improvement if it supports the image tool.
 - **Gemini API:** Nano Banana image models (synchronous) and `gemini-omni-1.1-flash` video through Interactions with `background: true`.
@@ -142,15 +144,15 @@ Model ids, parameters and frame modes come from each adapter's model table, as f
 
 a and b are independent and run in parallel; c needs b.
 
-## Not done yet (as of 2026-11-04)
+## Not done yet (as of 2026-11-08)
 
 Steps a–d are implemented. The unchecked items below remain open; this RFC stays in progress until they are closed.
 
-**Real-API acceptance: none done.** It needs the maintainer's approval per service, test keys, an isolated data directory and tight daily limits. `verified` stays `false` until a service passes.
+**Real-API acceptance: MiniMax accepted; the others partial or not started.** It needs the maintainer's approval per service, test keys, an isolated data directory and tight daily limits. `verified` stays `false` until a service passes.
 - [ ] Kling. Adapter tested against a fake server only.
-- [ ] OpenAI Images. Adapter tested against a fake server only.
-- [ ] DashScope. Adapter tested against a fake server only. Check that the request id string really confirms a cancel.
-- [ ] MiniMax. Adapter tested against a fake server only. Check `image-01` latency against the five-minute timeout.
+- [ ] OpenAI Images. 2026-11-08: the maintainer generated images successfully through a custom gateway, which confirms the request and response handling; the official `api.openai.com` host has not been run yet, so `verified` stays `false`.
+- [ ] DashScope. Adapter tested against a fake server only. Check that the request id string really confirms a cancel. Wan3.0 needs a run through a workspace host.
+- [x] MiniMax. Accepted 2026-11-08: the maintainer generated `MiniMax-H3` video and `image-01` images in the China region (`api.minimax.cn`); `image-01` finished inside the five-minute timeout. `verified` is now `true`. The international host was not run; it serves the same API.
 - [ ] Gemini. Adapter tested against a fake server only. Measure studiod memory on a large inline base64 video: the response is parsed whole, bounded at about 340 MiB of body, and the peak is estimated, not measured, at around 1 GB.
 
 **Open questions that need a real account.**
@@ -165,6 +167,12 @@ Steps a–d are implemented. The unchecked items below remain open; this RFC sta
 - [ ] MiniMax: `help.consoleUrl` points at the international console; a descriptor has one URL, so China users get the wrong link.
 - [ ] Gemini: whether Nano Banana models support background mode.
 
+**Prompt reference labels (found 2026-11-11 while fixing Seedance, RFC 0043).** Picked references are sent as `图片 1` / `视频 1` (numbered per media type) to every provider without its own format. Documentation suggests two mismatches, unverified against the real APIs:
+- [ ] Kling: 3.0/4.0 Omni video documents `@image_1`, and Image 3.0 Omni documents `<<<image_1>>>`.
+- [ ] DashScope Wan: Wan2.7 R2V and Wan3.0 document `Image 1` / `Video 1`.
+
+MiniMax, OpenAI and Gemini document no required syntax and keep the default label.
+
 **Agents.**
 - [ ] Claude Code real-Agent acceptance is still deferred, so the new-workspace option has not been run against a real Claude Code session.
 
@@ -172,7 +180,7 @@ Steps a–d are implemented. The unchecked items below remain open; this RFC sta
 - [x] [Adding an Agent](../contributing/adding-an-agent.md)
 - [x] [Adding a provider](../contributing/adding-a-provider.md)
 
-**Open-source readiness: CI and contribution guide implemented; hosted validation pending.** The GitHub Actions workflow and `CONTRIBUTING.md` are in place. The first hosted Linux run passed check/build and found e2e issues; hosted acceptance of the fixes is still required. `SECURITY.md`, a code of conduct, issue and PR templates, the license audit, the first-run path and the history scrub remain open.
+**Open-source readiness: CI, contribution guide and GitHub entry points implemented; license audit and first-run path open.** The GitHub Actions workflow and `CONTRIBUTING.md` are in place, and hosted Linux check, build and e2e have passed since one e2e file runs at a time (run 41860646714). `SECURITY.md`, the code of conduct, issue and PR templates and the publishing path that keeps the archive history private landed with [RFC 0042](0042-open-source-practices.md). The license audit and the first-run path remain open; see the parallel track below.
 
 **Known limitations, accepted for now.**
 - `validateInputs` is synchronous and sees no file size or dimensions, so those checks run in `submit`, before the paid call.
@@ -327,6 +335,7 @@ All three are built-in types with `verified: false` and, at this wave, `allowCus
 - Hosts: `dashscope.aliyuncs.com` and `dashscope-intl.aliyuncs.com`. Keys are region-bound.
 - Models: `wan2.7-t2v`, `wan2.7-i2v`, `wan2.7-r2v` with dated snapshots; `wan2.7-image`, `wan2.7-image-pro`. Both kinds are asynchronous with `X-DashScope-Async: enable`, polled every 15 s.
 - `wan2.7-r2v` allows 15 s with image references, 10 s with video references. Video and audio references need public URLs, so they are not exposed and the adapter's range is 2–15 s.
+- Added 2026-11-08: `wan3.0-video` and `wan3.0-video-prime` (preview). One model covers text-to-video, first frame, first and last frame, and up to 10 reference images; frames and references cannot be mixed. Parameters: `resolution` 480P/720P/1080P (default 1080P), `ratio` adaptive (default) or 21:9/16:9/4:3/1:1/3:4/9:16, kept with frames, `duration` 2–30 s, `audio` (default on, same price), `prompt_extend`, `watermark`, `seed`; no `negative_prompt`. Duration -1 (the model picks) is not exposed so the billed length stays known. Prompts may run to 20,000 characters. Wan3.0 is offered only on `{WorkspaceId}.<region>.maas.aliyuncs.com`, never on `dashscope.aliyuncs.com`, so it needs the workspace host as a custom URL; the settings help says so. Video, audio, file and link inputs are not exposed. Source: https://www.alibabacloud.com/help/en/model-studio/wan3-video-generation-api-reference (checked without authenticated calls). Not yet run against the real API.
 - Moderation: `DataInspectionFailed` / `data_inspection_failed` at submit is `rejected`; in `output.code` or partial `output.results` it is `failed` with `generation.moderation_rejected`.
 - `UNKNOWN` maps to `not_found`, which the runner settles as `unknown`.
 - Cancel reads state first and posts only for `PENDING`. The documented success response is a request id string, which is taken as confirmation; real acceptance must check this.
@@ -380,10 +389,10 @@ Not part of this RFC's contract; tracked here so it lands with it.
 
 - [x] CI workflow: `pnpm check`, `pnpm build` and one full browser e2e round on Linux for pull requests and pushes to `main`; Windows and macOS check and build on pushes to `main` and `workflow_dispatch` only, to limit private-repository minutes. Manual runs include Linux e2e. Node 24, pnpm from `packageManager`, frozen lockfile, pnpm-store caching, superseded-run cancellation, `contents: read`, SHA-pinned actions and failure artifacts are configured in [ci.yml](../../.github/workflows/ci.yml). No provider keys, vendor API calls or real Agents are needed. The first hosted Linux run passed check/build; the maintainer must push and inspect the e2e corrections described below.
 - [x] [CONTRIBUTING.md](../../CONTRIBUTING.md): commands, the unchanged two-consecutive-e2e definition of done, the RFC process, English code and links to integration guides.
-- [ ] `SECURITY.md` (key handling, how to report), a code of conduct, issue and PR templates.
-- Third-party license audit: ffmpeg build (LGPL vs GPL), bundled fonts (OFL, fetched not committed), the bundled gsap and rough.js, npm dependencies.
-- First-run path for someone with no paid keys: mock and render providers, a sample project, and README steps for each Agent's install and login.
-- Scrub history and docs for machine paths and anything private before making the repository public.
+- [x] `SECURITY.md` (key handling, how to report), a code of conduct, issue and PR templates: landed with [RFC 0042](0042-open-source-practices.md).
+- [ ] Third-party license audit: ffmpeg build (LGPL vs GPL), bundled fonts (OFL, fetched not committed), the bundled anime.js (which replaced GSAP on 2026-11-07) and rough.js, npm dependencies.
+- [ ] First-run path for someone with no paid keys: mock and render providers, a sample project, and README steps for each Agent's install and login.
+- [x] Scrub history and docs for machine paths and anything private before making the repository public: the public repository receives only squashed snapshots, and the [RFC 0042](0042-open-source-practices.md) privacy check covers the tree, the message and the identity of every snapshot.
 
 **Linux CI audit (2026-11-04).** Linux is a test target, not a new supported product platform. The system secret store chooses Keychain outside Windows and explicitly rejects operations outside macOS; fixtures use memory stores or fake command runners, so no Linux key backend is needed for CI. `prepareSandbox` fails closed without macOS Seatbelt, filters the environment and keeps permission expansion disabled. Fake-Agent canvas/work-item RPC coverage still runs; native command-approval cases in `web.e2e.ts`, `agent-registry.e2e.ts` and `session-panel.e2e.ts` share `supportsNativeApprovals` and skip on Linux because the adapter deliberately denies those approvals. Registry discovery/activation and attachment/mode checks are split from native approvals and still run on Linux. No product permissions were changed. macOS sandbox enforcement and Windows-only runtime/credential tests keep their existing platform guards; the optional installed-dsh handshake is disabled in CI so no real Agent starts.
 
@@ -413,3 +422,29 @@ Not part of this RFC's contract; tracked here so it lands with it.
 ## UI polish (2026-11-05)
 
 English settings consistently call configured generation integrations “services”, use “Model ID”, and give the service Name field the full form width. Internal provider IDs and protocol names are unchanged.
+
+## Model-table parameter notes (RFC 0039 step c, checked 2026-11-08)
+
+The following checks used official documentation pages only, without credentials or generation requests. Bilingual display annotations live on each model schema, and ordinary descriptions remain English. Fake-server tests cover every added or corrected request parameter.
+
+| Adapter | Added or corrected | Deliberately left out |
+| --- | --- | --- |
+| Volcengine Ark | Seedream 5.0 pro/flash: size 1K/1.5K/2K, or custom dimensions with 921600–4624220 pixels and ratio 1:16–16:1; remove 4K for those models. `outputFormat` maps to `output_format` png/jpeg; `optimizePromptMode` maps to `optimize_prompt_options.mode`, standard/fast on pro and standard only on flash. Video `returnLastFrame` and `executionExpiresAfter` map to `return_last_frame` and `execution_expires_after` (3600–259200 seconds). Seedance 2.0 schemas omit `seed`/`cameraFixed`, now documented only for 1.0. | Layer decomposition returns an unbounded layer collection that the current output handling does not support; background transparency requires alpha-image validation not supplied by this adapter; `frames` conflicts with duration-based billing accounting; `service_tier` is not supported by the registered Seedance 2.0 family. Callback, streaming and response transport settings stay adapter-owned. Existing generic/endpoint schemas retain compatibility ranges. |
+| Kling | IMAGE 3.0 Omni `n` corrected from 1–4 to documented 1–9. VIDEO 3.0 duration 3–15, audio native/off, multi_shot true default and 720p/1080p/4k; VIDEO 4.0 duration 3–30 and 720p/1080p remain as documented. | `watermark_info`, elements and media-content structures are objects/arrays; callbacks/external IDs are transport/idempotency mechanisms. Series mode and automatic series count are not exposed; result_type remains single with explicit n. Existing optional 4.0 duration is preserved. |
+| OpenAI Images | `n` corrected to documented 1–10; optional moderation auto/low and complexity low/medium/high are sent in JSON and multipart. Existing per-model quality, size, raster output, compression and background settings retained. | GIF/SVG need output/media handling the adapter does not provide; SVG model/reasoning settings are objects. Streaming and partial images need a streaming parser and incur extra billing; masks/markup are file workflows rather than scalar controls. `input_fidelity` is not configurable for the registered GPT Image 2 family. User and response-format fields are transport metadata. |
+| Gemini | Image generationConfig seed, temperature 0–2 and topP 0–1 are optional, with vendor defaults. Nano Banana 2.1 and 3.1 Flash Image add 1:4/4:1/1:8/8:1 ratios; only 3.1 Flash Image adds 512px (the docs explicitly exclude 2.1). Pro/legacy/Lite keep their model-specific limits. | Tools/grounding, safety/thinking configuration and response modalities are objects/arrays; topK support depends on per-model metadata not established by the image docs. Candidate count/output-token limits are response-budget controls beyond the current fixed image-output flow. The current Omni duration examples target 1.2; this table still registers 1.1, so its existing aspect/resolution controls are retained without inferring 1.2 support. Video/audio references and editing are separate operations. |
+| MiniMax | Rechecked H3/Highspeed/Lite/Max duration and resolution variants, six explicit text-to-video ratios, frame/reference translation, Max prompt expansion modes, image-01 ratios, width/height multiples of eight in 512–2048, n 1–9, seed and prompt_optimizer. No scalar range correction needed. | Reference media/subject entries are arrays/objects; callback and response_format are transport settings. Adaptive ratio is selected by the adapter for frames and cannot be a valid text-only choice. Image aspect/dimension conflict remains explicitly rejected rather than relying on the vendor's precedence rule. |
+| DashScope | Wan2.7 images add thinking_mode and width*height strings: 768²–2048² pixels (up to 4096² for pro text-only), ratio 1:8–8:1. Reference inputs reject output above 2048². Wan3.0 seed now accepts -1, matching automatic random seed selection. Existing explicit duration 2–30 and audio/prompt_extend controls retained. | Sequential image sets and model-selected duration make the billed output count/length unknown; color_palette and edit areas are object arrays. Video/audio/file/link references require unsupported input paths. shot_type is documented as ineffective for Wan2.7, so is not exposed. |
+
+Sources, all checked 2026-11-08:
+
+- Ark: https://www.volcengine.com/docs/82379/1541523 and https://www.volcengine.com/docs/82379/1520757
+- Kling: https://kling.ai/document-api/api/image/3-0-omni/image-omni and https://kling.ai/document-api/api/video/3-0-omni/text-to-video and https://kling.ai/document-api/api/video/4-0/text-to-video (official documentation's published JS data bundles were read because the page shell contains no parameter text).
+- OpenAI: https://developers.openai.com/api/reference/resources/images/methods/generate and https://developers.openai.com/api/reference/resources/images/methods/edit and https://developers.openai.com/api/docs/guides/image-generation
+- Gemini: https://ai.google.dev/gemini-api/docs/image-generation and https://ai.google.dev/api/generate-content and https://ai.google.dev/gemini-api/docs/omni
+- MiniMax: https://platform.minimax.io/docs/api-reference/video-generation-v2-create.md and https://platform.minimax.io/docs/api-reference/image-generation-t2i.md and https://platform.minimax.io/docs/api-reference/video-generation-v2-query.md
+- DashScope: https://www.alibabacloud.com/help/en/model-studio/wan-image-generation-and-editing-api-reference and https://www.alibabacloud.com/help/en/model-studio/text-to-video-api-reference and https://www.alibabacloud.com/help/en/model-studio/wan3-video-generation-api-reference
+
+Ark's `returnLastFrame` is an output retrieval option: it returns the last JPEG frame of the existing generated video, without another generation submission or additional video duration. The published video billing formula uses model rate, input/output video duration, dimensions and frame rate, with no last-frame surcharge or billing dimension; this documentation check indicates that requesting the frame does not change billing. Sources: https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh and https://docs.volcengine.com/docs/ark/model-pricing?lang=zh (checked 2026-11-08). The fake-server test checks `return_last_frame: true` in the existing video request; no real billing call was made.
+
+Boolean defaults are explicit where the vendor defaults to on: Wan2.7 image `thinking_mode` and registered Seedance 2.0 `generateAudio` both default to true. This makes their switches match the existing vendor behavior rather than showing an unset boolean as off; fake-server tests cover the default fields as well as explicit off values. Sources: the Ark video and DashScope image references above (checked 2026-11-08).

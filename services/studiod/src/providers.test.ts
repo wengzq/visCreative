@@ -1,19 +1,23 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import type { Server } from 'node:http'
 import { createRequire } from 'node:module'
 import { connect, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { inspect } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { newId } from '@vis/domain'
 import { createMockProvider } from '@vis/generation'
-import { PROTOCOL_VERSION, type ProviderConfig } from '@vis/protocol'
+import { type NodeView, PROTOCOL_VERSION, type ProviderConfig } from '@vis/protocol'
 import { eq, spaceSchema as s } from '@vis/storage'
 import { issueAgentToken } from './auth'
 import { createMemorySecretStore } from './secret-store'
 import type { AgentRuntimeFactory } from './space-host'
 import { startStudiod, type Studiod, type StudiodOptions } from './studiod'
+import { saveHostingConfig } from './hosting-config'
+import { createFakeTos } from './testing/fake-tos'
+import { createIsolatedHttpServer } from '../../../scripts/testing/isolated-http'
 
 const Database = createRequire(import.meta.url)('better-sqlite3')
 const SECRET = 'integration-secret-never-persist-7f31e4'
@@ -35,6 +39,9 @@ let received: Message[]
 let logs: string[]
 let sockets: Socket[]
 let options: StudiodOptions
+let hostedReader: typeof fetch | undefined
+let hostedEcho: string | undefined
+let hostedReads: number
 
 const fakeRuntime: AgentRuntimeFactory = ({ spaceId, db }) => ({
   async ensureReady() {},
@@ -53,12 +60,15 @@ beforeEach(async () => {
   vi.stubEnv('VIS_PROJECTS_DIR', join(dir, 'projects'))
   clock = Date.now()
   agentToken = undefined
+  hostedReader = undefined
+  hostedEcho = undefined
+  hostedReads = 0
   requests = []
   received = []
   logs = []
   sockets = []
   for (const method of ['log', 'warn', 'error'] as const) vi.spyOn(console, method).mockImplementation((...args) => { logs.push(inspect(args)) })
-  server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const chunks: Buffer[] = []
     for await (const chunk of req) chunks.push(Buffer.from(chunk))
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}
@@ -76,7 +86,16 @@ beforeEach(async () => {
         res.end(JSON.stringify({ data }))
       }
     } else if (req.method === 'POST' && path.endsWith('/contents/generations/tasks')) {
+      const video = body.content?.find((item: { type: string }) => item.type === 'video_url')
+      if (video && hostedReader) {
+        hostedEcho = video.video_url.url
+        const response = await hostedReader(hostedEcho!)
+        if (response.ok && (await response.arrayBuffer()).byteLength > 0) hostedReads++
+      }
+      if (body.content?.[0]?.text === 'echo-hosted-error') { res.end(JSON.stringify({ id: 'hosted-error-task' })); return }
       res.end(JSON.stringify({ id: `${path.startsWith('/old/') ? 'old' : 'new'}-video-${requests.length}` }))
+    } else if (req.method === 'GET' && path.endsWith('/contents/generations/tasks/hosted-error-task')) {
+      res.end(JSON.stringify({ status: 'failed', error: { code: 'hosted_failed', message: `Could not read ${hostedEcho}` } }))
     } else if (req.method === 'GET' && path.includes('/contents/generations/tasks/')) {
       res.end(JSON.stringify({ status: 'succeeded', content: { video_url: `${origin}/video.mp4` } }))
     } else if (path === '/image.png') {
@@ -87,14 +106,14 @@ beforeEach(async () => {
       res.end(readFileSync(new URL('../../../packages/generation/src/providers/mock/fixtures/sample.mp4', import.meta.url)))
     } else res.writeHead(404).end('{}')
   })
+  server = isolated.server
   await new Promise<void>(resolve => { server.listen(0, '127.0.0.1', resolve) })
-  const address = server.address() as { port: number }
-  origin = `http://127.0.0.1:${address.port}`
+  origin = isolated.baseUrl
   options = {
     dataDir: dir, studiodVersion: 'test', runtimes: { codex: fakeRuntime },
     providers: [createMockProvider({ latencyMs: 0 })],
     defaults: { image: { provider: 'mock' }, video: { provider: 'mock' }, audio: { provider: 'mock' } },
-    secretStore: createMemorySecretStore(), now: () => clock,
+    secretStore: createMemorySecretStore(), hostingSecretStore: createMemorySecretStore(), now: () => clock,
     media: {
       async process() { throw new Error('Unexpected local processing') },
       async analyzeSilence() { throw new Error('Unexpected silence analysis') },
@@ -224,7 +243,67 @@ function expectNoPersistedSecret() {
 }
 
 describe('Provider Gateway integration', () => {
+  it('rejects hosting in provider updates and preserves the independent hosting file', async () => {
+    const c = await client()
+    const hosting = { type: 'tos' as const, region: 'cn-beijing', bucket: 'reference-clips', accessKeyId: 'example-access-key', prefix: 'vis-creative/refs/' }
+    saveHostingConfig(dir, hosting)
+    const before = readFileSync(join(dir, 'hosting.json'), 'utf8')
+    await c.call('providers.update', { config: config() })
+    const providersBefore = readFileSync(join(dir, 'providers.json'), 'utf8')
+    expect((await c.raw('providers.update', { config: { ...config(), hosting } })).error?.data?.code).toBe('invalid_params')
+    expect(readFileSync(join(dir, 'hosting.json'), 'utf8')).toBe(before)
+    expect(readFileSync(join(dir, 'providers.json'), 'utf8')).toBe(providersBefore)
+  })
+
+  it('keeps hosting UI-only and never echoes or persists submitted secrets', async () => {
+    expect((await fetch(new URL(origin).origin)).status).toBe(404)
+    const c = await client()
+    const catalog = await c.call('providers.update', { config: config() })
+    expect(catalog.videoReferences).toBe('hosting_required')
+    expect(catalog).not.toHaveProperty('hosting')
+    expect(await c.call('hosting.get')).toEqual({ config: null, hasSecret: false })
+    expect(await c.call('hosting.test')).toEqual({ ok: false, step: 'config', reason: 'hosting.not_configured' })
+    const invalidHosting = await c.raw('hosting.update', { config: { type: 'tos', region: 'cn-beijing', bucket: 'INVALID', accessKeyId: 'example', prefix: 'refs/' } })
+    expect(JSON.stringify(invalidHosting.error)).toContain('bucket')
+    expect(JSON.stringify(invalidHosting.error)).not.toContain('Invalid key parameters')
+    const hosting = { type: 'tos', region: 'cn-beijing', bucket: 'reference-clips', accessKeyId: 'example-access-key', prefix: 'vis-creative/refs/' }
+    const providerFile = readFileSync(join(dir, 'providers.json'), 'utf8')
+    expect(await c.call('hosting.update', { config: hosting })).toEqual({ config: hosting, hasSecret: false })
+    expect(await c.call('hosting.setSecret', { secret: SECRET })).toEqual({ hasSecret: true })
+    expect((await c.call('providers.list')).videoReferences).toBe('ready')
+    expect(await c.call('hosting.get')).toEqual({ config: hosting, hasSecret: true })
+    expect(readFileSync(join(dir, 'providers.json'), 'utf8')).toBe(providerFile)
+    const hostingFile = readFileSync(join(dir, 'hosting.json'), 'utf8')
+    await c.call('providers.update', { config: config() })
+    expect(readFileSync(join(dir, 'hosting.json'), 'utf8')).toBe(hostingFile)
+    expect((await c.call('providers.list')).videoReferences).toBe('ready')
+    expect(await c.call('hosting.clearSecret')).toEqual({ hasSecret: false })
+    expect((await c.call('providers.list')).videoReferences).toBe('hosting_required')
+    await c.call('hosting.setSecret', { secret: SECRET })
+    expect(await c.call('hosting.update', { config: null })).toEqual({ config: null, hasSecret: false })
+    expect(await options.hostingSecretStore!.get('tos')).toBeUndefined()
+    for (const params of [{ secret: { [SECRET]: SECRET } }, { secret: SECRET, [SECRET]: SECRET }]) {
+      const invalid = await c.raw('hosting.setSecret', params)
+      expect(invalid.error?.data?.code).toBe('invalid_params')
+      expect(JSON.stringify(invalid)).not.toContain(SECRET)
+    }
+    await c.call('events.subscribe', { spaceId })
+    const { sessionId } = await c.call('session.create', { requestId: rid(), title: 'Hosting permissions' })
+    await c.call('session.sendMessage', { requestId: rid(), sessionId, text: 'Check hosting permissions', refs: [] })
+    await until(() => agentToken !== undefined)
+    const a = await client(agentToken!)
+    for (const method of ['hosting.get', 'hosting.update', 'hosting.setSecret', 'hosting.clearSecret', 'hosting.test']) {
+      expect((await a.raw(method, { secret: SECRET })).error?.data?.code).toBe('forbidden')
+    }
+    expect((await a.call('providers.list')).videoReferences).toBe('hosting_required')
+    expect(JSON.stringify(received)).not.toContain(SECRET)
+    expect(logs.join('\n')).not.toContain(SECRET)
+    for (const file of filesUnder(dir)) expect(readFileSync(file).includes(Buffer.from(SECRET)), file).toBe(false)
+    expect(requests).toEqual([])
+  })
+
   it('uses an available default for implicit submissions when the stored default is invalid', async () => {
+    expect((await fetch(new URL(origin).origin)).status).toBe(404)
     await studiod.stop('user_quit')
     const invalid = config()
     invalid.providers[0]!.region = 'unregistered'
@@ -237,6 +316,103 @@ describe('Provider Gateway integration', () => {
     expect(await finish(c, jobId)).toMatchObject({ status: 'succeeded' })
     expect(studiod.spaces.get(spaceId)!.db.select().from(s.generationJobs).where(eq(s.generationJobs.id, jobId)).get()?.provider).toBe('mock')
     expect(requests).toHaveLength(0)
+  })
+
+  it('broadcasts a successful secret write even when the follow-up presence check fails', async () => {
+    vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    const c = await client()
+    await c.call('events.subscribe', { spaceId })
+    await c.call('hosting.update', { config: { type: 'tos', region: 'cn-beijing', bucket: 'reference-clips', accessKeyId: 'testAK', prefix: 'refs/' } })
+    const host = studiod.spaces.get(spaceId)!
+    const configure = vi.spyOn(host.generation, 'configure')
+    const before = c.notifications.filter(message => message.method === 'events.providersChanged').length
+    const has = vi.spyOn(options.hostingSecretStore!, 'has').mockRejectedValueOnce(new Error('Private store failure'))
+    const result = await c.raw('hosting.setSecret', { secret: SECRET })
+    expect(result.result).toEqual({ hasSecret: false })
+    expect(result.error).toBeUndefined()
+    expect(configure).toHaveBeenCalledTimes(1)
+    expect(c.notifications.filter(message => message.method === 'events.providersChanged')).toHaveLength(before + 1)
+    expect((await c.call('providers.list')).videoReferences).toBe('hosting_required')
+    expect((await c.call('hosting.get')).hasSecret).toBe(false)
+    expect(has).toHaveBeenCalledTimes(1)
+    clock += 30000
+    expect((await c.call('providers.list')).videoReferences).toBe('ready')
+  })
+
+  it.each(['success', 'failure'])('preserves the hosting mutation %s and broadcasts when adapter refresh throws', async outcome => {
+    const c = await client()
+    await c.call('events.subscribe', { spaceId })
+    await c.call('hosting.update', { config: { type: 'tos', region: 'cn-beijing', bucket: 'reference-clips', accessKeyId: 'testAK', prefix: 'refs/' } })
+    const before = c.notifications.filter(message => message.method === 'events.providersChanged').length
+    const logStart = logs.length
+    vi.spyOn(studiod.spaces.get(spaceId)!.generation, 'configure').mockImplementationOnce(() => { throw new Error('Private refresh diagnostic') })
+    if (outcome === 'failure') vi.spyOn(options.hostingSecretStore!, 'set').mockRejectedValueOnce(new Error('Private store diagnostic'))
+    const result = await c.raw('hosting.setSecret', { secret: SECRET })
+    if (outcome === 'success') expect(result.result).toEqual({ hasSecret: true })
+    else expect(result.error).toMatchObject({ data: { reason: 'hosting.store_failed' } })
+    expect(c.notifications.filter(message => message.method === 'events.providersChanged')).toHaveLength(before + 1)
+    expect(logs.slice(logStart)).toEqual([inspect(['[gateway] Media hosting refresh failed'])])
+  })
+
+  it('rejects secret writes before the author saves hosting settings', async () => {
+    const c = await client()
+    const set = vi.spyOn(options.hostingSecretStore!, 'set')
+    expect((await c.raw('hosting.setSecret', { secret: SECRET })).error).toMatchObject({ data: { reason: 'hosting.not_configured' } })
+    expect(set).not.toHaveBeenCalled()
+  })
+
+  it('uploads Seedance reference videos through fake TOS, settles fake Ark jobs and releases without persisting signed URLs', async () => {
+    const tos = await createFakeTos()
+    try {
+      await studiod.stop('user_quit')
+      options.hostingFetch = tos.fetch
+      options.hostingUploadRequest = tos.uploadRequest
+      options.media!.probe = async () => ({ kind: 'video', mime: 'video/mp4', width: 1280, height: 720, durationMs: 3000, fps: 30 })
+      studiod = await startStudiod(options)
+      hostedReader = tos.fetch
+      const c = await client()
+      await c.call('events.subscribe', { spaceId })
+      const next = config()
+      const model = 'doubao-seedance-2-0-mini-260615'
+      next.providers[0]!.videoModels = [{ id: model, label: 'Seedance' }]
+      next.defaults.video = { provider: PROVIDER, model }
+      await c.call('providers.update', { config: next })
+      await c.call('providers.setKey', { providerId: PROVIDER, apiKey: SECRET })
+      await c.call('hosting.update', { config: { type: 'tos', region: 'cn-beijing', bucket: 'reference-clips', accessKeyId: 'testAK', prefix: 'refs/' } })
+      await c.call('hosting.setSecret', { secret: 'testSK' })
+      const input = await c.call('asset.import', { requestId: rid(), path: fileURLToPath(new URL('../../../packages/generation/src/providers/mock/fixtures/sample.mp4', import.meta.url)) })
+      const host = studiod.spaces.get(spaceId)!
+      for (const [prompt, status] of [['Reference clip', 'succeeded'], ['echo-hosted-error', 'failed']] as const) {
+        const { jobId } = await c.call('generation.submit', { requestId: rid(), kind: 'video', prompt, inputs: [{ assetVersionId: input.assetVersionId }] })
+        await expect.poll(async () => {
+          clock += 5000
+          await host.generation.pump()
+          return (await c.call('generation.get', { jobId })).status
+        }, { timeout: 5000 }).toBe(status)
+        await expect.poll(() => tos.objects.size).toBe(0)
+        const row = host.db.select().from(s.generationJobs).where(eq(s.generationJobs.id, jobId)).get()!
+        const events = host.db.select().from(s.events).all()
+        const view = await c.call('generation.get', { jobId })
+        const persisted = JSON.stringify({ row, events, error: view.error })
+        for (const forbidden of ['X-Tos-Signature', 'X-Tos-Credential', 'testAK', 'testSK', hostedEcho!]) expect(persisted.includes(forbidden)).toBe(false)
+      }
+      expect(hostedReads).toBe(2)
+      expect(tos.requests.map(request => request.method)).toEqual(['PUT', 'GET', 'LIST', 'DELETE', 'PUT', 'GET', 'LIST', 'DELETE'])
+      expect(tos.rejected).toBe(0)
+      const posts = requests.filter(request => request.method === 'POST' && request.path.endsWith('/contents/generations/tasks'))
+      expect(posts).toHaveLength(2)
+      for (const post of posts) {
+        const video = post.body.content.find((item: { type: string }) => item.type === 'video_url')
+        expect(video.role).toBe('reference_video')
+        expect(new URL(video.video_url.url).searchParams.has('X-Tos-Signature')).toBe(true)
+      }
+      for (const file of filesUnder(dir)) {
+        const bytes = readFileSync(file)
+        for (const forbidden of ['X-Tos-Signature', 'X-Tos-Credential', hostedEcho!]) expect(bytes.includes(Buffer.from(forbidden))).toBe(false)
+      }
+      expect(JSON.stringify(received).includes('X-Tos-Signature')).toBe(false)
+      expect(logs.join('\n').includes('X-Tos-Signature')).toBe(false)
+    } finally { await tos.close() }
   })
 
   it('settles an invalid pinned snapshot as unknown before sending a paid request', async () => {
@@ -400,7 +576,11 @@ describe('Provider Gateway integration', () => {
       missingOutputIndexes: [1],
       targets: [{ outputIndex: 0, status: 'delivered' }, { outputIndex: 1, status: 'no_output' }],
     })
-    expect((await restored.call('canvas.get')).nodes).toHaveLength(1)
+    // Placeholders (RFC 0047): the unknown job's and the missing output's stay empty, the delivered one holds the image
+    const placeholders = [...dropped.bindings, ...partial.bindings].map(binding => (binding.target as { nodeId: string }).nodeId)
+    const nodes = (await restored.call('canvas.get')).nodes as NodeView[]
+    expect(nodes.map(node => node.nodeId).sort()).toEqual([...placeholders].sort())
+    expect(placeholders.map(id => nodes.find(node => node.nodeId === id)!.slots[0]!.content.type)).toEqual(['empty', 'asset', 'empty'])
     expect(requests.filter(r => r.method === 'POST' && r.body.prompt === 'partial')).toHaveLength(1)
     expectNoPersistedSecret()
   })

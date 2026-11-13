@@ -1,10 +1,11 @@
-import type { JobView, SkillDraftReceipt, TranscriptItem } from '@vis/protocol'
+import type { JobView, SceneProposal, SkillDraftReceipt, TranscriptItem } from '@vis/protocol'
 import { groupTranscript, type ToolCall, type TranscriptGroup } from './toolGroups'
+import { sceneProposalResults } from './SceneProposalCard'
 import { skillDraftResults } from './SkillDraftCard'
 import { generationResults } from './generationResults'
 
 export type WorkBlockGroup = { kind: 'work'; itemId: string; turnId: string | null; items: TranscriptItem[]; steps: TranscriptGroup[]; active: boolean; endedAt?: number }
-export type WorkTranscriptGroup = WorkBlockGroup | { kind: 'item'; item: TranscriptItem } | { kind: 'result'; job: JobView } | { kind: 'skillDraft'; draft: SkillDraftReceipt }
+export type WorkTranscriptGroup = WorkBlockGroup | { kind: 'item'; item: TranscriptItem } | { kind: 'result'; job: JobView } | { kind: 'skillDraft'; draft: SkillDraftReceipt } | { kind: 'sceneProposal'; proposal: SceneProposal }
 
 /** A message queued mid-turn is stored inside that turn; show it after the turn so one turn stays one block. */
 function queuedAfterTurn(items: TranscriptItem[], waiting: (item: TranscriptItem) => boolean) {
@@ -39,6 +40,7 @@ export function workTranscript(source: TranscriptItem[], jobs?: ReadonlyMap<stri
     pairs.set((pair.call ?? pair.result)!.itemId, pair)
   }
   const results = generationResults(items, jobs)
+  const sceneProposals = sceneProposalResults(items)
   const skillDrafts = skillDraftResults(items)
   const groups: WorkTranscriptGroup[] = []
   let block: WorkBlockGroup | undefined
@@ -63,6 +65,13 @@ export function workTranscript(source: TranscriptItem[], jobs?: ReadonlyMap<stri
       if (block && item.turnId === block.turnId) block.endedAt = item.createdAt
       groups.push({ kind: 'item', item })
       boundary = item.itemId
+      block = undefined
+    }
+    const proposal = sceneProposals.get(item.itemId)
+    if (proposal) {
+      if (block) block.endedAt = item.createdAt
+      groups.push({ kind: 'sceneProposal', proposal })
+      boundary = proposal.proposalId
       block = undefined
     }
     const draft = skillDrafts.get(item.itemId)

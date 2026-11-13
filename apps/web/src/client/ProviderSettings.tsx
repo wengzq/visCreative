@@ -1,8 +1,9 @@
 import { CloseIcon, IconButton, describeError, type Locale, messagesFor, useFormat, useLocale, useMessages } from '@vis/ui-kit'
 import { defaultParams, schemaFields as parameterFields, type ProviderCatalog } from '@vis/canvas-ui'
-import { isBuiltinProviderType as isBuiltin, type ProviderConfig, ProviderConfigSchema, type WorkSlotsView } from '@vis/protocol'
+import { isBuiltinProviderType as isBuiltin, isSceneInputModel, type ProviderConfig, ProviderConfigSchema, type WorkSlotsView } from '@vis/protocol'
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import { MySkills } from './MySkills'
+import { MediaHostingSettings } from './MediaHostingSettings'
 import { mySkillsMessages } from './messages'
 import { RecentlyDeleted } from './RecentlyDeleted'
 import { settingsMessages } from './messages'
@@ -20,8 +21,8 @@ type Props = {
   spaceId?: string
   onSkillsUsed?(): void
   draftId?: string | undefined
-  initialSection?: 'guardrails' | 'mySkills'
-  rpc: { call<T = any>(method: string, params?: any): Promise<T>; onSkillsChanged?(listener: () => void): () => void }
+  initialSection?: 'guardrails' | 'mySkills' | 'hosting'
+  rpc: { call<T = any>(method: string, params?: any): Promise<T>; onSkillsChanged?(listener: () => void): () => void; onProvidersChanged?(listener: () => void): () => void }
   onClose(): void
   onUpdated(catalog: ProviderCatalog): void
   onProjectsChanged?(): Promise<void>
@@ -60,6 +61,7 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
   const m = useMessages(settingsMessages)
   const skillMessages = useMessages(mySkillsMessages)
   const [skillsDirty, setSkillsDirty] = useState(false)
+  const [hostingDirty, setHostingDirty] = useState(false)
   const { locale, setLocale } = useLocale()
   const format = useFormat()
   const kindLabel = { image: m.settingsImage, video: m.settingsVideo, audio: m.settingsAudio }
@@ -96,7 +98,7 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
   const [draft, setDraft] = useState(() => configuration(catalog))
   const [latest, setLatest] = useState<ProviderCatalog | null>(null)
   const [selectedId, setSelectedId] = useState(catalog.providers[0]?.id ?? '')
-  const [section, setSection] = useState<'providers' | 'defaults' | 'guardrails' | 'recentlyDeleted' | 'general' | 'appearance' | 'mySkills'>(initialSection ?? 'providers')
+  const [section, setSection] = useState<'providers' | 'defaults' | 'guardrails' | 'recentlyDeleted' | 'general' | 'appearance' | 'mySkills' | 'hosting'>(initialSection ?? 'providers')
   const [knownSlots, setKnownSlots] = useState(slots)
   const [slotLimits, setSlotLimits] = useState<Record<string, number | null>>({})
   const [keyEntered, setKeyEntered] = useState(false)
@@ -177,7 +179,7 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
 
   function close() {
     if (languageBusy) return
-    if ((dirty || keyEntered || slotsDirty || skillsDirty) && !window.confirm(m.settingsDiscard)) return
+    if ((dirty || keyEntered || slotsDirty || skillsDirty || hostingDirty) && !window.confirm(m.settingsDiscard)) return
     clearInput()
     onClose()
   }
@@ -357,7 +359,7 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
 
   function defaults(kind: Kind) {
     const groups = [
-      ...builtins.map(provider => ({ id: provider.id, label: provider.label, models: provider.models.filter(model => model.kind === kind), keyMissing: false })),
+      ...builtins.map(provider => ({ id: provider.id, label: provider.label, models: provider.models.filter(model => model.kind === kind && !isSceneInputModel(provider.id, model.id)), keyMissing: false })),
       ...draft.providers.filter(provider => serviceStatus(provider) !== 'unavailable').map(provider => ({ id: provider.id, label: provider.label, models: provider[`${kind}Models`], keyMissing: serviceStatus(provider) === 'keyMissing' })),
     ].filter(group => group.models.length)
     const selected = draft.defaults[kind]
@@ -384,8 +386,8 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
   }
 
   return (
-    <dialog ref={dialog} className="vis-dialog provider-settings" aria-label={m.settingsTitle} onCancel={event => { event.preventDefault(); if (choosingType) closeChooser(); else close() }} onKeyDown={trapFocus} onClick={event => { if (event.target === event.currentTarget && !dirty && !keyEntered && !slotsDirty && !skillsDirty) close() }}>
-      <form noValidate onSubmit={event => { event.preventDefault(); if (section !== 'mySkills') void save() }}>
+    <dialog ref={dialog} className="vis-dialog provider-settings" aria-label={m.settingsTitle} onCancel={event => { event.preventDefault(); if (choosingType) closeChooser(); else close() }} onKeyDown={trapFocus} onClick={event => { if (event.target === event.currentTarget && !dirty && !keyEntered && !slotsDirty && !skillsDirty && !hostingDirty) close() }}>
+      <form noValidate onSubmit={event => { event.preventDefault(); if (section !== 'mySkills' && section !== 'hosting') void save() }}>
         <header className="vis-dialog-header provider-settings-header">
           <h1 id={`${prefix}-title`}>{section === 'providers' || section === 'defaults' ? m.settingsProviders : m.settingsTitle}</h1>
           <IconButton type="button" label={m.settingsClose} disabled={languageBusy} onClick={close}><CloseIcon /></IconButton>
@@ -429,6 +431,7 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
             </button>)}
             <button ref={addButton} type="button" disabled={Boolean(busy)} aria-expanded={choosingType} onClick={() => setChoosingType(true)}>{m.settingsAddService}</button>
             <button type="button" aria-pressed={section === 'defaults'} className={section === 'defaults' ? 'is-active' : ''} disabled={Boolean(busy)} onClick={() => { clearInput(); setSection('defaults') }}>{m.settingsDefaultsLimits}</button>
+            <button type="button" aria-pressed={section === 'hosting'} className={section === 'hosting' ? 'is-active' : ''} disabled={Boolean(busy)} onClick={() => { clearInput(); setSection('hosting') }}>{m.hostingTitle}</button>
             <h2>{m.settingsData}</h2>
             <button type="button" aria-pressed={section === 'recentlyDeleted'} className={section === 'recentlyDeleted' ? 'is-active' : ''} disabled={Boolean(busy)} onClick={() => {
               clearInput()
@@ -438,6 +441,13 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
             }}>{m.recentlyDeleted}</button>
           </nav>
           <div className="provider-settings-content">
+            <div hidden={section !== 'hosting'}>
+              <MediaHostingSettings active={section === 'hosting'} rpc={rpc} agentIsolation={knownCatalog.agentIsolation} onDirtyChange={setHostingDirty} onChanged={async () => {
+                const next = await rpc.call<ProviderCatalog>('providers.list')
+                setKnownCatalog(next)
+                onUpdated(next)
+              }} />
+            </div>
             <MySkills draftId={draftId} rpc={rpc} active={section === 'mySkills'} {...(spaceId ? { spaceId } : {})} onDirtyChange={setSkillsDirty} {...(onSkillsUsed ? { onUsed: onSkillsUsed } : {})} />
             {section === 'general' ? <section aria-labelledby={`${prefix}-general-title`}>
               <h2 id={`${prefix}-general-title`}>{m.settingsGeneral}</h2>
@@ -621,7 +631,7 @@ export function ProviderSettings({ catalog, localePreference, onLocaleChange, sl
           <span role="status">{busy ? m.settingsSaving : (status ? m[status] : dirty || slotsDirty ? m.settingsUnsaved : '')}</span>
         </div>
         {/* Recently deleted actions take effect immediately without Save configuration */}
-        {section === 'mySkills' || section === 'recentlyDeleted' || section === 'general' || section === 'appearance' ? null : <footer className="vis-dialog-footer provider-settings-footer">
+        {section === 'mySkills' || section === 'recentlyDeleted' || section === 'general' || section === 'appearance' || section === 'hosting' ? null : <footer className="vis-dialog-footer provider-settings-footer">
           <button type="button" disabled={languageBusy} onClick={close}>{m.cancel}</button>
           <button type="submit" className="is-primary" disabled={Boolean(busy) || !dirty}>{m.settingsSaveConfig}</button>
         </footer>}

@@ -35,6 +35,15 @@ providerContract('Gemini synchronous image', async scenario => {
 })
 
 describe('Gemini adapter', () => {
+  it.each(['gemini-nano-banana-2.1', 'gemini-3.1-flash-image'])('sends expanded aspect ratios with the supported image sizes for %s', async model => {
+    const h = await fakeGemini('normal', 'image')
+    try {
+      await h.adapter.submit({ ...h.request, model, params: { aspect_ratio: '1:8', image_size: model === 'gemini-3.1-flash-image' ? '512' : '1K', seed: 0, temperature: 0, top_p: 0.5 } }, { idempotencyKey: 'expanded-ratio' })
+      expect(h.requests[0]?.body).toMatchObject({ generationConfig: { seed: 0, temperature: 0, topP: 0.5, imageConfig: { aspectRatio: '1:8', imageSize: model === 'gemini-3.1-flash-image' ? '512' : '1K' } } })
+      expect(geminiParamsSchema('image', 'gemini-nano-banana-2.1').safeParse({ image_size: '512' }).success).toBe(false)
+      expect(geminiParamsSchema('image', 'gemini-3-pro-image').safeParse({ aspect_ratio: '1:8' }).success).toBe(false)
+    } finally { await h.close() }
+  })
   it('registers an unverified global image and video service', () => {
     expect(createProviderTypeRegistry().get('gemini')).toBe(geminiProviderType)
     expect(geminiProviderType).toMatchObject({ label: { zh: 'Google Gemini', en: 'Google Gemini' }, needsKey: true, verified: false, allowCustomBaseUrl: true, kinds: ['image', 'video'], regions: [{ id: 'global', baseUrl: GEMINI_BASE_URL }] })
@@ -199,7 +208,8 @@ describe('Gemini adapter', () => {
       h.controls.status = 'failed'
       h.controls.pollError = code
       const { jobId } = service.submit({ sessionId: null, turnId: null, inputSnapshotId: null }, { requestId: code, kind: 'video', prompt: h.request.prompt })
-      await expect.poll(async () => { await service.pump(); return (await service.get({ jobId })).status }).toBe('failed')
+      // Each poll pumps the fake server round trip; the default one-second poll ran out on a loaded Windows runner.
+      await expect.poll(async () => { await service.pump(); return (await service.get({ jobId })).status }, { timeout: 10_000 }).toBe('failed')
       expect(await service.get({ jobId })).toMatchObject({ error: { code: 'gemini_safety_blocked', data: { reason: 'generation.moderation_rejected' }, message: expect.stringContaining('billing cannot be confirmed') } })
       const attempt = db.select().from(spaceSchema.generationAttempts).get()!
       h.controls.pollError = ''

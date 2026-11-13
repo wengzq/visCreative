@@ -106,7 +106,9 @@ export function stageSyncOutput(opts: {
       if (!opts.mimeTypes.includes(info.mime) || data.byteLength > opts.maxBytes) throw new ProviderError('rejected', 'Invalid synchronous generation output type or size')
       return { ...info, data: new Uint8Array(data) }
     },
-    async cleanup({ idempotencyKey }) {
+    async cleanup({ idempotencyKey, status }) {
+      // Rechecking an unknown job may still need its paid output; only conclusive settlement releases bytes.
+      if (status === 'unknown') return
       const id = taskId(idempotencyKey)
       // A cancelled job may still be completing its paid call; release only after that writer finishes.
       await inflight.get(directory(id))

@@ -1,5 +1,5 @@
-import { refreshTextDeletionApprovals } from './text-deletion'
 import { assertAgentTextWrites, childTextOps } from './writing-permissions'
+import { assertAgentMediaPurpose } from './canvas-permissions'
 import type { MediaTools } from '@vis/assets'
 import { appendNotice, getGuide } from '@vis/workbench-core'
 import { VisError } from '@vis/domain'
@@ -17,6 +17,7 @@ import { listProjectSkills, pickDirectory, reveal, validateDirectory } from './f
 import { join } from 'node:path'
 import { statSync } from 'node:fs'
 import type { ProviderManager } from './providers'
+import type { HostingManager } from './hosting'
 import type { SpaceHost, SpaceRegistry } from './space-host'
 import { readActiveMediaTasks } from './media-tasks'
 import { databaseVersion } from './database-version'
@@ -43,6 +44,7 @@ export type GatewayDeps = {
   appDb: AppDb
   spaces: SpaceRegistry
   providers?: ProviderManager
+  hosting?: HostingManager
   usage?: () => MethodResult<'generation.usage'>
   uiToken: string
   studiodVersion: string
@@ -139,11 +141,20 @@ export function createGateway(deps: GatewayDeps): Gateway {
     return { sessionId: ctx.conn.agent!.sessionId, workItemId: session.workItemId }
   }
 
-  const handlers: { [M in Exclude<MethodName, 'agents.list' | 'series.list' | 'series.create' | 'series.rename' | 'series.delete' | 'series.mediaGet' | 'providers.list' | 'providers.update' | 'providers.setKey' | 'providers.clearKey' | 'events.subscribe' | `space.${string}` | 'generation.usage' | 'fs.pickDirectory' | 'fs.validateDirectory' | 'fs.listSkills' | 'fs.reveal' | `skill.${string}` | `preferences.${string}` | 'runtime.activity' | 'runtime.shutdown' | 'work.inbox' | 'work.slots' | 'work.setSlotLimit'>]: Handler<M> } = {
+  const handlers: { [M in Exclude<MethodName, 'agents.list' | 'series.list' | 'series.create' | 'series.rename' | 'series.delete' | 'series.mediaGet' | 'providers.list' | 'providers.update' | 'providers.setKey' | 'providers.clearKey' | 'hosting.get' | 'hosting.update' | 'hosting.setSecret' | 'hosting.clearSecret' | 'hosting.test' | 'events.subscribe' | `space.${string}` | 'generation.usage' | 'fs.pickDirectory' | 'fs.validateDirectory' | 'fs.listSkills' | 'fs.reveal' | `skill.${string}` | `preferences.${string}` | 'runtime.activity' | 'runtime.shutdown' | 'work.inbox' | 'work.slots' | 'work.setSlotLimit'>]: Handler<M> } = {
     'text.requestDelete': (p, ctx) => {
       const turn = agentTurn(ctx)
       return ctx.host.textDeletion.request(p, ctx.conn.agent!.sessionId, turn.turnId)
     },
+    'scene.propose': (p, ctx) => {
+      agentTurn(ctx)
+      return ctx.host.sceneProposals.propose(p, ctx.conn.agent!.sessionId, tx => { requireAgentWriteSession(tx, ctx.conn.agent!.sessionId) })
+    },
+    'scene.proposal.list': (p, ctx) => {
+      if (ctx.caller === 'agent') agentTurn(ctx)
+      return ctx.host.sceneProposals.list(p)
+    },
+    'scene.proposal.resolve': (p, { host }) => host.sceneProposals.resolve(p),
     'text.propose': (p, ctx) => {
       agentTurn(ctx)
       return ctx.host.textProposals.propose(p, ctx.conn.agent!.sessionId)
@@ -152,7 +163,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
       if (ctx.caller === 'agent') agentTurn(ctx)
       return ctx.host.textProposals.list(p)
     },
-    'text.proposal.resolve': (p, { host }) => host.db.transaction(tx => { const result = host.textProposals.resolve(p); refreshTextDeletionApprovals(tx, now()); return result }, { behavior: 'immediate' }),
+    'text.proposal.resolve': (p, { host }) => host.textProposals.resolve(p),
     'series.textList': (_p, ctx) => {
       agentTurn(ctx)
       const membership = deps.spaces.series.membership(ctx.host.spaceId)
@@ -223,7 +234,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
     },
     'generation.cancel': (p, ctx) => {
       const turn = ctx.caller === 'agent' ? agentTurn(ctx) : undefined
-      return ctx.host.generation.cancel({ sessionId: ctx.caller === 'agent' ? ctx.conn.agent!.sessionId : null, turnId: turn?.turnId ?? null, inputSnapshotId: turn?.inputSnapshotId ?? null }, p)
+      return ctx.host.generation.cancel({ sessionId: ctx.caller === 'agent' ? ctx.conn.agent!.sessionId : null, turnId: turn?.turnId ?? null, inputSnapshotId: turn?.inputSnapshotId ?? null }, p, { releasePlaceholders: true })
     },
     'generation.recheck': (p, ctx) => {
       const turn = ctx.caller === 'agent' ? agentTurn(ctx) : undefined
@@ -237,14 +248,26 @@ export function createGateway(deps: GatewayDeps): Gateway {
     'canvas.apply': (p, ctx) => {
       if (ctx.caller === 'ui') {
         if (!p.ops.some(op => op.op === 'scene.set')) return ctx.host.canvas.apply({ kind: 'user' }, p)
-        return ctx.host.db.transaction(tx => ctx.host.canvas.apply({ kind: 'user' }, { ...p, ops: stampUserSceneWrites(readNodes(tx), p.ops) }), { behavior: 'immediate' })
+        return ctx.host.canvas.apply({ kind: 'user' }, p, tx => stampUserSceneWrites(readNodes(tx), p.ops))
       }
       agentTurn(ctx)
-      if (p.ops.some(op => op.op === 'scene.set' || (op.op === 'node.create' && op.kind === 'scene') || op.op === 'node.delete')) assertAgentSceneWrites(readNodes(ctx.host.db), p.ops)
+      if (p.ops.some(op => op.op === 'node.setPrompt')) throw VisError.of('forbidden', 'runtime.caller_forbidden', { method: 'node.setPrompt', caller: ctx.caller }, 'Only the author can create or restore a prompt through node.setPrompt')
       if (p.ops.some(op => op.op === 'previz.set' || op.op === 'node.delete')) assertAgentPrevizWrites(readNodes(ctx.host.db), p.ops)
+      const sceneOps = p.ops.some(op => op.op === 'scene.set' || (op.op === 'node.create' && op.kind === 'scene') || op.op === 'node.delete')
+      if (sceneOps) return ctx.host.canvas.apply({ kind: 'agent', sessionId: ctx.conn.agent!.sessionId }, p, tx => {
+        const nodes = readNodes(tx)
+        const writesScene = p.ops.some(op => op.op === 'scene.set' || (op.op === 'node.create' && op.kind === 'scene') || (op.op === 'node.delete' && nodes.some(node => node.kind === 'scene' && node.nodeId === op.nodeId)))
+        if (writesScene) requireAgentWriteSession(tx, ctx.conn.agent!.sessionId)
+        const ops = assertAgentSceneWrites(nodes, p.ops)
+        assertAgentMediaPurpose(tx, ops)
+        assertAgentTextWrites(tx, ops)
+        return childTextOps(tx, ctx.conn.agent!.sessionId, ops)
+      })
       return ctx.host.db.transaction(tx => {
-        assertAgentTextWrites(tx, p.ops)
-        return ctx.host.canvas.apply({ kind: 'agent', sessionId: ctx.conn.agent!.sessionId }, { ...p, ops: childTextOps(tx, ctx.conn.agent!.sessionId, p.ops) })
+        return ctx.host.canvas.apply({ kind: 'agent', sessionId: ctx.conn.agent!.sessionId }, { ...p, ops: childTextOps(tx, ctx.conn.agent!.sessionId, p.ops) }, applyTx => {
+          assertAgentMediaPurpose(applyTx, p.ops)
+          assertAgentTextWrites(applyTx, p.ops)
+        })
       }, { behavior: 'immediate' })
     },
     'canvas.undo': (p, { host }) => host.canvas.undo(p),
@@ -700,7 +723,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
 
     const parsed = spec.params.safeParse(params ?? {})
     if (!parsed.success) {
-      const detail = method === 'providers.setKey' || method === 'providers.clearKey' ? 'Invalid key parameters' : describeIssues(parsed.error.issues)
+      const detail = method === 'providers.setKey' || method === 'providers.clearKey' || method === 'hosting.setSecret' ? 'Invalid key parameters' : describeIssues(parsed.error.issues)
       const ops = method === 'canvas.apply' && params && typeof params === 'object' && 'ops' in params && Array.isArray(params.ops) ? params.ops : []
       const topics = new Set<'script' | 'timeline'>()
       for (const issue of parsed.error.issues) {
@@ -743,6 +766,31 @@ export function createGateway(deps: GatewayDeps): Gateway {
         if (peer.phase === 'ready' && peer.caller === 'ui') peer.peer.send({ jsonrpc: '2.0', method: 'events.providersChanged', params: {} })
       }
       return result
+    }
+
+    if (method === 'hosting.get' || method === 'hosting.update' || method === 'hosting.setSecret' || method === 'hosting.clearSecret' || method === 'hosting.test') {
+      if (!deps.hosting) throw VisError.of('unavailable', 'hosting.not_configured', {}, 'Media hosting is not configured')
+      if (method === 'hosting.get') return deps.hosting.get()
+      if (method === 'hosting.test') return deps.hosting.test()
+      // A failed mutation may have changed one store, so reconciliation must reach adapters and every settings window.
+      try {
+        if (method === 'hosting.update') return await deps.hosting.update((p as MethodParams<'hosting.update'>).config)
+        if (method === 'hosting.setSecret') return await deps.hosting.setSecret((p as MethodParams<'hosting.setSecret'>).secret)
+        return await deps.hosting.clearSecret()
+      } catch (error) {
+        // No credential or transport exception may reach gateway logs, including errors from refresh callbacks.
+        if (error instanceof VisError && error.details?.reason === 'hosting.not_configured') throw VisError.of('unavailable', 'hosting.not_configured', {}, 'Media hosting is not configured')
+        throw VisError.of('unavailable', 'hosting.store_failed', {}, 'Media hosting settings operation failed')
+      }
+      finally {
+        try { deps.providers?.refreshHosting() }
+        catch { try { console.error('[gateway] Media hosting refresh failed') } catch { /* Logging cannot replace a mutation result. */ } }
+        finally {
+          for (const peer of conns) {
+            if (peer.phase === 'ready' && peer.caller === 'ui') peer.peer.send({ jsonrpc: '2.0', method: 'events.providersChanged', params: {} })
+          }
+        }
+      }
     }
 
     switch (method) {

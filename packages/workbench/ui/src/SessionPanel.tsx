@@ -8,6 +8,7 @@ import { ApprovalCard } from './ApprovalCard'
 import type { BatchApprovalActions } from './BatchApprovalCard'
 import { workTranscript } from './workBlocks'
 import { WorkBlock } from './WorkBlock'
+import { SceneProposalCard, type SceneProposalHost } from './SceneProposalCard'
 import { SkillDraftCard, type SkillDraftHost } from './SkillDraftCard'
 import { GenerationResult } from './GenerationResult'
 import { type ProjectOption, type SkillOption, WorkspaceDialog, type WorkspaceInput, type DirectoryPicker } from './WorkspaceDialog'
@@ -32,6 +33,7 @@ export type RefChip = { nodeId: string }
 export type { RefPreview } from './RefThumb'
 
 export type SessionPanelProps = {
+  sceneProposalHost?: SceneProposalHost
   skillDraftHost?: SkillDraftHost
 
   scriptBatches?: ReadonlyMap<string, import('@vis/protocol').BatchView>
@@ -389,6 +391,8 @@ function Conversation(p: SessionPanelProps & ComposerDraft & { session: SessionS
           ? <WorkBlock key={group.itemId} block={group} onStop={() => p.onStop(p.session.sessionId)} silentSince={group.active ? p.session.silentSince : null} items={items} jobs={p.generationJobs} onToggle={() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight }} />
           : group.kind === 'result'
             ? <GenerationResult key={group.job.jobId} job={group.job} archived={archived} resolveAsset={p.resolveAsset} assetUrl={p.assetUrl} posterUrl={p.posterUrl} onLocateRef={p.onLocateRef} onAddRef={p.onAddRef} onAddAssetRef={p.onAddAssetRef} />
+            : group.kind === 'sceneProposal'
+            ? <SceneProposalCard key={group.proposal.proposalId} proposal={group.proposal} host={p.sceneProposalHost} />
             : group.kind === 'skillDraft'
             ? <SkillDraftCard key={group.draft.draftId} draft={group.draft} host={p.skillDraftHost} />
             : group.item.kind === 'approval'

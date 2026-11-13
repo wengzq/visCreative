@@ -13,6 +13,8 @@ import { newSecret } from './auth'
 import { createGateway, type Gateway, type ShutdownReason } from './gateway'
 import { createProviderManager, type ProviderManager } from './providers'
 import { createSystemSecretStore, type SecretStore } from './secret-store'
+import { createHostingManager, type HostingManager } from './hosting'
+import type { UploadRequest } from './tos-upload'
 import { listen } from './server'
 import { type AgentRuntimes, createSpaceRegistry, type SpaceRegistry } from './space-host'
 import { hasActiveMediaTasks } from './media-tasks'
@@ -30,6 +32,9 @@ export type StudiodOptions = {
   providerTypes?: readonly ProviderType[]
   defaults: ProviderDefaults
   secretStore?: SecretStore
+  hostingSecretStore?: SecretStore
+  hostingFetch?: typeof fetch
+  hostingUploadRequest?: UploadRequest
   idleExitMs?: number
   /** Defaults to ffmpeg / ffprobe from PATH */
   media?: MediaTools
@@ -80,11 +85,14 @@ export async function startStudiod(opts: StudiodOptions): Promise<Studiod> {
   let appDb: ReturnType<typeof openAppDb> | undefined
   let spaces!: SpaceRegistry
   let providers: ProviderManager
+  let hosting: HostingManager
   const media = opts.media ?? createFfmpegMedia()
   try {
     appDb = openAppDb(join(opts.dataDir, 'app.db'))
+    hosting = createHostingManager({ dataDir: opts.dataDir, secrets: opts.hostingSecretStore ?? createSystemSecretStore('vis-creative.hosting'), fetch: opts.hostingFetch, uploadRequest: opts.hostingUploadRequest })
+    await hosting.initialize()
     providers = createProviderManager({
-      dataDir: opts.dataDir, builtins: opts.providers, defaults: opts.defaults,
+      dataDir: opts.dataDir, builtins: opts.providers, defaults: opts.defaults, hosting,
       secrets: opts.secretStore ?? createSystemSecretStore(), media, ...(opts.providerTypes ? { providerTypes: opts.providerTypes } : {}),
       onChange(next, defaults, limits) {
         hostOptions.providers = next
@@ -171,7 +179,7 @@ export async function startStudiod(opts: StudiodOptions): Promise<Studiod> {
   const gateway = createGateway({
     appDb: db, spaces, uiToken, studiodVersion: opts.studiodVersion, runtimeEpoch: randomUUID(),
     onShutdown: reason => { void stop(reason) },
-    media, providers, now,
+    media, providers, hosting, now,
     usage: () => {
       const date = localDate(now())
       const ledger = db.select().from(appSchema.generationQuota).where(eq(appSchema.generationQuota.date, date)).all()

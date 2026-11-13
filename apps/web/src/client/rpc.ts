@@ -12,6 +12,7 @@ export class RpcError extends Error {
 export type RpcClient = {
   call<T = any>(method: string, params?: unknown): Promise<T>
   onSkillsChanged?(listener: () => void): () => void
+  onProvidersChanged?(listener: () => void): () => void
   close(): void
 }
 
@@ -27,6 +28,7 @@ export function connectRpc(opts: {
   onOpen(): void
 }): RpcClient {
   const skillListeners = new Set<() => void>()
+  const providerListeners = new Set<() => void>()
   let skillSeq = 0
   let socket: WebSocket | undefined
   let closed = false
@@ -57,6 +59,7 @@ export function connectRpc(opts: {
           const seq = msg.params?.seq
           if (typeof seq === 'number' && seq > skillSeq) { skillSeq = seq; for (const listener of skillListeners) listener() }
         }
+        if (msg.method === 'events.providersChanged') for (const listener of providerListeners) listener()
         if (typeof msg.method === 'string') opts.onNotification(msg.method, msg.params)
         return
       }
@@ -85,6 +88,7 @@ export function connectRpc(opts: {
         socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
       })
     },
+    onProvidersChanged(listener) { providerListeners.add(listener); return () => providerListeners.delete(listener) },
     onSkillsChanged(listener) { skillListeners.add(listener); return () => skillListeners.delete(listener) },
     close() {
       closed = true

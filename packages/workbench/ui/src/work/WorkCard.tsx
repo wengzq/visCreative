@@ -64,7 +64,7 @@ export function WorkCard(p: WorkCardProps) {
       const bounds = event.currentTarget.getBoundingClientRect()
       menu.current?.open(bounds.right - 210, bounds.top + 28, event.currentTarget)
     }
-  }} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); menu.current?.open(event.clientX, event.clientY, card.current) }}>
+  }} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); menu.current?.openFromContextMenu(event, card.current) }}>
     <div className="vis-work-card-heading">
       {getWorkActivity(item) !== 'idle' ? <span className={`vis-work-activity is-${getWorkActivity(item)}`} aria-hidden="true" /> : null}
       <span className="vis-work-card-title" title={item.title}>{item.title}</span>

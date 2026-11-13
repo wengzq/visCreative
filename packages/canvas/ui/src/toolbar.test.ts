@@ -1,14 +1,50 @@
-import { createElement } from 'react'
+import { createElement, type ComponentProps, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@vis/ui-kit'
 import type { NodeView } from '@vis/protocol'
-import { toolbarEntries, toolbarFocusIndex, toolbarOffset } from './toolbar'
+import { placeFloatingToolbar, toolbarEntries, toolbarFocusIndex, toolbarOffset } from './toolbar'
 import { clampCrop, fitCrop, resizeCrop } from './imageSelection'
 import { NodeTitle } from './NodeTitle'
 import { IMAGE_PANELS } from './imagePanels'
+import { NodeOperationsToolbar } from './NodeOperationsToolbar'
+
+vi.mock('@xyflow/react', async importOriginal => ({
+  ...await importOriginal<typeof import('@xyflow/react')>(),
+  useViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+}))
+vi.mock('./FloatingNodeToolbar', () => ({ FloatingNodeToolbar: ({ children }: { children: ReactNode }) => children }))
 
 describe('Node operation toolbar catalog', () => {
+  it.each(['image', 'video', 'audio'] as const)('shows %s regeneration only with displayed job provenance and no active generation', kind => {
+    const props = { nodeId: 'node', nodes: [], kind, disabled: false, onOperation() {}, onDownload() {}, onFullscreen() {}, onRegenerate: async () => {} }
+    const render = (extra: Partial<ComponentProps<typeof NodeOperationsToolbar>>) => renderToStaticMarkup(createElement(LocaleProvider, {
+      locale: 'en', setLocale() {}, children: createElement(NodeOperationsToolbar, { ...props, ...extra }),
+    }))
+    const label = 'Regenerate with the same prompt and settings (new version)'
+    expect(render({})).not.toContain(label)
+    expect(render({ sourceJobId: 'job' })).toContain(`aria-label="${label}"`)
+    expect(render({ sourceJobId: 'job', running: true })).not.toContain(label)
+    expect(render({ sourceJobId: 'job', onRegenerate: undefined })).not.toContain(label)
+    expect(render({ sourceJobId: 'job', disabled: true })).toContain(`title="${label}" disabled=""`)
+  })
+
+  it('uses the approved regeneration label and tooltip in both languages', () => {
+    for (const [locale, label, hint] of [
+      ['en', 'Regenerate', 'Regenerate with the same prompt and settings (new version)'],
+      ['zh-CN', '重新生成', '用相同的提示词和设置重新生成（新版本）'],
+    ] as const) {
+      const html = renderToStaticMarkup(createElement(LocaleProvider, {
+        locale, setLocale() {}, children: createElement(NodeOperationsToolbar, {
+          nodeId: 'node', nodes: [], kind: 'image', sourceJobId: 'job', disabled: false,
+          onRegenerate: async () => {}, onOperation() {}, onDownload() {}, onFullscreen() {},
+        }),
+      }))
+      expect(html).toContain(`aria-label="${hint}" title="${hint}"`)
+      expect(html).toContain(`<span>${label}</span>`)
+    }
+  })
+
   it('keeps local edits without providers, hides foreign and unknown operations, and deduplicates provider entries', () => {
     expect(toolbarEntries('image')).toEqual({ common: [{ operation: 'image.crop' }, { operation: 'image.gridSplit' }], more: [] })
     expect(toolbarEntries('image', ['generate', 'image.upscale', 'image.upscale', 'video.upscale', 'image.outpaint'])).toEqual({
@@ -41,6 +77,27 @@ describe('Node operation toolbar catalog', () => {
     const above = node('above', 340, -120)
     expect(toolbarOffset('selected', [selected, source, above], 1, { w: 480, h: 44 })).toBe(355)
     expect(toolbarOffset('selected', [selected, { ...source, kind: 'frame' }], 1, { w: 480, h: 44 })).toBe(42)
+  })
+
+  it('keeps a wide clamped toolbar clear of its card, title, version strip and fixed header', () => {
+    const bounds = { left: 190, top: -15, right: 790, bottom: 29 }
+    const area = { left: 0, top: 0, right: 960, bottom: 600 }
+    const obstacles = [
+      { left: 400, top: 10, right: 560, bottom: 50 },
+      { left: 390, top: 80, right: 570, bottom: 220 },
+      { left: 390, top: 60, right: 570, bottom: 80 },
+      { left: 360, top: 230, right: 600, bottom: 280 },
+    ]
+    expect(placeFloatingToolbar(bounds, area, obstacles)).toEqual({ x: 0, y: 303 })
+    expect(placeFloatingToolbar({ left: 190, top: 300, right: 790, bottom: 344 }, area, obstacles)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('uses space beside the card when the bottom of the canvas has no room', () => {
+    expect(placeFloatingToolbar(
+      { left: 0, top: 0, right: 300, bottom: 44 },
+      { left: 0, top: 0, right: 1000, bottom: 400 },
+      [{ left: 0, top: 0, right: 1000, bottom: 60 }, { left: 10, top: 80, right: 210, bottom: 390 }],
+    )).toEqual({ x: 218, y: 68 })
   })
 })
 

@@ -135,6 +135,34 @@ describe.skipIf(!ready)('Canvas organization and content purpose', () => {
     expect((await nodes()).find(item => item.nodeId === member.nodeId)?.slots).toEqual(member.slots)
   })
 
+  it('moves a text card dragged by its word-count bar', async () => {
+    await apply([{ op: 'node.create', tempId: 'bar', kind: 'text', x: 100, y: 100, w: 320, h: 200, content: { text: '可拖动的文本卡片' } }])
+    const original = (await nodes())[0]!
+    await fitCanvas()
+    const handle = node(original.nodeId).locator('.vis-writing-card-bar > span')
+    // Wait for the handle itself to be stable before measuring; a paused fit animation can pass the viewport poll.
+    await handle.hover()
+    const bar = (await handle.boundingBox())!
+    await page.mouse.down()
+    await page.mouse.move(bar.x + bar.width / 2 + 120, bar.y + 120, { steps: 12 })
+    await page.mouse.up()
+    await expect.poll(async () => (await nodes())[0]!.x).toBeGreaterThan(original.x)
+  })
+
+  it('moves a script card dragged by its body', async () => {
+    await apply([{ op: 'node.create', tempId: 'script', kind: 'script', title: 'Draggable script', x: 100, y: 100 }])
+    const original = (await nodes())[0]!
+    await fitCanvas()
+    const handle = node(original.nodeId).locator('.vis-script-card-summary')
+    await handle.hover()
+    const box = (await handle.boundingBox())!
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 120, { steps: 12 })
+    await page.mouse.up()
+    await expect.poll(async () => (await nodes())[0]!.x).toBeGreaterThan(original.x)
+    expect(await page.getByRole('dialog', { name: '脚本编辑器', exact: true }).count()).toBe(0)
+  })
+
   it('keeps text node dimensions and full editing content when zooming out and back', async () => {
     const body = '# Detail heading\n\n**Full Markdown content** ' + 'A readable canvas sentence. '.repeat(12)
     await apply([{ op: 'node.create', tempId: 'detail', kind: 'text', x: 100, y: 100, w: 320, h: 240, content: { text: body } }])

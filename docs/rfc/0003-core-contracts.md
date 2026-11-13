@@ -120,7 +120,7 @@ result: {
     bindingId: string
     outputIndex: number
     target: { kind: 'slot'; nodeId: string; slotId: string; expectedRevision: number }
-          | { kind: 'new_node'; nearNodeId?: string }
+          | { kind: 'new_node'; nearNodeId?: string }   // RFC 0047 adds nodeId and slotId: the placeholder created at submission
   }[]
 }
 ```

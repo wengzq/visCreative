@@ -358,3 +358,16 @@ it('expires delivery files and deletes retained output when the project closes',
   expect(existsSync(secondFile.path)).toBe(false)
   expect((await f.service.get({ taskId: second.taskId })).download).toBeUndefined()
 })
+
+
+it('refreshes pending reviews when a direct media canvas mutation completes', async () => {
+  const f = await fixture()
+  f.db.insert(s.sessions).values({ id: 'review-session', agentKind: 'codex', title: 'Reviewer', createdAt: 1 }).run()
+  f.db.insert(s.transcriptEntries).values({ sessionId: 'review-session', itemId: 'expired-review', revision: 1, createdSeq: 1, kind: 'approval', createdAt: 1, updatedAt: 1,
+    payload: { approvalId: 'expired-review', kind: 'text_delete', summary: 'Delete', detail: '', status: 'pending', textDelete: { nodeId: f.node.nodeId, slotId: f.slot.slotId, revision: 1, title: 'Source', expiresAt: 0 } } }).run()
+  const task = await f.service.process(user, f.params)
+  await expect.poll(() => f.pending.length).toBe(1)
+  f.pending[0]!.complete()
+  expect((await f.service.get({ taskId: task.taskId, waitMs: 1000 })).status).toBe('succeeded')
+  expect(f.db.select().from(s.transcriptEntries).where(eq(s.transcriptEntries.itemId, 'expired-review')).get()!.payload).toMatchObject({ status: 'expired' })
+})

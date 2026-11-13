@@ -7,22 +7,39 @@ import { createRequire as moduleRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { chromium, type Route } from 'playwright-core'
 import { promisify } from 'node:util'
+import { detectVideoEncoder, SOFTWARE_FIRST_H264_ENCODERS, type EncoderRunner } from '@vis/assets'
 import { RenderVideoParams, RENDER_MAX_DURATION_MS } from '@vis/protocol'
 import type { z } from 'zod'
 import { ProviderError } from '../types'
 import type { ProviderAdapter, ProviderInput, ProviderRequest, ProviderTaskState } from '../types'
-import { canInstallRenderLibrary, readRenderLibrary } from './render-libs'
+import { canInstallRenderLibrary, readRenderLibrary, sourceSceneBundlePath } from './render-libs'
+import { sceneImageParams, sceneModelInputs, sceneRenderPage, sceneVideoParams, validateSceneRender } from './scene'
 
 /** Virtual origin for the page: all requests are answered locally and all other addresses blocked */
 export const RENDER_ORIGIN = 'https://vis.local'
 export { RENDER_MAX_DURATION_MS } from '@vis/protocol'
 const exec = promisify(execFile)
 
+// Chrome's compositor sometimes fails a capture once and succeeds right after, most often without a GPU under load.
+// Retry only that failure, a few times; any other error, or a persistent one, still fails the render.
+const TRANSIENT_CAPTURE = /Unable to capture screenshot/
+export async function captureFrame(capture: () => Promise<Buffer>, attempts = 3, delayMs = 100): Promise<Buffer> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await capture()
+    } catch (error) {
+      if (attempt >= attempts || !(error instanceof Error) || !TRANSIENT_CAPTURE.test(error.message)) throw error
+      await new Promise(resolve => setTimeout(resolve, delayMs * attempt))
+    }
+  }
+}
+
 export type RenderProviderOptions = {
   /** Render output directory keyed by idempotency key; completed jobs remain recoverable after restart */
   workDir: string
   chromePath?: string
   ffmpegPath?: string
+  encoderRunner?: EncoderRunner
   /** Libraries available to pages: name -> local file, accessed through https://vis.local/lib/<name> */
   libs?: Record<string, string>
   /** Author-managed libraries outside project and session work directories; read for each request */
@@ -31,10 +48,16 @@ export type RenderProviderOptions = {
   loadTimeoutMs?: number
 }
 
-const paramsSchema = RenderVideoParams
-type Params = z.infer<typeof paramsSchema>
+const paramsSchema = RenderVideoParams.extend({
+  width: RenderVideoParams.shape.width.meta({ 'x-vis-label': { zh: '宽度', en: 'Width' } }),
+  height: RenderVideoParams.shape.height.meta({ 'x-vis-label': { zh: '高度', en: 'Height' } }),
+  fps: RenderVideoParams.shape.fps.meta({ 'x-vis-label': { zh: '帧率', en: 'Frame rate' } }),
+  durationMs: RenderVideoParams.shape.durationMs.meta({ 'x-vis-label': { zh: '时长（毫秒）', en: 'Duration (ms)' } }),
+  transparent: RenderVideoParams.shape.transparent.meta({ 'x-vis-label': { zh: '透明背景', en: 'Transparent background' } }),
+})
+type Params = z.infer<typeof paramsSchema> & { timeS?: number }
 
-type Meta = { width: number; height: number; durationMs: number; fps?: number; transparent?: boolean; hasAlpha?: boolean }
+type Meta = { width: number; height: number; durationMs?: number; fps?: number; transparent?: boolean; hasAlpha?: boolean }
 type Task =
   | { state: 'running'; progress: number }
   | { state: 'cancelled' }
@@ -60,12 +83,13 @@ export function defaultRenderLibs(): Record<string, string> {
     'rough.js': require.resolve('roughjs/bundled/rough.js'),
     'three.module.js': join(require.resolve('three'), '..', 'three.module.js'),
     'three.core.js': join(require.resolve('three'), '..', 'three.core.js'),
+    'vis-scene.js': sourceSceneBundlePath(),
   }
 }
 
 /**
- * Code rendering: the agent writes an HTML animation into a canvas text node as the first text input;
- * local headless Chrome opens the page and calls window.vis.seek(t) for frame screenshots, which ffmpeg combines into mp4.
+ * Local headless Chrome renders HTML inputs or the owned scene page through window.vis.seek(t).
+ * Video frames go to ffmpeg; a scene image captures one sampled frame directly.
  * Pages cannot access the network, only libraries under /lib/ and asset inputs at /input/<n>.
  */
 export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapter {
@@ -80,7 +104,7 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
   let queue = Promise.resolve()
 
   const dirOf = (key: string) => join(opts.workDir, encodeURIComponent(key))
-  const outOf = (key: string) => join(dirOf(key), existsSync(join(dirOf(key), 'out.webm')) ? 'out.webm' : 'out.mp4')
+  const outOf = (key: string) => join(dirOf(key), existsSync(join(dirOf(key), 'out.png')) ? 'out.png' : existsSync(join(dirOf(key), 'out.webm')) ? 'out.webm' : 'out.mp4')
 
   async function readMeta(key: string): Promise<Meta | null> {
     try {
@@ -92,12 +116,21 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
 
   async function render(key: string, req: ProviderRequest, params: Params, signal: AbortSignal): Promise<void> {
     if (signal.aborted) return
-    const html = req.inputs.find((i): i is Extract<ProviderInput, { type: 'text' }> => i.type === 'text')!.text
-    const assets = req.inputs.filter((i): i is Extract<ProviderInput, { type: 'asset' }> => i.type === 'asset')
+    const scene = req.model === 'scene' && req.inputs[0]?.type === 'scene' ? req.inputs[0] : undefined
+    const html = scene ? sceneRenderPage(scene, { ...params, viewId: req.params.viewId as string, timeS: params.timeS ?? 0 })
+      : req.inputs.find((i): i is Extract<ProviderInput, { type: 'text' }> => i.type === 'text')!.text
+    const assets = scene ? sceneModelInputs(scene) : req.inputs.filter((i): i is Extract<ProviderInput, { type: 'asset' }> => i.type === 'asset')
     const dir = dirOf(key)
     await mkdir(dir, { recursive: true })
-    const ext = params.transparent ? 'webm' : 'mp4'
+    const ext = req.kind === 'image' ? 'png' : params.transparent ? 'webm' : 'mp4'
     const part = join(dir, `out.part.${ext}`)
+    const finish = async (meta: Meta) => {
+      signal.throwIfAborted()
+      await writeFile(join(dir, 'meta.json'), JSON.stringify(meta))
+      await rename(part, join(dir, `out.${ext}`))
+      signal.throwIfAborted()
+      tasks.set(key, { state: 'succeeded', meta })
+    }
 
     const errors: string[] = []
     let missingLibrary: string | undefined
@@ -140,7 +173,11 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
         }
         const n = url.pathname.match(/^\/input\/(\d+)$/)?.[1]
         const asset = n !== undefined ? assets[Number(n)] : undefined
-        if (asset) return route.fulfill({ contentType: asset.mime, path: asset.path })
+        if (asset) {
+          // An unavailable model is an ordinary builder placeholder, including a missing blob.
+          if (scene) return route.fulfill({ contentType: asset.mime, body: await readFile(asset.path).catch(() => Buffer.alloc(0)) })
+          return route.fulfill({ contentType: asset.mime, path: asset.path })
+        }
         errors.push(`Page requested a nonexistent address: ${url.pathname}`)
         return route.fulfill({ status: 404, body: '' })
       }
@@ -155,6 +192,15 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
         throw new RenderError(`Page did not define window.vis = { duration, seek(t) } within ${loadTimeoutMs / 1000} seconds`)
       }
       await orLibraryFailure(page.evaluate('document.fonts.ready.then(() => true)'))
+      if (req.kind === 'image') {
+        await orLibraryFailure(page.evaluate(`window.vis.seek(${params.timeS ?? 0})`))
+        if (errors.length) throw new RenderError('Scene frame rendering failed')
+        await writeFile(part, await captureFrame(() => page.screenshot({ type: 'png' })))
+        await browser.close().catch(() => {})
+        browser = undefined
+        await finish({ width: params.width, height: params.height })
+        return
+      }
       const pageDuration = Number(await orLibraryFailure(page.evaluate('window.vis.duration')))
       const durationMs = params.durationMs ?? Math.round(pageDuration * 1000)
       if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > RENDER_MAX_DURATION_MS) {
@@ -163,11 +209,15 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
       if (errors.length) throw new RenderError('')
 
       const frames = Math.max(1, Math.round((durationMs / 1000) * params.fps))
+      const videoEncoder = params.transparent ? undefined : await detectVideoEncoder({ ffmpegPath: ffmpeg, priority: SOFTWARE_FIRST_H264_ENCODERS, ...(opts.encoderRunner ? { exec: opts.encoderRunner } : {}) })
+      const encoderArgs = videoEncoder?.name === 'libx264'
+        ? videoEncoder.args.map((value, index, args) => args[index - 1] === '-crf' ? '18' : value)
+        : videoEncoder?.args ?? []
       const encoder = spawn(ffmpeg, [
-        '-v', 'error', '-y', '-f', 'image2pipe', '-framerate', String(params.fps), '-i', '-',
+        '-v', 'error', '-y', ...(videoEncoder?.inputArgs ?? []), '-f', 'image2pipe', '-framerate', String(params.fps), '-i', '-',
         ...(params.transparent
           ? ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-crf', '18', '-b:v', '0', '-auto-alt-ref', '0']
-          : ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-movflags', '+faststart']), part,
+          : [...(videoEncoder!.filter ? ['-vf', videoEncoder!.filter] : []), '-c:v', videoEncoder!.name, ...encoderArgs, '-movflags', '+faststart']), part,
       ], { stdio: ['pipe', 'ignore', 'pipe'] })
       const killEncoder = () => { encoder.kill('SIGKILL') }
       signal.addEventListener('abort', killEncoder, { once: true })
@@ -186,7 +236,7 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
           // A loader may wait forever for script.onload after a 404; fail that seek as soon as its library is missing.
           await orLibraryFailure(page.evaluate(`(async () => { const r = window.vis.seek(${i / params.fps}); if (r instanceof Promise) await r; return true })()`))
           if (errors.length) throw new RenderError(`Error at frame ${i} (${(i / params.fps).toFixed(2)} seconds)`)
-          const png = await page.screenshot({ type: 'png', omitBackground: params.transparent })
+          const png = await captureFrame(() => page.screenshot({ type: 'png', omitBackground: params.transparent }))
           signal.throwIfAborted()
           if (!encoder.stdin.write(png)) await once(encoder.stdin, 'drain', { signal })
           signal.throwIfAborted()
@@ -207,10 +257,7 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
       if (missingLibrary !== undefined) throw new RenderError('')
       signal.throwIfAborted()
       const meta: Meta = { width: params.width, height: params.height, durationMs: Math.round((frames / params.fps) * 1000), fps: params.fps, transparent: params.transparent, hasAlpha: params.transparent }
-      await writeFile(join(dir, 'meta.json'), JSON.stringify(meta))
-      await rename(part, join(dir, `out.${ext}`))
-      signal.throwIfAborted()
-      tasks.set(key, { state: 'succeeded', meta })
+      await finish(meta)
     } catch (error) {
       await rm(part, { force: true })
       // An environment failure stays itself: installing the library would not fix it.
@@ -235,22 +282,34 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
   return {
     id: 'render',
     type: 'render',
-    kinds: ['video'],
-    models: ['html'],
-    defaultModels: { video: 'html' },
+    kinds: ['video', 'image'],
+    models: ['html', 'scene'],
+    defaultModels: { video: 'html', image: 'scene' },
     paramsSchema,
+    paramsSchemaFor: (kind, model) => model === 'scene' ? kind === 'image' ? sceneImageParams : sceneVideoParams : paramsSchema,
     async submit(req, { idempotencyKey, signal }) {
       signal?.throwIfAborted()
       if (tasks.has(idempotencyKey) || existsSync(outOf(idempotencyKey))) return { externalTaskId: idempotencyKey }
-      if (!chromePath || !existsSync(chromePath)) throw new ProviderError('rejected', 'Cannot find Chrome for rendering; install Google Chrome')
-      if (!req.inputs.some(i => i.type === 'text')) throw new ProviderError('rejected', 'inputs requires a text slot containing HTML')
-      const parsed = paramsSchema.safeParse(req.params)
+      if ((req.model !== 'html' && req.model !== 'scene') || (req.kind !== 'video' && !(req.model === 'scene' && req.kind === 'image'))) throw new ProviderError('rejected', 'Unsupported render model or output kind')
+      const parsed = (req.model === 'scene' ? req.kind === 'image' ? sceneImageParams : sceneVideoParams : paramsSchema).safeParse(req.params)
       if (!parsed.success) throw new ProviderError('rejected', parsed.error.message)
+      let params: Params
+      if (req.model === 'scene') {
+        const input = req.inputs[0]
+        if (input?.type !== 'scene') throw new ProviderError('rejected', 'The first input must be a scene slot', 'generation.render_scene_input_required')
+        validateSceneRender(req.kind, input.doc, parsed.data)
+        params = { ...parsed.data, transparent: false, ...(input.doc.durationS !== undefined ? { durationMs: Math.round(input.doc.durationS * 1000) } : {}) }
+      } else {
+        if (!req.inputs.some(i => i.type === 'text')) throw new ProviderError('rejected', 'inputs requires a text slot containing HTML')
+        params = parsed.data as Params
+      }
+      if (!chromePath || !existsSync(chromePath)) throw new ProviderError('rejected', 'Cannot find Chrome for rendering; install Google Chrome')
+      const snapshot = structuredClone(req)
       tasks.set(idempotencyKey, { state: 'running', progress: 0 })
       const controller = new AbortController()
       controllers.set(idempotencyKey, controller)
       queue = queue.then(async () => {
-        const operation = render(idempotencyKey, req, parsed.data, controller.signal)
+        const operation = render(idempotencyKey, snapshot, params, controller.signal)
         rendering.set(idempotencyKey, operation)
         try { await operation } finally { rendering.delete(idempotencyKey) }
       })
@@ -287,7 +346,7 @@ export function createRenderProvider(opts: RenderProviderOptions): ProviderAdapt
       } catch {
         throw new ProviderError('not_found', 'Render output does not exist')
       }
-      return { data, mime: meta?.transparent || outOf(output.ref).endsWith('.webm') ? 'video/webm' : 'video/mp4', ...(meta ?? {}) }
+      return { data, mime: outOf(output.ref).endsWith('.png') ? 'image/png' : meta?.transparent || outOf(output.ref).endsWith('.webm') ? 'video/webm' : 'video/mp4', ...(meta ?? {}) }
     },
   }
 }

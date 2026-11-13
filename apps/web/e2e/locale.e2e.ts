@@ -290,4 +290,63 @@ describe.skipIf(!ready)('RFC 0018 UI language', () => {
     expect(await page.getByRole('combobox', { name: 'Language', exact: true }).inputValue()).toBe('system')
     expect(await page.locator('html').getAttribute('lang')).toBe('en')
   })
+
+  it('switches model-owned parameter labels, descriptions and option names between English and Chinese', async () => {
+    const { arkParamsSchema } = await import('../../../packages/generation/src/providers/ark/models')
+    const { dashscopeParamsSchema } = await import('../../../packages/generation/src/providers/dashscope/models')
+    const ark = arkParamsSchema('video', 'doubao-seedance-2-0').toJSONSchema({ io: 'input', unrepresentable: 'any' })
+    const wan = dashscopeParamsSchema('video', 'wan3.0-video').toJSONSchema({ io: 'input', unrepresentable: 'any' })
+    const localized = await browser.newPage({ locale: 'en-US', viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
+    const methods = new Map<number, string>()
+    localized.setDefaultTimeout(10_000)
+    localized.on('pageerror', error => pageErrors.push(error.stack ?? error.message))
+    try {
+      // Use real adapter schemas on a mock model. This exercises providers.list transport without a key or paid call.
+      await localized.routeWebSocket('**', socket => {
+        const server = socket.connectToServer()
+        socket.onMessage(message => {
+          const request = JSON.parse(String(message))
+          methods.set(request.id, request.method)
+          server.send(message)
+        })
+        server.onMessage(message => {
+          const response = JSON.parse(String(message))
+          if (methods.get(response.id) === 'providers.list' && response.result) {
+            const model = response.result.providers.find((provider: { id: string }) => provider.id === 'mock')?.models.find((model: { kind: string }) => model.kind === 'video')
+            if (model) model.paramsSchema = { ...wan, properties: { ...wan.properties, imageMode: ark.properties!.imageMode } }
+            socket.send(JSON.stringify(response))
+          } else socket.send(message)
+        })
+      })
+      const { idMap } = await admin.call('canvas.apply', { requestId: rid(), ops: [
+        { op: 'node.create', tempId: 'copy-video', kind: 'video', x: 500, y: 0, w: 320, h: 240, prompt: 'A quiet sunrise' },
+      ] })
+      await localized.goto(webUrl)
+      await localized.locator(`.react-flow__node[data-id="${idMap['copy-video']}"] .vis-node-label`).click()
+      await localized.getByRole('button', { name: 'Parameter summary', exact: true }).click()
+      const en = localized.getByRole('dialog', { name: 'Generation parameters', exact: true })
+      await en.getByRole('group', { name: 'Generate audio', exact: true }).waitFor()
+      await en.getByRole('group', { name: 'Extend prompt', exact: true }).waitFor()
+      expect(await en.getByRole('combobox', { name: 'Aspect ratio', exact: true }).getByRole('option', { name: 'Adaptive', exact: true }).count()).toBe(1)
+      await en.getByRole('group', { name: 'Reference image mode', exact: true }).getByRole('button', { name: 'First frame', exact: true }).waitFor()
+      expect(await en.getByRole('group', { name: 'Reference image mode', exact: true }).getAttribute('title')).toContain('one image as the first frame')
+      await en.press('Escape')
+      await localized.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = localized.getByRole('dialog', { name: 'Settings', exact: true })
+      await settings.getByRole('button', { name: 'Language', exact: true }).click()
+      await settings.getByRole('combobox', { name: 'Language', exact: true }).selectOption('zh-CN')
+      await expect.poll(() => localized.locator('html').getAttribute('lang')).toBe('zh-CN')
+      await localized.getByRole('button', { name: '关闭设置', exact: true }).click()
+      await localized.getByRole('button', { name: '参数摘要', exact: true }).click()
+      const zh = localized.getByRole('dialog', { name: '生成参数', exact: true })
+      await zh.getByRole('group', { name: '生成音频', exact: true }).waitFor()
+      await zh.getByRole('group', { name: '扩展提示词', exact: true }).waitFor()
+      expect(await zh.getByRole('combobox', { name: '画幅', exact: true }).getByRole('option', { name: '自适应', exact: true }).count()).toBe(1)
+      await zh.getByRole('group', { name: '参考图片模式', exact: true }).getByRole('button', { name: '首帧', exact: true }).waitFor()
+      await localized.screenshot({ path: join(artifacts, 'schema-parameter-copy-zh.png'), animations: 'disabled' })
+    } finally {
+      await admin.call('preferences.set', { locale: null })
+      await localized.close()
+    }
+  }, 40_000)
 })

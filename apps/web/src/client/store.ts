@@ -205,7 +205,8 @@ export function nodeDecorations(state: SpaceState, locale: Locale = 'zh-CN', pre
     for (const t of job.targets) {
       if (running && t.status !== 'pending') continue
       if (!running && !PROBLEM[t.status] && job.status === 'succeeded') continue
-      const nodeId = t.kind === 'slot' ? t.nodeId : t.nearNodeId
+      // A new-node target shows on its placeholder (RFC 0047), else beside its reference
+      const nodeId = t.kind === 'slot' ? t.nodeId : [t.nodeId, t.nearNodeId].find(id => id && state.nodes.has(id))
       if (nodeId && state.nodes.has(nodeId)) anchors.add(nodeId)
     }
     if (!anchors.size) {

@@ -1,19 +1,25 @@
 {
   "name": "@vis/desktop",
-  "version": "0.0.0",
+  "version": "0.1.0-preview.1",
   "private": true,
   "type": "module",
-  "description": "Electron 壳：拉起 studiod、管理窗口，渲染层挂载各 UI 包。",
-  "exports": {
-    ".": "./src/index.ts"
-  },
+  "description": "Electron shell (RFC 0046): starts or attaches to studiod, runs the web host in the main process and shows it in one window.",
+  "main": "dist/main.mjs",
   "scripts": {
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.e2e.json",
+    "build": "node build.mjs",
+    "start": "electron .",
+    "test:smoke": "vitest run -c vitest.smoke.config.ts",
+    "dist:mac": "node package.mjs",
+    "test:packaged": "vitest run -c vitest.packaged.config.ts"
   },
   "dependencies": {
-    "@vis/protocol": "workspace:*",
-    "@vis/ui-kit": "workspace:*",
-    "@vis/canvas-ui": "workspace:*",
-    "@vis/workbench-ui": "workspace:*"
+    "@vis/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "^45.3.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.64.1"
   }
 }

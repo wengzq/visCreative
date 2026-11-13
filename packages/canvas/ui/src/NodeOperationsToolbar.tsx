@@ -23,12 +23,16 @@ function OperationIcon({ entry, kind }: { entry: ToolbarEntry; kind: MediaKind }
   return paths ? <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{paths}</svg> : <Icon kind={kind} size={16} />
 }
 
-export function NodeOperationsToolbar({ nodeId, nodes, kind, generation, disabled, onOperation, onDownload, onExportMov, onFullscreen, onCreateTimeline }: {
+export function NodeOperationsToolbar({ nodeId, nodes, kind, generation, disabled, regenerateDisabled = disabled, sourceJobId, running, onRegenerate, onOperation, onDownload, onExportMov, onFullscreen, onCreateTimeline }: {
   nodeId: string
   nodes: readonly NodeView[]
   kind: MediaKind
   generation?: readonly GenerationOperation[] | undefined
   disabled: boolean
+  regenerateDisabled?: boolean | undefined
+  sourceJobId?: string | undefined
+  running?: boolean | undefined
+  onRegenerate?: ((jobId: string) => Promise<void>) | undefined
   onOperation(entry: ToolbarEntry): void
   onDownload(): void
   onExportMov?: (() => void) | undefined
@@ -39,6 +43,8 @@ export function NodeOperationsToolbar({ nodeId, nodes, kind, generation, disable
   const tl = useMessages(timelineMessages)
   const [downloadMenu, setDownloadMenu] = useState(false)
   const [more, setMore] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const regeneratePending = useRef(false)
   const root = useRef<HTMLDivElement>(null)
   const { zoom } = useViewport()
   const [size, setSize] = useState({ w: 480, h: 44 })
@@ -52,6 +58,15 @@ export function NodeOperationsToolbar({ nodeId, nodes, kind, generation, disable
     return () => observer.disconnect()
   }, [])
   const entries = toolbarEntries(kind, generation)
+  const regenerate = () => {
+    if (!sourceJobId || !onRegenerate || regeneratePending.current) return
+    regeneratePending.current = true
+    setRegenerating(true)
+    void onRegenerate(sourceJobId).catch(() => {}).finally(() => {
+      regeneratePending.current = false
+      setRegenerating(false)
+    })
+  }
   const keyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     event.stopPropagation()
     if (event.key === 'Escape') {
@@ -83,6 +98,10 @@ export function NodeOperationsToolbar({ nodeId, nodes, kind, generation, disable
           setDownloadMenu(false)
         }
       }}>
+      {sourceJobId && !running && onRegenerate ? <button type="button" aria-label={m.regenerateHint} title={m.regenerateHint} disabled={regenerateDisabled || regenerating} onClick={regenerate}>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17" /></svg>
+        <span>{m.regenerate}</span>
+      </button> : null}
       {entries.common.map(entry => button(entry))}
       {onCreateTimeline ? <button type="button" aria-label={tl.create} disabled={disabled} onClick={onCreateTimeline}><Icon kind="timeline" size={16} /><span>{tl.create}</span></button> : null}
       <span className="vis-operation-divider" />

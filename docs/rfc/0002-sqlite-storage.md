@@ -1,6 +1,6 @@
 # 0002 · 以 SQLite 作为存储真源
 
-状态：已决定（存储方向）/ 表结构为草案，待评审
+状态：已实现。本文的表结构是最初草案，现行表结构以 `packages/storage` 的 schema 和 drizzle 迁移为准
 
 日期：2026-10-26
 
@@ -397,6 +397,8 @@ CREATE TABLE delivery_bindings (
 4. 绑定状态仍是 `pending`。
 
 全部满足就写入新的 `slot_revisions`、更新槽位、把绑定标为 `delivered`、登记事件。任何一条不满足，产物照样保留为素材，绑定标为 `conflict` 或 `target_missing`。Job 结束（成功、失败或未知）时仍为 `pending` 的绑定标为 `no_output`：Provider 返回的产物少于请求数量时，缺的位置不会再交付。
+
+> Note (2026-11-12): since [RFC 0047](0047-result-placeholders.md), the node for a `new_node` target is created empty at submission with this placement rule, and delivery fills its main slot like a slot target.
 
 `new_node` 类型交付的落点：放在本次执行所引用节点的旁边（`placement` 记录参考节点 ID），右侧被占用时向下寻找空位；参考节点已删除或不存在时，放进空间的结果区域。MVP 中结果区域暂定为“现有内容的右侧”，最终形态待画布交互设计。
 

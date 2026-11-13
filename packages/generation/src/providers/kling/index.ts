@@ -185,10 +185,10 @@ export function createKlingProvider(opts: Options): ProviderAdapter {
       if (input.type !== 'asset') throw new ProviderError('rejected', 'Kling frame must be an image asset', 'generation.kling_input_invalid')
       try {
         const info = await stat(input.path)
-        if (!info.isFile() || info.size > model.inputBytes || totalBytes + info.size > 60_000_000) throw new ProviderError('rejected', 'Kling input image exceeds the size limit', 'generation.kling_input_size')
+        if (!info.isFile() || info.size > ('imageInputBytes' in model ? model.imageInputBytes : model.inputBytes) || totalBytes + info.size > 60_000_000) throw new ProviderError('rejected', 'Kling input image exceeds the size limit', 'generation.kling_input_size')
         const bytes = await readFile(input.path, signal ? { signal } : {})
         totalBytes += bytes.length
-        if (bytes.length > model.inputBytes || totalBytes > 60_000_000) throw new ProviderError('rejected', 'Kling input image exceeds the size limit', 'generation.kling_input_size')
+        if (bytes.length > ('imageInputBytes' in model ? model.imageInputBytes : model.inputBytes) || totalBytes > 60_000_000) throw new ProviderError('rejected', 'Kling input image exceeds the size limit', 'generation.kling_input_size')
         // Asset blobs have no extension; probe a correctly named copy using the pinned input MIME.
         if (sniffKlingMime(bytes) !== input.mime) throw new ProviderError('rejected', 'Kling input content does not match its MIME type', 'generation.kling_input_invalid')
         const infoMedia = await probeBytes(bytes, input.mime)

@@ -5,7 +5,7 @@ import { sceneLink } from './scene-link'
 const ref: PrevizSceneRef = { sceneNodeId: 'scene', viewId: 'wide', sceneRev: 8 }
 const doc: SceneDoc = {
   version: 1, rev: 4, objects: [], views: [{
-    id: 'wide', name: 'Wide', still: 'picture', aspectRatio: '16:9',
+    id: 'wide', name: 'Wide', still: 'picture', aspectRatio: '16:9', createdBy: 'user', userTouched: false,
     camera: { position: [0, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 },
   }],
 }

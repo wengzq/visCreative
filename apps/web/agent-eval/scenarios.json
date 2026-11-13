@@ -550,5 +550,54 @@
       "transparent_timeline_quality",
       "final_reply_internals"
     ]
+  },
+  {
+    "id": "SC1",
+    "title": "Scene S1: assembled bench and seated figure",
+    "fixture": "none",
+    "prompts": [
+      "请新建一个三维场景：用一个由基础几何体组成的组搭一张长凳，让一个人形坐在凳子上，并加一个能看清两者的全景机位。长凳作为一个物体整体移动。请直接制作，用免费的本地场景渲染出一张检查帧并查看，将场景和图片交付到画布，不用付费生成。"
+    ],
+    "checks": [
+      "scene_guide_read",
+      "scene_document",
+      "scene_bench_group",
+      "scene_render_image",
+      "scene_local_only",
+      "scene_bench_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "SC2",
+    "title": "Scene S2: walking figure and camera motion",
+    "fixture": "none",
+    "prompts": [
+      "请新建一个5秒的三维场景：一个人形从舞台左侧走到右侧，腿和手臂交替摆动，身体朝向行进方向，摄影机缓慢跟随。请在场景中写好人物和摄影机关键帧，用免费的本地场景渲染生成24帧每秒的视频，交付到画布并抽帧检查。不要使用付费生成。"
+    ],
+    "checks": [
+      "scene_guide_read",
+      "scene_document",
+      "scene_walk_motion",
+      "scene_render_video",
+      "scene_local_only",
+      "scene_walk_quality",
+      "final_reply_internals"
+    ]
+  },
+  {
+    "id": "SC3",
+    "title": "Scene S3: propose a change to an author-touched object",
+    "fixture": "scene-protected",
+    "prompts": [
+      "场景 {{sceneNodeId}} 里的长凳“{{sceneObjectName}}”（对象 {{sceneObjectId}}）我刚刚手动调整过。现在想让它再往右移半米，请提交修改建议供我审阅。不需要新增场景、替代物体或生成图片。"
+    ],
+    "checks": [
+      "scene_guide_read",
+      "scene_protected_preserved",
+      "scene_proposal",
+      "scene_local_only",
+      "final_reply_internals"
+    ]
   }
 ]

@@ -5,6 +5,8 @@ import type { MethodResult, SpaceEvent, TranscriptItem, WorkMessageView } from '
 import { openStudiodLink, type StudiodLink } from '../src/host/studiod-link'
 import { studiodEndpoint } from '../../../runtime/studiod-endpoint'
 import { resolveDsh } from '../../../packages/workbench/deepseek/src/resolve-dsh'
+import { resolveMcode } from '../../../packages/workbench/minimax/src/resolve'
+import { resolveCodebuddy } from '../../../packages/workbench/codebuddy/src/resolve'
 import { resolveExecutable } from '../../../packages/workbench/core/src/resolve-executable'
 import { killTree } from '../../../packages/workbench/core/src/kill-tree'
 import { assertFreeProviders, assertMockConfiguration, parseOptions, prepareDirectories, type Options } from './safety'
@@ -63,6 +65,13 @@ function versions(options: Options) {
     const dsh = resolveDsh()
     if (!dsh) throw new Error('DeepSeek Harness is not installed or VIS_DSH_PATH is invalid')
     result.deepseek = dsh
+  }
+  // --version is local to the CLI and makes no model call.
+  for (const [kind, path] of [['minimax-code', resolveMcode()], ['codebuddy', resolveCodebuddy()]] as const) {
+    if (!options.agents.includes(kind)) continue
+    if (!path) throw new Error(`${kind} is not installed or its VIS_*_PATH override is invalid`)
+    const executable = resolveExecutable(kind, path)
+    result[kind] = { executable, version: execFileSync(executable.command, [...executable.args, '--version'], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim() }
   }
   return result
 }
@@ -340,7 +349,7 @@ async function scenarioRun(options: Options, agent: Options['agents'][number], s
 
 export async function main(args: string[], root: string) {
   if (args.includes('--help')) {
-    console.log('Usage: pnpm --filter @vis/web agent-eval --data-dir <fresh-path> [--agents codex,deepseek] [--scenarios G1,S2] [--out <fresh-path>] [--timeout-ms 1200000] [--dry-run]')
+    console.log('Usage: pnpm --filter @vis/web agent-eval --data-dir <fresh-path> [--agents codex,deepseek,minimax-code,codebuddy] [--scenarios G1,S2] [--out <fresh-path>] [--timeout-ms 1200000] [--dry-run]')
     return
   }
   const options = parseOptions(args, scenarios.map(scenario => scenario.id))

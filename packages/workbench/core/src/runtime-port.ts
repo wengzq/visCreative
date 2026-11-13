@@ -13,6 +13,8 @@ export type ApprovalRequest = {
   paths?: string[]
   /** The request includes additional permissions that cannot be assessed from cwd or target paths alone. */
   autoApprovalBlocked?: boolean
+  /** A network request from the Agent's own read-only web search or fetch tool, not a command or permission grant (RFC 0048). */
+  webRead?: boolean
   mcpTool?: { serverName: 'vis'; toolName: string }
 }
 export type RequestApproval = (request: ApprovalRequest) => Promise<ApprovalDecision>

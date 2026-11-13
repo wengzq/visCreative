@@ -22,6 +22,7 @@ const ready = existsSync(chromePath()) && existsSync(cli) && existsSync(join(roo
 const screenshots = join(process.platform === 'win32' ? tmpdir() : '/tmp', 'vis-0029/step-c')
 const ffmpeg = process.platform === 'darwin' ? '/opt/homebrew/bin/ffmpeg' : 'ffmpeg'
 let dir: string
+let dataDir: string
 let daemon: Studiod
 let host: WebHost
 let admin: StudiodLink
@@ -77,10 +78,11 @@ describe.skipIf(!ready)('Previz blockout workflow', () => {
   beforeAll(async () => {
     mkdirSync(screenshots, { recursive: true })
     dir = mkdtempSync(join(tmpdir(), 'vis-previz-blockout-'))
+    dataDir = join(dir, 'data')
     vi.stubEnv('VIS_PROJECTS_DIR', join(dir, 'projects'))
-    daemon = await startStudiod({ dataDir: dir, studiodVersion: 'previz-blockout-e2e', secretStore: createMemorySecretStore(),
+    daemon = await startStudiod({ dataDir, studiodVersion: 'previz-blockout-e2e', secretStore: createMemorySecretStore(),
       providers: [createMockProvider({ latencyMs: 0 }), createRenderProvider({ workDir: join(dir, 'render'), chromePath: chromePath(), ffmpegPath: ffmpeg })], defaults: { image: { provider: 'mock' }, video: { provider: 'mock' } },
-      runtimes: { codex: codexRuntime({ dataDir: dir, socketPath: studiodEndpoint(dir), codexPath: join(root, 'apps/web/e2e/fake-codex.mjs'), visMcp: { command: process.execPath, args: [cli, 'mcp'] } }) },
+      runtimes: { codex: codexRuntime({ dataDir, socketPath: studiodEndpoint(dataDir), codexPath: join(root, 'apps/web/e2e/fake-codex.mjs'), visMcp: { command: process.execPath, args: [cli, 'mcp'] } }) },
     })
     spaceId = daemon.spaces.create('Blockout workflow').spaceId
     admin = await openStudiodLink({ socketPath: daemon.socketPath, tokenPath: daemon.tokenPath })
@@ -321,6 +323,43 @@ describe.skipIf(!ready)('Previz blockout workflow', () => {
     await controls.getByText('Composition uses the blockout frame', { exact: true }).waitFor()
     expect(await controls.getByText('Draw or import first', { exact: true }).count()).toBe(0)
     await page.keyboard.press('Escape')
+    await setPanel({ image: before.image, sketch: before.sketch, underlay: before.underlay, blockout: before.blockout }, 0)
+  })
+
+  it('draws over the blockout frame of a panel without a picture and keeps it in the saved picture', async () => {
+    const before = (await doc()).panels[0]!
+    // The steelblue layout image stands in for a blockout frame, so white means the frame was dropped.
+    const frame = before.image!
+    await setPanel({ image: null, sketch: null, underlay: null, blockout: frame }, 0)
+    await card().getByRole('button', { name: 'Open shot previz', exact: true }).click()
+    const surface = editor().getByRole('img', { name: 'Panel drawing', exact: true })
+    expect(await editor().locator('.vis-pv-paper > img').getAttribute('src')).toContain(frame)
+    await expect.poll(() => surface.getAttribute('aria-disabled')).toBe('false')
+    const box = (await surface.boundingBox())!
+    await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.5, { steps: 12 })
+    await page.mouse.up()
+    await expect.poll(async () => (await doc()).panels[0]!.image, { timeout: 10_000 }).toMatch(/^astv_/)
+    await expect.poll(() => editor().getByRole('status').filter({ hasText: 'Saved' }).count()).toBe(1)
+    const saved = (await doc()).panels[0]!
+    expect(saved).toMatchObject({ blockout: frame, underlay: null })
+    expect(saved.image).not.toBe(frame)
+    await editor().getByRole('button', { name: 'Close editor', exact: true }).click()
+    const tile = card().getByRole('button', { name: 'Panel 1, Shot 1', exact: true }).getByRole('img').first()
+    await expect.poll(() => tile.getAttribute('src')).toContain(saved.image!)
+    // Sample a corner away from the stroke: the frame, not a blank page, sits under the ink.
+    const pixel = await tile.evaluate(async (element: HTMLImageElement) => {
+      const image = new Image()
+      image.src = element.src
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth; canvas.height = image.naturalHeight
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(image, 0, 0)
+      return [...ctx.getImageData(4, 4, 1, 1).data.slice(0, 3)]
+    })
+    expect(pixel[2]! - pixel[0]!).toBeGreaterThan(60)
     await setPanel({ image: before.image, sketch: before.sketch, underlay: before.underlay, blockout: before.blockout }, 0)
   })
 

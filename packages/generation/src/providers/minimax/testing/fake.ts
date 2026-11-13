@@ -1,4 +1,3 @@
-import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +6,7 @@ import type { ContractScenario } from '../../contract'
 import type { ProviderRequest } from '../../types'
 import { createMiniMaxProvider, MINIMAX_REGIONS } from '../index'
 import { MINIMAX_MODELS } from '../models'
+import { createIsolatedHttpServer } from '../../../../../../scripts/testing/isolated-http'
 
 export const SECRET = 'minimax-fixture-key/never-real'
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=', 'base64')
@@ -26,7 +26,7 @@ export async function fakeMiniMax(scenario: ContractScenario = 'normal', kind: '
     expired: 0, queryCount: 0, outputMime: 'video/mp4', outputBytes: mp4,
     createOverride: undefined as { status: number; body: string } | undefined,
   }
-  const server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const chunks: Buffer[] = []
     for await (const chunk of req) chunks.push(Buffer.from(chunk))
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown> : {}
@@ -67,17 +67,16 @@ export async function fakeMiniMax(scenario: ContractScenario = 'normal', kind: '
     const id = req.url.split('/').at(-1)
     send({ task: { id: controls.wrongId ? 'another-task' : id, status: controls.status, model: 'MiniMax-H3', content: { url: controls.secretUrl ? `${origin}/output?key=${encodeURIComponent(SECRET)}` : `${origin}/output?revision=${controls.queryCount}` }, error: { code: String(controls.code), message: controls.errorMessage }, task_type: 'generation', modality: 'video' } })
   })
+  const { server } = isolated
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Fake MiniMax server did not start')
-  origin = `http://127.0.0.1:${address.port}`
+  origin = isolated.baseUrl
   const fetcher: typeof fetch = (input, init) => {
     const url = new URL(String(input))
     if (MINIMAX_REGIONS.some(region => region.baseUrl === url.origin)) {
       hosts.push(url.origin)
       return fetch(`${origin}${url.pathname}${url.search}`, init)
     }
-    if (url.origin === origin) return fetch(input, init)
+    if (url.origin === new URL(origin).origin) return fetch(input, init)
     throw new Error('Fake MiniMax transport refuses external requests')
   }
   const options = {

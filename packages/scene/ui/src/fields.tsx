@@ -32,25 +32,23 @@ export function NumberField({ label, caption, value, disabled, min, max, commitO
   const [text, setText] = useState(display(value))
   const [focused, setFocused] = useState(false)
   const cancelled = useRef(false)
-  useEffect(() => { if (!focused) setText(display(value)) }, [value, focused])
   const finish = (input: HTMLInputElement) => {
     input.blur()
     input.closest<HTMLElement>('.vis-sc-editor')?.focus({ preventScroll: true })
   }
-  return <label className="vis-sc-field">{caption ?? label}<input type="number" aria-label={label} value={text} min={min} max={max} step="any" disabled={disabled}
-    onFocus={() => { setFocused(true); cancelled.current = false }}
+  // Read committed values directly while blurred, so a rejected edit cannot leave a deferred reset racing the next focus.
+  return <label className="vis-sc-field">{caption ?? label}<input type="number" aria-label={label} value={focused ? text : display(value)} min={min} max={max} step="any" disabled={disabled}
+    onFocus={() => { setText(display(value)); setFocused(true); cancelled.current = false }}
     onChange={event => {
       setText(event.target.value)
       if (!commitOnBlur && event.target.value && event.target.validity.valid && Number.isFinite(event.target.valueAsNumber)) onChange(event.target.valueAsNumber)
     }}
     onBlur={event => {
-      let next = value
       if (commitOnBlur && !cancelled.current && event.target.value && event.target.value !== display(value) && Number.isFinite(event.target.valueAsNumber)) {
-        next = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, event.target.valueAsNumber))
+        const next = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, event.target.valueAsNumber))
         onChange(next)
       }
       setFocused(false)
-      setText(display(next))
     }}
     onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelled.current = true; setText(display(value)); finish(event.currentTarget) }

@@ -1,6 +1,6 @@
 # 0037 · Interactive 3D scene nodes
 
-Status: accepted (2026-11-06); steps a and b implemented, steps c and d not yet
+Status: done (2026-11-11). Accepted 2026-11-06; steps a–d implemented (c and d on 2026-11-10); Codex evaluation and refusal e2e completed on 2026-11-11. Closed by the maintainer with native image-view evidence recorded as a known limitation
 
 Date: 2026-11-06
 
@@ -126,7 +126,7 @@ New package `packages/scene/ui` (`@vis/scene-ui`), mounted from `apps/web/src/cl
 
 - **Card:** shows the selected view's latest still, the scene name and the number of views. Double-click or Open scene opens the editor. A card with no still shows an empty stage.
 - Everything the gizmo does can also be done in the inspector, so the feature does not depend on a pointer. Fields use `aria-label`s, and the outline is a list with visible names.
-- **Keyboard:** W, E, R switch move, rotate and scale; F frames the selection; Delete removes it. With a joint selected (step b), W and R still act on the whole figure, E rotates the joint, F frames its subtree, Delete resets the joint and never removes the figure, and Escape leaves joint selection once fields and open menus have had it. Keys must not reach the canvas behind the editor.
+- **Keyboard:** W, E, R switch move, rotate and scale; F frames the selection; Delete removes it. With a joint selected (step b), W and R still act on the whole figure, E rotates the joint, F frames its subtree, Delete resets the joint and never removes the figure, and Escape leaves joint selection once fields and open menus have had it. The arrow keys and PageUp/PageDown nudge the selection with the current tool, relative to the camera on the floor: Left/Right along the camera's right, Up/Down away from and toward the camera, PageUp/PageDown world up and down (camera roll is ignored). Move steps 0.1 m, Rotate 5° and Scale ×1.05; Shift makes it 1 m, 45°, ×1.25 and Alt 0.01 m, 1°, ×1.01. Rotate turns the object in world space about its origin: Right spins it like a turntable so the near side moves right, Up tips its top away from the camera, PageUp tips it to the right. With a joint selected, Rotate turns the joint like the inspector fields (Up/Down X, Right/Left Y, PageUp/PageDown Z) within its limits, while Move and Scale still act on the whole figure. A scale step may not take a component out of 0.01–100 or further from it, but one already outside may step back toward it, and a component the step leaves unchanged (a zero) never blocks. A step that changes nothing, at a joint limit or a refused scale, records nothing and still consumes the key. When a nudge cannot apply (nothing selected, the object hidden, a conflict, a drag or other work in progress, or the stage not ready), the key keeps its default action, so PageUp and PageDown still scroll. One held key is one undo step, each new press another, and nudges save through the usual debounce. Keys must not reach the canvas behind the editor.
 - Copy lives in the package's `messages.ts` in both languages. Colours come from theme variables, read when the viewport mounts and on theme change. Icons are inline SVG.
 - An empty scene shows a floor grid and one call to action, Add a figure. It adds nothing by itself.
 
@@ -148,8 +148,86 @@ New package `packages/scene/ui` (`@vis/scene-ui`), mounted from `apps/web/src/cl
 
 ### Later steps (not in the first version)
 
-- **c. Motion.** Keyframes for cameras and objects, rendered to a video by the render provider through `buildScene`.
-- **d. Agents.** Agents write scenes through `scene.set`, including `group` objects, under the rule below. The guides and the evaluation runner gain scenes, including Agent-built objects.
+- **c. Motion.** Keyframes for cameras and objects, rendered to a video by the render provider through `buildScene`. See [Step c](#step-c-motion).
+- **d. Agents.** Agents write scenes through `scene.set`, including `group` objects, under the rule below. The guides and the evaluation runner gain scenes, including Agent-built objects. See [Step d](#step-d-agents).
+
+## Step c: motion
+
+Decisions (maintainer, 2026-11-09):
+
+- **One clock per scene.** Object and pose keyframes belong to the stage and are shared by every view; each view keeps its own camera keyframes. Rendering a view shows the same action from that camera, as "one stage, many views" already implies.
+- **Keyable:** object transforms, figure joints, view cameras (position, target, roll, focal length) and visibility.
+- **Interpolation is chosen per key**: linear, ease in/out or hold. New keys are linear, the neutral choice; nothing smooths motion behind the author's back.
+
+### Document
+
+All additions are optional, so documents written before step c stay valid and `version` stays `1`.
+
+```ts
+type SceneEase = 'linear' | 'easeInOut' | 'hold'
+type Key<T> = { t: number, value: T, ease: SceneEase }       // t in seconds; ease shapes the segment to the next key
+
+SceneDoc.durationS?: number                                    // absent: a static scene
+SceneObject.tracks?: {
+  transform?: Key<Transform>[]
+  pose?: Record<jointId, Key<Quat>[]>                          // figures only
+  hidden?: { t: number, value: boolean }[]                     // stepped, no ease
+}
+SceneView.cameraKeys?: Key<SceneCamera>[]
+```
+
+- Limits in `SCENE_LIMITS`: duration 0.1–120 s, 512 keys per track, 8,192 keys per scene. Any track requires `durationS`, no key lies past it, and key times increase strictly.
+- **Sampling** is `sampleScene(doc, t)` in `@vis/scene-core`, with no DOM. It returns a static document: keyed properties take their sampled value and untracked ones keep their static value. Before the first key the first value holds; after the last, the last. A segment uses the earlier key's ease: linear interpolation (shortest-arc slerp for rotations), ease in/out as smoothstep, or hold. Visibility is stepped. Joint limits apply in the builder, after sampling, as for any pose. The editor and the render page both sample through this one function.
+
+### Editor
+
+- A **timeline strip** under the viewport. A static scene shows one action, Add motion, which sets a duration the author can edit (prefilled with 5 s). The strip has a playhead, play and pause, the duration, and rows for the selected object (transform, visibility, then its keyed joints, folded under the figure) and for the current view's camera.
+- The viewport always shows the scene at the playhead.
+- **Keys:** Set key (K) keys the selected property at the playhead. Editing a property **that has a track** sets or updates its key at the playhead; editing one without a track changes its static value, as before step c. A key is a diamond: select it to change its ease, type its time, or delete it; dragging it commits on release. Deleting the last key of a track removes the track and leaves that key's value as the static value.
+- Shortening the duration removes keys past the new end after a confirmation that says how many.
+- **Keyboard:** Space plays and pauses, comma and period step one frame at 24 fps, brackets jump to the previous or next key, K sets a key. Like the existing keys, none of these reach the canvas. Playback is the author's content, not UI animation; with `prefers-reduced-motion` it still plays when asked and never autoplays.
+- The card shows the duration on scenes with motion. Save as image and Send to a previz panel capture the frame at the playhead.
+- **Render video** renders the current view through the render provider (below) into a new video node beside the scene, with the scene as its input. It is free and local, and it never starts by itself.
+
+### Rendering
+
+- The render provider gains the model `scene`. Request: kind `video`, the scene slot as the first input (`{ slotId, revision }`), params `viewId`, `width`, `height` and `fps` (default 24, 1–60). The duration is the document's; a static scene is refused. Kind `image` with `timeS` renders one frame, which is how an Agent checks its work.
+- Generation snapshots the scene document at submit, so provenance records exactly what was rendered. Model asset versions the document references become `/input/<n>` in document order, and the page maps each `assetVersionId` to its input.
+- The page is the provider's own, not Agent-written: it imports `/lib/vis-scene.js`, a browser bundle of `@vis/scene-core` with `three` resolved by an import map to `/lib/three.module.js`. It builds the view once and, on each `seek(t)`, applies `sampleScene(doc, t)` to the built objects and camera without rebuilding. Lighting, bodies and the failed-model wireframe are the editor's, because both use `buildScene`.
+- The bundle is built with esbuild, which the build already uses, and ships with the other render libraries; `vis-scene.js` joins the reserved library names. No dependency is added.
+
+## Step d: Agents
+
+Decision (maintainer, 2026-11-09): **views follow the same rule as objects.** A view gains `createdBy` and `userTouched`; for documents written before step d both default to a view the author made.
+
+- An Agent may create scenes, add objects and views, and change or delete objects and views with `createdBy: 'agent'` and `userTouched: false`, including their tracks and camera keys.
+- Any other change to an object is refused with `scene.object_protected`, and to a view with `scene.view_protected`, each naming the item. The Agent proposes the change in its session and the author makes it.
+- "Change" compares content by ID, without `createdBy` and `userTouched`, and for views without `still`: a still is an output pointer of the author's saves, so saving a view never protects it. On an Agent write the gateway keeps every view's previous `still` (null for new views), and Agents never set one.
+- **Duration.** An Agent may set or change `durationS`, unless that would leave a key of a protected object or view past the end: `scene.duration_protected`.
+- **Deleting a scene node** is allowed to an Agent only when every object and view in it is Agent-made and untouched; otherwise `scene.user_only`. Its hint asks the author to delete the scene, or directs the Agent to `scene.propose` for deleting individual objects or views. MCP forwards gateway error hints alongside the reason and params, including the `scene.propose` guidance on protected object, view and duration edits.
+- Order of objects and views is not protected; reordering changes no content.
+- **Stamping.** On every write the gateway diffs the document. A UI write marks each object or view whose content changed as `userTouched` and new ones as `createdBy: 'user'`; an Agent write marks new ones `createdBy: 'agent', userTouched: false`. Values sent by any client are ignored. `sceneRef` and `panel.blockout` stay user-only.
+- **Guide.** A new `scene` guide in `packages/workbench/core/src/instructions/guides/`: units and axes, figures with the human body's joint ids and preset poses, `group` objects for built props such as a bench, motion keys and eases, rendering a `render/scene` video or a single `image` frame to check the result, and the protection rule above with propose-don't-change wording. A test keeps the guide's joint list equal to the body descriptor.
+- **Evaluation** (`apps/web/agent-eval`, Mock and local render only, run with the maintainer's approval): build a bench as a group with a figure sitting on it and a wide view; animate a figure walking across the stage with a camera move and render it; ask for a change to an object the author touched and expect a proposal, not a write.
+
+### As built (steps c and d, 2026-11-10)
+
+- **Render video** submits `render/scene` with the committed scene slot revision, the current view, 24 fps and a 1920-pixel long edge. The generation contract needs a non-empty prompt, so the editor sends a neutral one naming the scene and view; it carries no creative content. A lost acknowledgement reuses the request ID; a new click gets a new one.
+- MP4 output rounds the short edge to an even pixel count for the encoder (21:9 renders 1920×822); still images keep the 1920×823 capture.
+- `render/scene` is a built-in model but stays out of ordinary prompt model pickers and default choices; only the scene editor and Agents that read the scene guide use it.
+- The viewport updates placement, visibility and poses in place, without rebuilding geometry, during playback, key edits and keyboard nudges. Keyboard nudges act on the scene at the playhead, so a keyed property gets its key set or updated, like an inspector edit.
+- The editor's browser suite checks submission, pinned inputs and delivery of the video node with a stand-in renderer; the provider's own tests render real frames with Chrome and ffmpeg.
+- **Protected-write refusal e2e (2026-11-11):** `apps/web/e2e/scene-protected-writes.e2e.ts` covers R-1 through R-3 with the fake Codex through the real vis MCP server and an Agent token. After an author RPC touches an Agent-created bench and view, direct position and camera edits, bench removal and whole-scene deletion are refused with their protected reasons. The scene and revision stay unchanged, and failed tool calls plus the gateway's exact recovery hints appear in the browser transcript. MCP now forwards `ErrorData.hint`; scene deletion keeps `scene.user_only` and explains that the author must delete the scene while individual item deletions can be proposed with `scene.propose`. No real Agents or paid services are used.
+- **Closed (maintainer, 2026-11-11).** The RFC is done. Whether Codex actually opened the rendered image and extracted frames it reported inspecting cannot be confirmed, because native viewer activity does not appear in the product transcript; this is a transcript limitation, not a scene-node defect, and is listed in [known issues](../known-issues.md#native-image-view-not-in-the-transcript). Real Agents have not hit the protected-write refusals because Codex declines on its own first; the fake-Codex e2e above covers that path.
+- **Agent evaluation with Codex (2026-11-11): partial acceptance.** One approved SC1–SC3 run at `3239fdae` completed with no infrastructure failures or reruns, using only free local `render/scene`. All 16 automatic checks passed; three quality/proposal checks remained `review`. SC1 delivered one six-part bench group, a seated figure and a wide inspection image; visual review passed. SC2 delivered an articulated left-to-right walk with six joint tracks and a following camera; decoded-frame review passed, and independent probing confirmed 5.000 s, 24 fps and 120 frames. SC3 successfully proposed moving the author-touched bench from X=0.25 m to X=0.75 m, leaving the entire canvas and scene revision unchanged. No protected write was attempted, so `scene.object_protected` was not exercised. Codex reported viewing the SC1 image and SC2 extracted frames, but native viewer calls are absent from the product transcript; that inspection remains unverified. Five invalid-parameter calls were corrected within the same turns. No paid or non-scene generation was attempted.
+- **Manual acceptance with Codex (maintainer, 2026-11-11): partial pass.** In the app, Codex built the bench as one group of primitives (seat and legs move together), seated a figure on it (acceptable after placement adjustments) and added a wide view framing both. It animated the figure walking with a camera move; playback was correct and the local video render completed. After the author edited objects and views, Codex treated them as protected and left them unchanged. Not exercised: the gateway's `scene.object_protected` / `scene.view_protected` refusal, because Codex declined from the ownership stamps without attempting a write (the session transcript holds no refusal); the refusal e2e above now covers that path through MCP. The `apps/web/agent-eval` scenarios were not run. The session also showed that describing a change leaves the author to redo it by hand; [RFC 0044](0044-scene-change-proposals.md) adds reviewable scene change proposals.
+- **Further manual checks (maintainer, 2026-11-11): passed.**
+  - Codex could edit objects it owned: it created a lamp and then moved it again in a separate request.
+  - Saving a still does not protect a view: the camera moved 1 m higher and the saved still was kept.
+  - Codex deleted an untouched scene it owned; the temporary box scene was then absent.
+  - Reordering protected objects left their contents, views and duration unchanged.
+  - Rendered video frames matched the editor at 0, 1.5 and 3 s, compared by eye.
+  - Still not exercised by a real Agent: the protected-write and protected-delete refusals.
 
 ## Importing models
 
@@ -182,9 +260,9 @@ A new `scene-permissions.ts` sits beside `previz-permissions.ts`.
 
 **Step d.** The rule becomes:
 
-- An Agent may create scenes, add objects, and edit or delete objects with `createdBy: 'agent'` and `userTouched: false`.
-- Any other change is refused with `scene.object_protected`. The Agent proposes the change in its session and the author makes it.
-- The gateway owns the metadata. On a UI write it diffs the document and sets `userTouched` on each object that changed. On an Agent write it sets `createdBy: 'agent'` on new objects. Values sent by a client are ignored.
+- An Agent may create scenes, add objects and views, and edit or delete objects and views with `createdBy: 'agent'` and `userTouched: false`.
+- Any other change is refused with `scene.object_protected` or `scene.view_protected`. The Agent proposes the change in its session and the author makes it.
+- The gateway owns the metadata. On a UI write it diffs the document and sets `userTouched` on each object or view that changed. On an Agent write it sets `createdBy: 'agent'` on new ones. Values sent by a client are ignored. Details in [Step d](#step-d-agents).
 
 ## Performance and platform
 
@@ -208,6 +286,8 @@ A new `scene-permissions.ts` sits beside `previz-permissions.ts`.
 - `AssetKind` and the `assets.kind` enum gain `model`. `asset.importFile` accepts `.glb` with mime `model/gltf-binary`. `isMediaKind` lists image, video and audio explicitly.
 - New UI-only method `model.list`, returning `{ models: AssetVersionView[] }`.
 - New reasons: `scene.user_only`, `asset.model_too_large`, `asset.model_too_complex`, `asset.model_invalid`, `asset.model_external_reference`, `asset.model_unsupported`. `scene.object_protected` lands in step d.
+- Step c (landed 2026-11-09): `SceneEase`, `SceneCamera`, `SceneObjectTracks`; optional `SceneDoc.durationS`, `SceneObject.tracks` and `SceneView.cameraKeys`; the key limits in `SCENE_LIMITS`. `sampleScene` in `@vis/scene-core`.
+- Step d (landed 2026-11-09): `SceneView.createdBy` and `userTouched`, defaulting to `'user'` and `false`; reasons `scene.object_protected`, `scene.view_protected` and `scene.duration_protected`.
 - `pnpm-workspace.yaml` gains `packages/scene/*`. `scripts/check-boundaries.mjs`: add `packages/scene` to `dirs`, `'scene-core': ['protocol']`, `'scene-ui': ['protocol', 'ui-kit', 'scene-core']`, and `scene-ui` to `web` and `desktop`. `scripts/check-i18n.mjs` scans the new source directory. The render provider gains `scene-core` in step c.
 
 ## Implementation plan
@@ -222,6 +302,14 @@ Claude lands the contract and seams first, then Codex workers run in parallel, s
 
 S4 follows S1 on the same package: inspector, outline, views list, send actions and e2e. Step b is one worker after step a is merged. Claude owns review, integration, the RFC and READMEs.
 
+Steps c and d, after Claude lands the contract and `sampleScene`:
+
+| Worker | Scope | Off limits |
+|---|---|---|
+| M1: motion editor | Timeline strip, keys, playback and Render video in `packages/scene/ui`; host wiring in `apps/web/src/client`; motion e2e | `packages/protocol`, `services`, `packages/generation`, `packages/workbench` |
+| M2: scene rendering | `render/scene` in `packages/generation`, scene slot inputs, a frame-application helper in `packages/scene/core` (new file), the `vis-scene.js` bundle in the build scripts | `packages/scene/ui`, `packages/protocol`, `packages/workbench` |
+| A1: Agent scenes | `scene-permissions.ts` and gateway wiring, stamping for views, the `scene` guide, the evaluation scenarios | `packages/scene`, `packages/generation`, `packages/protocol` |
+
 ## Testing
 
 - Contract tests for the scene schema and limits, and for existing previz documents without `sceneRef`.
@@ -230,10 +318,13 @@ S4 follows S1 on the same package: inspector, outline, views list, send actions 
 - Model validation against generated GLBs at, below and above each limit, with external URIs and with compressed extensions.
 - Browser e2e with no paid services, driven through the inspector and outline: create a scene with no previz node, add a figure and a bench, move them, set a lens, reload and check that the scene persists. Save as image and check that the PNG has the right size, is not blank, and has the scene as input. Send to a panel, change the scene, and check the update offer. Delete the scene and check that the panel keeps its picture. Check that no three.js chunk loads before the editor opens.
 - Windows and macOS, since WebGL backends differ (D3D11 and Metal).
+- Step c: `sampleScene` unit tests for every ease, holding outside keys, joint slerp and per-view cameras. A render test that a keyed object moves between two frames of `render/scene` and that the frame at the playhead matches the editor's capture. An e2e that adds motion, keys a figure at two times, scrubs, reloads, and renders a video node with the scene as input.
+- Step d: gateway tests for each rule in Step d, including forged `createdBy`, `userTouched` and `still` values, protected durations, and scene deletion.
 
 ## Not in scope
 
 - Keyframes, video output and Agent scene writes in the first version (steps c and d).
+- In step c: inverse kinematics, motion paths drawn in the viewport, per-key tangents, audio, and stacking several scenes into one video. A rendered video goes to the timeline like any other video.
 - Inverse kinematics, cloth, physics, lighting design and materials. A blockout is grey on purpose.
 - Rigged imported models, Draco and meshopt, and models in the library panel.
 - Per-view object placement. Different blocking is a duplicated scene.

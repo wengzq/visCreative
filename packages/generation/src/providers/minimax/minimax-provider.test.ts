@@ -40,13 +40,13 @@ describe('MiniMax adapter', () => {
   async function setup(kind: 'image' | 'video' = 'video') { const fixture = await fakeMiniMax('normal', kind); fixtures.push(fixture); return fixture }
   afterEach(async () => { await Promise.all(fixtures.splice(0).map(fixture => fixture.close())) })
 
-  it('registers official regional hosts, models and the unverified descriptor', () => {
+  it('registers official regional hosts, models and the verified descriptor', () => {
     const registry = createProviderTypeRegistry()
     expect(registry.get('minimax')).toBe(minimaxProviderType)
-    expect(registry.descriptors.find(type => type.type === 'minimax')).toMatchObject({ label: { zh: 'MiniMax 海螺', en: 'MiniMax Hailuo' }, verified: false, needsKey: true, kinds: ['video', 'image'], allowCustomBaseUrl: true })
-    expect(minimaxProviderType.availability?.en).toContain('has not been verified against the real API')
+    expect(registry.descriptors.find(type => type.type === 'minimax')).toMatchObject({ label: { zh: 'MiniMax 海螺', en: 'MiniMax Hailuo' }, verified: true, needsKey: true, kinds: ['video', 'image'], allowCustomBaseUrl: true })
+    expect(minimaxProviderType.availability?.en).not.toContain('not been verified')
     expect(minimaxProviderType.regions.map(region => region.baseUrl)).toEqual(['https://api.minimax.cn', 'https://api.minimax.io'])
-    expect(minimaxProviderType.knownModels).toEqual(MINIMAX_MODELS.map(({ id, label, kind }) => ({ id, label, kind })))
+    expect(minimaxProviderType.knownModels.map(({ id, label, kind }) => ({ id, label, kind }))).toEqual(MINIMAX_MODELS.map(({ id, label, kind }) => ({ id, label, kind })))
     expect(MINIMAX_IMAGE_TIMEOUT_MS).toBe(300_000)
   })
   it.each(MINIMAX_REGIONS)('routes both media kinds to the $id host', async region => {

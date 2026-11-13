@@ -1,0 +1,14 @@
+# The maintainer reviews everything. The paths below are listed explicitly because they hold the rules,
+# the contract and the security boundary (RFC 0042 §3); keep them owned if the default line changes.
+*                                         @wengzq
+
+/AGENTS.md                                @wengzq
+/CLAUDE.md                                @wengzq
+/SECURITY.md                              @wengzq
+/docs/rfc/                                @wengzq
+/packages/protocol/                       @wengzq
+/services/studiod/src/gateway.ts          @wengzq
+/services/studiod/src/secret-store.ts     @wengzq
+/packages/workbench/core/src/sandbox.ts   @wengzq
+/scripts/                                 @wengzq
+/.github/                                 @wengzq

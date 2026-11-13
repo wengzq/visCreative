@@ -67,6 +67,8 @@ RFC 0021（节点组件）要在这台机器上开发和验证，所以本文先
 
 ### 4. Agent 隔离：Windows 上较弱，事先提醒
 
+> Note ([RFC 0048](0048-agent-native-capabilities.md), 2026-11-12): Agents keep their own web search and fetch. Codex runs with live web search, so OpenAI's servers fetch the pages it opens; in `auto` approval an Agent's own read-only web search and fetch pass without asking. This widens no secret, cost or gateway limit, on Windows or elsewhere.
+
 macOS 上 `sandbox-exec` 阻止 Agent 读取密钥、studiod 令牌和数据库文件。Windows 没有现成的等价物，本期**承认这一点**（维护者 2026-10-31 确认）：
 
 - Windows 上 Agent 以当前用户身份运行，**不加沙箱，也不退回只读模式**。技术上它能读到凭据管理器、`run/` 下的令牌和数据库文件。

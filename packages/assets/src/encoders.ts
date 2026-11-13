@@ -8,6 +8,8 @@ const run = promisify(execFile)
 
 export type EncoderRunner = (executable: string, args: string[], opts: { timeoutMs: number }) => Promise<{ stdout: string }>
 
+export const SOFTWARE_FIRST_H264_ENCODERS = ['libx264', 'h264_videotoolbox', 'libopenh264'] as const
+
 const execute: EncoderRunner = (executable, args, opts) => run(executable, args, {
   timeout: opts.timeoutMs, windowsHide: true, shell: false, maxBuffer: 1024 * 1024,
 })
@@ -33,23 +35,27 @@ const profiles: Record<string, VideoEncoder> = {
 const detections = new Map<string, Promise<VideoEncoder>>()
 
 /** Cache the trial as well as its result so simultaneous exports never probe twice. */
-export function detectVideoEncoder(opts: { ffmpegPath?: string; platform?: NodeJS.Platform; exec?: EncoderRunner } = {}): Promise<VideoEncoder> {
+export function detectVideoEncoder(opts: { ffmpegPath?: string; platform?: NodeJS.Platform; exec?: EncoderRunner; priority?: readonly string[] } = {}): Promise<VideoEncoder> {
   const ffmpeg = opts.ffmpegPath ?? 'ffmpeg'
-  const existing = detections.get(ffmpeg)
+  const key = JSON.stringify([ffmpeg, opts.priority ?? null])
+  const existing = detections.get(key)
   if (existing) return existing
-  const detection = detect(ffmpeg, opts.platform ?? process.platform, opts.exec ?? execute)
-  detections.set(ffmpeg, detection)
+  const detection = detect(ffmpeg, opts.platform ?? process.platform, opts.exec ?? execute, opts.priority).catch(error => {
+    if (detections.get(key) === detection) detections.delete(key)
+    throw error
+  })
+  detections.set(key, detection)
   return detection
 }
 
-async function detect(ffmpeg: string, platform: NodeJS.Platform, exec: EncoderRunner): Promise<VideoEncoder> {
+async function detect(ffmpeg: string, platform: NodeJS.Platform, exec: EncoderRunner, priority?: readonly string[]): Promise<VideoEncoder> {
   let detail = ''
   try {
     const { stdout } = await exec(ffmpeg, ['-hide_banner', '-encoders'], { timeoutMs: 5000 })
     const listed = new Set([...stdout.matchAll(/^\s*V\S{5}\s+(\S+)/gm)].map(match => match[1]))
-    for (const name of [...(hardware[platform] ?? []), 'libx264', 'libopenh264']) {
-      if (!listed.has(name)) continue
-      const encoder = profiles[name]!
+    for (const name of priority ?? [...(hardware[platform] ?? []), 'libx264', 'libopenh264']) {
+      const encoder = profiles[name]
+      if (!listed.has(name) || !encoder) continue
       try {
         await exec(ffmpeg, [
           '-hide_banner', '-v', 'error', '-nostdin', ...(encoder.inputArgs ?? []),

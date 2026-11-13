@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { chromium } from 'playwright-core'
-import { createFfmpegMedia, poster, filmstrip, renderTimeline } from '@vis/assets'
+import { createFfmpegMedia, detectVideoEncoder, SOFTWARE_FIRST_H264_ENCODERS, poster, filmstrip, renderTimeline } from '@vis/assets'
 import { ProviderError } from '../types'
 import type { ProviderAdapter, ProviderRequest, ProviderTaskState } from '../types'
 import { createRenderProvider, defaultRenderLibs, DEFAULT_CHROME_PATHS, RENDER_ORIGIN } from './index'
@@ -66,7 +66,9 @@ describe('render provider', () => {
       const provider = createRenderProvider({ workDir: dir })
       const html = '<body style="margin:0"><div style="position:absolute;left:16px;top:16px;width:32px;height:32px;background:red"></div><script>window.vis={duration:1,seek(){}}</script>'
       await provider.submit(request(html, { width: 64, height: 64, fps: 4, transparent: true }), { idempotencyKey: 'alpha' })
-      expect(await settle(provider, 'alpha')).toMatchObject({ state: 'succeeded' })
+      // The message carries the failure code and text, which the default diff collapses.
+      const settled = await settle(provider, 'alpha')
+      expect(settled, JSON.stringify(settled)).toMatchObject({ state: 'succeeded' })
       const output = await provider.download({ outputIndex: 0, ref: 'alpha' })
       expect(output).toMatchObject({ mime: 'video/webm', hasAlpha: true, fps: 4 })
       const file = join(dir, 'alpha.webm')
@@ -101,14 +103,16 @@ describe('render provider', () => {
       expect(pixel(image, 32, 32)[0]).toBeGreaterThan(240)
       await filmstrip(file, join(dir, 'strip.jpg'))
       const background = join(dir, 'blue.mp4')
-      execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:r=4:d=1', '-c:v', 'libx264', '-y', background])
+      execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:r=4:d=1', '-c:v', 'mpeg4', '-q:v', '2', '-y', background])
+      // The small fixture shares the providers' compatibility order instead of timeline GPU priorities.
+      const encoder = await detectVideoEncoder({ priority: SOFTWARE_FIRST_H264_ENCODERS })
       const clip = (id: string, overlay = false) => ({ id, source: { nodeId: id, assetVersionId: id }, startMs: 0, inMs: 0, outMs: 1000, volume: 1, fadeInMs: 0, fadeOutMs: 0, ...(overlay ? { overlay: { x: 0.5, y: 0.5, width: 1, opacity: 1 } } : {}) })
       for (const overlay of [true, false]) {
         const result = await renderTimeline({ version: 1, output: { width: 64, height: 64, fps: 4 }, tracks: overlay
           ? [{ id: 'base', kind: 'video', muted: false, volume: 1, clips: [clip('blue')] }, { id: 'over', kind: 'overlay', muted: false, volume: 1, clips: [clip('alpha', true)] }]
           : [{ id: 'base', kind: 'video', muted: false, volume: 1, clips: [clip('alpha')] }] },
         new Map([['alpha', { kind: 'video', path: file, durationMs: 1000 }], ['blue', { kind: 'video', path: background, durationMs: 1000 }]]),
-        { encoder: { name: 'libx264', args: ['-crf', '18'], hardware: false } })
+        { encoder })
         try {
           const data = rgba(result.path)
           const corner = pixel(data, 4, 4)

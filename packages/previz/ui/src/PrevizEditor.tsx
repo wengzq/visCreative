@@ -1,7 +1,7 @@
 import { emptyPrevizPanel, PREVIZ_LIMITS, PrevizAspectRatio, type PrevizPanel } from '@vis/protocol'
 import { describeError, useFormat, useLocale, useMessages } from '@vis/ui-kit'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createDraftAssets, flatten, loadImage } from './assets'
+import { backdrop, createDraftAssets, flatten, loadImage } from './assets'
 import { usePrevizDraft } from './draft'
 import { DrawingSurface } from './DrawingSurface'
 import { PanelList } from './PanelList'
@@ -109,7 +109,7 @@ export function PrevizEditor({ host }: { host: PrevizEditorHost }) {
     draft.beginEdit()
     setBusy(true); setError(null)
     try {
-      const panels = await Promise.all(draft.doc.panels.map(async panel => panel.image ? { ...panel, rev: panel.rev + 1, image: assets.add(await flatten(panel.underlay, panel.sketch, aspectRatio, url), 'panel.png') } : panel))
+      const panels = await Promise.all(draft.doc.panels.map(async panel => panel.image ? { ...panel, rev: panel.rev + 1, image: assets.add(await flatten(backdrop(panel), panel.sketch, aspectRatio, url), 'panel.png') } : panel))
       latest.current.edit({ ...latest.current.doc, aspectRatio, panels }, true)
     } catch (error) { setError(error) } finally { setBusy(false) }
   }
@@ -172,7 +172,7 @@ export function PrevizEditor({ host }: { host: PrevizEditorHost }) {
         <div className="vis-pv-stage" onContextMenu={event => { if (panel) { event.preventDefault(); openMenu(panel.id, event.clientX, event.clientY) } }}>{panel ? <DrawingSurface key={panel.id} panel={panel} ratio={draft.doc.aspectRatio} url={url} tool={tool} colour={colour} size={size} disabled={disabled || working} sameSketch={assets.same} onBusy={value => { if (value) draft.beginEdit(); setDrawing(value) }} onError={setError} onDraw={async (sketch, adopt) => {
           const id = assets.add(sketch, 'sketch.png')
           try {
-            const image = assets.add(await flatten(panel.underlay, id, draft.doc.aspectRatio, url), 'panel.png')
+            const image = assets.add(await flatten(backdrop(panel), id, draft.doc.aspectRatio, url), 'panel.png')
             adopt(id)
             update(panel.id, { sketch: id, image, use: 'composition', frameRole: null }, true)
           } catch (error) { setError(error) }

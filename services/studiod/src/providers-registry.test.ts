@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createFfmpegMedia } from '@vis/assets'
-import { builtinProviderTypes, createMockProvider, type ProviderType } from '@vis/generation'
+import { builtinProviderTypes, createMockProvider, operationSpecOf, type ProviderType } from '@vis/generation'
 import { ProviderConfigSchema, providers } from '@vis/protocol'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createProviderManager } from './providers'
@@ -30,6 +30,46 @@ function setup(storedType = 'example') {
   const opts = { dataDir, providerTypes: [type], builtins: [createMockProvider()], defaults: { image: { provider: 'mock' }, video: { provider: 'mock' }, audio: { provider: 'mock' } }, secrets: createMemorySecretStore(), media: createFfmpegMedia(), onChange: vi.fn() }
   return { opts, config, create, manager: createProviderManager(opts) }
 }
+
+it('serializes every declared mock operation spec with defaults and bilingual annotations', async () => {
+  const { manager, opts } = setup()
+  const adapter = opts.builtins[0]!
+  const catalog = providers.list.result.parse(await manager.list())
+  for (const model of catalog.providers.find(provider => provider.id === 'mock')!.models) {
+    expect(Object.keys(model.operationSpecs ?? {}).sort()).toEqual(model.operations!.filter(operation => operation !== 'generate').sort())
+    expect(model.operationSpecs).not.toHaveProperty('generate')
+    for (const operation of model.operations!) {
+      if (operation === 'generate') continue
+      const spec = operationSpecOf(adapter, model.kind, model.id, operation)
+      expect(model.operationSpecs![operation]).toEqual({
+        paramsSchema: spec.paramsSchema.toJSONSchema({ io: 'input', unrepresentable: 'any' }),
+        prompt: spec.prompt,
+      })
+    }
+  }
+  const image = catalog.providers[0]!.models.find(model => model.id === 'mock-image-1')!
+  expect(image.operationSpecs!['image.upscale']).toMatchObject({
+    prompt: 'none',
+    paramsSchema: { additionalProperties: false, properties: { scale: { default: 2, enum: [2, 4], 'x-vis-label': { zh: '放大倍率', en: 'Scale' }, 'x-vis-options': { 4: { zh: '4 倍', en: '4×' } } } } },
+  })
+  expect(image.operationSpecs!['image.outpaint']!.paramsSchema).toMatchObject({
+    properties: { ratio: { 'x-vis-description': { zh: '扩展后的画面比例', en: 'Aspect ratio after outpainting' } } },
+  })
+})
+
+it('lists strict empty specs for declared operations without a spec and omits specs for generate-only models', async () => {
+  const { opts } = setup()
+  opts.builtins[0] = { ...opts.builtins[0]!, operationsFor: () => ['generate', 'image.matting'] }
+  delete opts.builtins[0].operationSpecFor
+  const model = (await createProviderManager(opts).list()).providers[0]!.models[0]!
+  expect(model.operationSpecs).toEqual({
+    'image.matting': { paramsSchema: expect.objectContaining({ type: 'object', properties: {}, additionalProperties: false }), prompt: 'none' },
+  })
+  opts.builtins[0] = { ...opts.builtins[0]!, operationSpecFor: vi.fn(() => { throw new Error('Generate must not consult operation specs') }) }
+  delete opts.builtins[0].operationsFor
+  for (const entry of (await createProviderManager(opts).list()).providers[0]!.models) expect(entry).not.toHaveProperty('operationSpecs')
+  expect(opts.builtins[0].operationSpecFor).not.toHaveBeenCalled()
+})
 
 it('lists descriptors and validates settings and unknown types before saving', async () => {
   const { manager, config, opts } = setup()
@@ -149,4 +189,24 @@ it('accepts declared endpoint overrides only with a custom URL and keeps them in
   ]) await expect(manager.update({ ...config, providers: [invalid] })).rejects.toMatchObject({ details: { reason: 'provider.endpoint_invalid' } })
   await expect(manager.update({ ...config, providers: [{ ...entry, endpoints: {} }] })).rejects.toMatchObject({ details: { reason: 'provider.endpoint_required' } })
   await manager.update({ ...config, providers: [entry] })
+})
+
+it('lists official doc links for known models and falls back to the type pages per media kind (RFC 0045)', async () => {
+  const { opts } = setup()
+  const guide = { kind: 'prompt_guide' as const, url: 'https://docs.example.com/image/prompting' }
+  const reference = { kind: 'api_reference' as const, url: 'https://docs.example.com/image/api' }
+  const fallback = { kind: 'prompt_guide' as const, url: 'https://docs.example.com/prompting' }
+  opts.providerTypes[0] = { ...opts.providerTypes[0]!, knownModels: [{ id: 'image', kind: 'image', label: 'Image', docs: [guide, reference] }], modelDocs: { image: [fallback] } }
+  const config = ProviderConfigSchema.parse({
+    providers: [{ id: 'custom', type: 'example', label: 'Custom', baseUrl: 'https://example.invalid/old', imageModels: [{ id: 'image', label: 'Image' }, { id: 'ep-custom', label: 'Endpoint' }], videoModels: [{ id: 'clip', label: 'Clip' }], settings: { label: 'first' } }],
+    defaults: { image: { provider: 'custom', model: 'image' } },
+  })
+  writeFileSync(join(opts.dataDir, 'providers.json'), JSON.stringify(config))
+  const catalog = providers.list.result.parse(await createProviderManager(opts).list())
+  const models = catalog.providers.find(provider => provider.id === 'custom')!.models
+  expect(models.find(model => model.id === 'image')!.docs).toEqual([guide, reference])
+  expect(models.find(model => model.id === 'ep-custom')!.docs).toEqual([fallback])
+  expect(models.find(model => model.id === 'clip')).not.toHaveProperty('docs')
+  for (const model of catalog.providers.find(provider => provider.id === 'mock')!.models) expect(model).not.toHaveProperty('docs')
+  expect(catalog.providerTypes[0]!.knownModels[0]!.docs).toEqual([guide, reference])
 })

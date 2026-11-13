@@ -1,3 +1,4 @@
+import { refreshReviews } from './reviews'
 import { applyOps, readNodes } from '@vis/canvas-core'
 import { VisError } from '@vis/domain'
 import type { CanvasOp, MethodParams, MethodResult } from '@vis/protocol'
@@ -51,7 +52,9 @@ export async function extractBlockout(host: SpaceHost, media: MediaTools, p: Met
     const extracted = register(tx)
     const next = { ...current.doc, rev: current.doc.rev + 1, panels: current.doc.panels.map((panel, i) => ({ ...panel, rev: panel.rev + 1, blockout: extracted.frames[i]!.assetVersionId, sceneRef: null, ...(fill ? { durationSec: durations[i]! } : {}) })) }
     const ops: CanvasOp[] = [{ op: 'previz.set', slotId: p.slotId, expectedRevision: p.expectedRevision, doc: next }]
-    const applied = applyOps(tx, { kind: 'user' }, { requestId: p.requestId, ops }, Date.now())
+    const at = Date.now()
+    const applied = applyOps(tx, { kind: 'user' }, { requestId: p.requestId, ops }, at)
+    refreshReviews(tx, at)
     return {
       revision: applied.slotRevisions[p.slotId]!,
       frames: extracted.frames.map((frame, i) => ({ panelId: current.doc.panels[i]!.id, atMs: frame.atMs, assetVersionId: frame.assetVersionId })),

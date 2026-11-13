@@ -5,16 +5,26 @@ import type { SceneDraft, SceneEditorHost } from './types'
 export type SceneDraftHost = Pick<SceneEditorHost, 'node' | 'commit'>
 const equal = (a: SceneDoc, b: SceneDoc) => JSON.stringify(a) === JSON.stringify(b)
 const sameWrite = (a: SceneDoc, b: SceneDoc) => {
-  const content = (doc: SceneDoc) => ({ ...doc, objects: doc.objects.map(({ createdBy, userTouched, ...object }) => object) })
+  const content = (doc: SceneDoc) => ({
+    ...doc,
+    objects: doc.objects.map(({ createdBy, userTouched, ...object }) => object),
+    views: doc.views.map(({ createdBy, userTouched, ...view }) => view),
+  })
   return JSON.stringify(content(a)) === JSON.stringify(content(b))
 }
 const stamped = (doc: SceneDoc, incoming: SceneDoc): SceneDoc => {
   const objects = new Map(incoming.objects.map(object => [object.id, object]))
+  const views = new Map(incoming.views.map(view => [view.id, view]))
   return {
     ...doc,
     objects: doc.objects.map(object => {
       const canonical = objects.get(object.id)
       return canonical ? { ...object, createdBy: canonical.createdBy, userTouched: canonical.userTouched } : object
+    }),
+    // Step d stamps views the same way, so the echo of our own write must not read as someone else's.
+    views: doc.views.map(view => {
+      const canonical = views.get(view.id)
+      return canonical ? { ...view, createdBy: canonical.createdBy, userTouched: canonical.userTouched } : view
     }),
   }
 }
@@ -34,6 +44,8 @@ export function createSceneDraft(initialHost: SceneDraftHost) {
   let conflict: SceneDraft['conflict'] = null
   let edited = false
   let undo: SceneDoc[] = []
+  // A held key's repeats share a run, and the entry pushed at its start already restores the document before it.
+  let run: string | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let inFlight: Promise<void> | null = null
   let active = true
@@ -42,7 +54,7 @@ export function createSceneDraft(initialHost: SceneDraftHost) {
   let snapshot: SceneDraft
   const cancelTimer = () => { clearTimeout(timer); timer = undefined }
   const publish = () => {
-    snapshot = { doc, baseRevision, getSnapshot: () => snapshot, saveState, saveError, conflict, edit, beginEdit: () => { edited = true }, undo: undoEdit, canUndo: undo.length > 0, loadTheirs, flush }
+    snapshot = { doc, baseRevision, getSnapshot: () => snapshot, saveState, saveError, conflict, edit, beginEdit: () => { edited = true }, undo: undoEdit, canUndo: undo.length > 0, loadTheirs, flush, adopt }
     if (active) listeners.forEach(listener => listener())
   }
   const markConflict = () => {
@@ -88,11 +100,13 @@ export function createSceneDraft(initialHost: SceneDraftHost) {
     publish()
     if (active && !conflict && !saveError && !equal(doc, saved)) await commit()
   }
-  function edit(next: SceneDoc, immediate = false) {
+  function edit(next: SceneDoc, immediate = false, nextRun?: string) {
+    if (nextRun !== run) run = undefined
     if (conflict || equal(doc, next)) return
     const parsed = SceneDoc.safeParse({ ...next, rev: doc.rev + 1 })
     if (!parsed.success) return
-    undo.push(doc)
+    if (run === undefined) undo.push(doc)
+    run = nextRun
     doc = parsed.data
     edited = true
     saveState = 'saving'
@@ -104,6 +118,7 @@ export function createSceneDraft(initialHost: SceneDraftHost) {
   }
   function undoEdit() {
     if (conflict || !undo.length) return
+    run = undefined
     doc = { ...undo.pop()!, rev: doc.rev + 1 }
     edited = true
     saveState = 'saving'
@@ -117,12 +132,19 @@ export function createSceneDraft(initialHost: SceneDraftHost) {
     doc = saved = latest.doc
     baseRevision = latest.revision
     undo = []
+    run = undefined
     own.clear()
     edited = false
     conflict = null
     saveError = null
     saveState = 'saved'
     publish()
+  }
+  // Resolution is an explicit author action. Adopt its saved result only while the flushed draft is still clean.
+  function adopt(incoming: SceneDoc, revision: number, expectedRevision: number) {
+    if (revision < latest.revision || baseRevision !== expectedRevision || inFlight || !equal(doc, saved)) return
+    latest = { doc: incoming, revision }
+    loadTheirs()
   }
   async function flush() {
     cancelTimer()
@@ -134,7 +156,7 @@ export function createSceneDraft(initialHost: SceneDraftHost) {
   function updateHost(next: SceneDraftHost) {
     host = next
     const incoming = committed(host)
-    if (incoming.revision === latest.revision && equal(incoming.doc, latest.doc)) return
+    if (incoming.revision < latest.revision || incoming.revision === latest.revision && equal(incoming.doc, latest.doc)) return
     latest = incoming
     if (incoming.revision < baseRevision) return
     const ownDoc = own.get(incoming.revision)

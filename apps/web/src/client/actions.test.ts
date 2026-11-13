@@ -24,7 +24,7 @@ describe('Canvas reference input actions', () => {
         transform: { position: [2, 0, 1], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
       }],
       views: [{
-        id: 'wide', name: 'Wide', still: 'still', aspectRatio: '16:9',
+        id: 'wide', name: 'Wide', still: 'still', aspectRatio: '16:9', createdBy: 'user', userTouched: false,
         camera: { position: [4, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 },
       }],
     }
@@ -555,6 +555,52 @@ describe('Generation job controls', () => {
     expect(confirm).toHaveBeenCalledWith('上一次可能已在服务端生成并计费，确定重新生成？')
     expect(call.mock.calls.filter(([method]) => method === 'generation.regenerate')).toHaveLength(confirmed ? 1 : 0)
     expect(dismissJobs).toHaveBeenCalledTimes(confirmed ? 1 : 0)
+  })
+
+  it.each([true, false])('unknown toolbar regeneration keeps the confirmation and chosen node when confirmed=%s', async confirmed => {
+    const confirm = vi.fn(() => confirmed)
+    vi.stubGlobal('window', { confirm })
+    const { actions, call, dismissJobs } = generationSetup('unknown')
+    await actions.onRegenerateNode!('chosen', 'old')
+    expect(confirm).toHaveBeenCalledWith('上一次可能已在服务端生成并计费，确定重新生成？')
+    expect(call.mock.calls.filter(([method]) => method === 'generation.regenerate')).toHaveLength(confirmed ? 1 : 0)
+    if (confirmed) expect(call).toHaveBeenLastCalledWith('generation.regenerate', { requestId: expect.any(String), jobId: 'old', targetNodeId: 'chosen' })
+    expect(dismissJobs).toHaveBeenCalledTimes(confirmed ? 1 : 0)
+  })
+
+  it('shares toolbar requests until the receipt returns and uses a fresh request ID for the next press', async () => {
+    const { actions, call } = generationSetup('succeeded')
+    const original = call.getMockImplementation()!
+    let receipt!: (value: unknown) => void
+    call.mockImplementation(method => method === 'generation.regenerate'
+      ? new Promise(resolve => { receipt = resolve })
+      : original(method))
+    const first = actions.onRegenerateNode!('chosen', 'old')
+    expect(actions.onRegenerateNode!('chosen', 'old')).toBe(first)
+    await vi.waitFor(() => expect(receipt).toBeTypeOf('function'))
+    expect(call.mock.calls.filter(([method]) => method === 'generation.regenerate')).toHaveLength(1)
+    receipt({ jobId: 'new', status: 'queued', bindings: [] })
+    await first
+    call.mockImplementation(original)
+    await actions.onRegenerateNode!('chosen', 'old')
+    const requests = call.mock.calls.filter(([method]) => method === 'generation.regenerate') as unknown as [string, Record<string, unknown>][]
+    expect(requests).toHaveLength(2)
+    expect(requests[0]![1]).toMatchObject({ jobId: 'old', targetNodeId: 'chosen' })
+    expect(requests[1]![1]).toMatchObject({ jobId: 'old', targetNodeId: 'chosen' })
+    expect(requests[1]![1].requestId).not.toBe(requests[0]![1].requestId)
+  })
+
+  it('releases failed toolbar requests for retry and preserves the source notice', async () => {
+    const { actions, call, notify, dismissJobs } = generationSetup('succeeded')
+    const original = call.getMockImplementation()!
+    call.mockImplementation(method => method === 'generation.regenerate' ? Promise.reject(new Error('Offline')) : original(method))
+    await expect(actions.onRegenerateNode!('chosen', 'old')).rejects.toThrow('Offline')
+    expect(notify).toHaveBeenCalledWith({ kind: 'error', text: '重新生成失败：Offline' })
+    expect(dismissJobs).not.toHaveBeenCalled()
+    call.mockImplementation(original)
+    await actions.onRegenerateNode!('chosen', 'old')
+    expect(call.mock.calls.filter(([method]) => method === 'generation.regenerate')).toHaveLength(2)
+    expect(dismissJobs).toHaveBeenCalledWith(['old'])
   })
 
   it('regeneration failures preserve the original notice and report errors without automatic retries', async () => {

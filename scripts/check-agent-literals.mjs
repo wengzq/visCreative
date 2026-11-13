@@ -10,6 +10,7 @@ const allowlist = new Map([
   ['services/studiod/src/codex.ts', 'Codex runtime factory binds adapter-specific launch options.'],
   ['services/studiod/src/deepseek.ts', 'DeepSeek runtime factory binds adapter-specific launch options.'],
   ['services/studiod/src/claude.ts', 'Claude runtime factory binds adapter-specific launch options.'],
+  ['apps/desktop/stage.mjs', 'Desktop packaging copies the bundled SDK executable for the target architecture.'],
   ['apps/web/agent-eval/runner.ts', 'Opt-in evaluation launches only the explicitly approved adapters.'],
   ['apps/web/agent-eval/safety.ts', 'Evaluation safety restricts paid real-Agent runs to the approved subset.'],
 ])

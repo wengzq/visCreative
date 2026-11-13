@@ -98,7 +98,7 @@ describe.skipIf(!ready)('Work messages and fake Codex end-to-end', () => {
     await expect.poll(() => evidence(item.workDir).filter(entry => entry.tool === 'guide').length).toBe(2)
     await expect.poll(async () => (await detail(item.workItemId)).item.sessions[0]?.activeTurnId).toBeNull()
     const [index, topic] = evidence(item.workDir).filter(entry => entry.tool === 'guide').map(entry => entry.output)
-    expect(index.topics.map((guide: { topic: string }) => guide.topic)).toEqual(['script', 'timeline', 'code-render', 'media', 'generation', 'canvas', 'library', 'previz', 'writing'])
+    expect(index.topics.map((guide: { topic: string }) => guide.topic)).toEqual(['script', 'timeline', 'code-render', 'media', 'generation', 'canvas', 'library', 'previz', 'writing', 'scene'])
     expect(index.guide).toBeUndefined()
     expect(topic.guide).toMatchObject({ topic: 'timeline', title: 'Timeline editing', body: expect.stringContaining('timeline.export') })
     expect(topic.topics).toEqual(index.topics)

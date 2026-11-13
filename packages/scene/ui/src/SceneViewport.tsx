@@ -1,5 +1,5 @@
 import type { Quat, SceneDoc, SceneTransform, SceneView } from '@vis/protocol'
-import { applySceneTransform, buildScene, BUILTIN_BODIES, clampJointRotation, createSceneCamera, DEFAULT_SCENE_CAMERA, disposeScene, type BuiltScene } from '@vis/scene-core'
+import { applyBodyPose, applySceneTransform, buildScene, BUILTIN_BODIES, clampJointRotation, createSceneCamera, DEFAULT_SCENE_CAMERA, disposeScene, type BuiltScene } from '@vis/scene-core'
 import { useMessages } from '@vis/ui-kit'
 import { useEffect, useRef } from 'react'
 import {
@@ -9,6 +9,7 @@ import {
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+import { createProposalOutlines } from './proposal-outlines'
 import { sceneMessages } from './messages'
 import { loadSceneModel } from './model-loader'
 import type { SceneViewportController } from './types'
@@ -19,6 +20,7 @@ export type SceneViewportProps = {
   controller: SceneViewportController
   doc: SceneDoc
   assetUrl(id: string): string
+  outlinedIds?: readonly string[] | undefined
   disabled?: boolean
   onBeginEdit?(): void
   onTransform(id: string, transform: SceneTransform): void
@@ -26,6 +28,10 @@ export type SceneViewportProps = {
   onCameraChange(viewId: string, camera: SceneView['camera']): void
 }
 
+// Everything that shapes the stage except placement and pose, which can change in place without a rebuild.
+// Placement, visibility, poses and motion keys change without new geometry; playback samples them every frame.
+const structure = (objects: SceneDoc['objects']) => JSON.stringify(objects.map(({ id, source }) =>
+  ({ id, source: source.type === 'figure' ? { ...source, pose: {} } : source })))
 const readTransform = (object: Object3D): SceneTransform => ({
   position: object.position.toArray(), rotation: object.quaternion.toArray(), scale: object.scale.toArray(),
 })
@@ -76,6 +82,8 @@ export function SceneViewport(props: SceneViewportProps) {
     let frame = 0
     let built: BuiltScene | null = null
     let doc = latest.current.doc
+    // The structure of the document the current stage was built from, kept beside `built` so updates compare one side.
+    let builtStructure = ''
     let width = 1
     let height = 1
     let viewSignature = ''
@@ -84,6 +92,7 @@ export function SceneViewport(props: SceneViewportProps) {
     const helpers = new Scene()
     const grid = new GridHelper(100, 100)
     helpers.add(grid)
+    const outlines = createProposalOutlines(helpers, () => new Color(getComputedStyle(element).getPropertyValue('--vis-accent').trim()))
     const jointHelpers = new Group()
     helpers.add(jointHelpers)
     const jointGeometry = new SphereGeometry(1, 10, 8)
@@ -105,6 +114,8 @@ export function SceneViewport(props: SceneViewportProps) {
     let dragStart: { id: string; jointId: string | null; object: Object3D; transform: SceneTransform } | null = null
     let navigationStart = ''
     let pointerStart: { x: number; y: number; gizmo: boolean } | null = null
+    // Whether the gizmo gesture begun by the current press wrote a change.
+    let gestureCommitted = false
     let captureInFlight = false
     let background = new Color()
 
@@ -137,6 +148,7 @@ export function SceneViewport(props: SceneViewportProps) {
       frame = 0
       if (dead || contextLost || !built) return
       syncJoints()
+      outlines.update(latest.current.outlinedIds ?? [], built.objects)
       const rect = viewport()
       renderer.setRenderTarget(null)
       renderer.setViewport(0, 0, width, height)
@@ -269,11 +281,30 @@ export function SceneViewport(props: SceneViewportProps) {
       const signature = JSON.stringify({
         objects: doc.objects.map(({ createdBy, userTouched, ...object }) => object),
       })
+      const shape = structure(doc.objects)
       const state = controller.getSnapshot()
       if (!doc.objects.some(object => object.id === state.selectedId)) controller.select(null)
       if (!doc.views.some(view => view.id === state.viewId)) controller.setView(doc.views[0]?.id ?? null)
       if (!doc.views.length && controller.getSnapshot().mode === 'camera') controller.setMode('orbit')
       if (built && signature === buildSignature && state.status === 'ready') { buildVersion++; rebuilding = false; applyState(); return }
+      // A held arrow key changes placement about 30 times a second. A gizmo grab, a forced rebuild or one in flight
+      // keeps the rebuild path, so cancelling and resynchronising behave as before.
+      if (built && state.status === 'ready' && !rebuilding && !dragStart && buildSignature && shape === builtStructure) {
+        // Every placement and pose is set the way buildScene sets it, so the stage matches a rebuild even after a stray gizmo sample.
+        for (const object of doc.objects) {
+          applySceneTransform(built.objects.get(object.id)!, object.transform)
+          built.objects.get(object.id)!.visible = !object.hidden
+          const source = object.source
+          const body = source.type === 'figure' ? BUILTIN_BODIES.find(body => body.id === source.bodyId) : undefined
+          const joints = built.joints.get(object.id)
+          if (source.type === 'figure' && body && joints) applyBodyPose(joints, body, source.pose)
+        }
+        built.scene.updateMatrixWorld(true)
+        buildSignature = signature
+        buildVersion++
+        applyState()
+        return
+      }
       const version = ++buildVersion
       rebuilding = true
       cancelTransform()
@@ -284,6 +315,7 @@ export function SceneViewport(props: SceneViewportProps) {
         transform.detach()
         if (built) disposeScene(built.scene)
         built = next
+        builtStructure = shape
         buildSignature = signature
         rebuilding = false
         next.scene.background = background.clone()
@@ -430,6 +462,7 @@ export function SceneViewport(props: SceneViewportProps) {
       if (JSON.stringify(start.transform) === JSON.stringify(next)) return
       // The gizmo moved the built object in place, so the stage no longer matches the document it was built from.
       buildSignature = ''
+      gestureCommitted = true
       if (start.jointId) latest.current.onJointRotation(start.id, start.jointId, next.rotation)
       else latest.current.onTransform(start.id, next)
     }
@@ -450,19 +483,28 @@ export function SceneViewport(props: SceneViewportProps) {
       navigationStart = ''
     }
     const pointerDown = (event: PointerEvent) => {
-      if (event.button === 0) pointerStart = { x: event.clientX, y: event.clientY, gizmo: Boolean(transform.axis) || transform.dragging }
+      if (event.button !== 0) return
+      pointerStart = { x: event.clientX, y: event.clientY, gizmo: Boolean(transform.axis) || transform.dragging }
+      gestureCommitted = false
     }
     const pointerUp = (event: PointerEvent) => {
       const start = pointerStart
       pointerStart = null
-      if (!start || event.button !== 0 || start.gizmo || transform.dragging || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4 || !built) return
+      if (!start || event.button !== 0 || transform.dragging || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4 || !built) return
+      // TransformControls connected in its constructor, before this listener, so a gizmo release has already gone through
+      // endTransform here. Were the order reversed, `transform.dragging` would still be set above and the press would
+      // never reach the markers, so a gesture still cannot both commit and reselect.
+      if (start.gizmo && gestureCommitted) return
       const rect = interaction.getBoundingClientRect()
       if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return
       const pointer = new Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1)
       raycaster.setFromCamera(pointer, camera)
       syncJoints()
       const marker = raycaster.intersectObjects(jointHelpers.children, false)[0]?.object
+      // A knee sits about one ring radius from the hip or the figure root, so its marker lies under the rotate gizmo's
+      // pick area. A gizmo press that committed nothing was a click, so the marker under it wins.
       if (marker) { controller.selectJoint(marker.userData.jointId as string); return }
+      if (start.gizmo) return
       const candidates = [...built.objects.values()].filter(object => object.visible)
       const hit = raycaster.intersectObjects(candidates, true).find(hit => {
         let object: Object3D | null = hit.object
@@ -549,6 +591,7 @@ export function SceneViewport(props: SceneViewportProps) {
       transform.dispose()
       orbit.dispose()
       if (built) disposeScene(built.scene)
+      outlines.dispose()
       helpers.remove(jointHelpers)
       jointHelpers.clear()
       jointGeometry.dispose()
@@ -566,7 +609,7 @@ export function SceneViewport(props: SceneViewportProps) {
     }
   }, [props.controller])
   useEffect(() => { runtime.current?.updateDoc(props.doc) }, [props.doc, props.controller])
-  useEffect(() => { runtime.current?.updateInteraction() }, [props.disabled])
+  useEffect(() => { runtime.current?.updateInteraction() }, [props.disabled, props.outlinedIds])
 
   return <div className="vis-sc-viewport">
     <div ref={container} className="vis-sc-surface" role="img" aria-label={m.viewport} tabIndex={0} />

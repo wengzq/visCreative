@@ -1,6 +1,6 @@
 // space.db schema; see docs/rfc/0002-sqlite-storage.md. Run `pnpm --filter @vis/storage db:generate` after schema changes.
 import { sql } from 'drizzle-orm'
-import type { TextProposalEdit, PrevizDoc, SceneDoc, AssetLabelField, BatchView, EntityKind, EntityMemberRole, EntityProposalInput, EntityRef, FrameView, GenerationOperation, LocalOperation, MediaTaskView, NodeGeneration, ScriptDoc, ShotLink, ExportOf, TimelineDoc, WorkActor, WorkMessageFrom, WorkRefs } from '@vis/protocol'
+import type { SceneChange, TextProposalEdit, PrevizDoc, SceneDoc, AssetLabelField, BatchView, EntityKind, EntityMemberRole, EntityProposalInput, EntityRef, FrameView, GenerationOperation, LocalOperation, MediaTaskView, NodeGeneration, ScriptDoc, ShotLink, ExportOf, TimelineDoc, WorkActor, WorkMessageFrom, WorkRefs } from '@vis/protocol'
 import {
   type AnySQLiteColumn,
   check,
@@ -570,3 +570,16 @@ export const textProposals = sqliteTable('text_proposals', {
   status: text('status', { enum: ['open', 'resolved'] }).notNull(),
   createdAt: integer('created_at').notNull(),
 }, t => [index('text_proposals_slot_status').on(t.slotId, t.status)])
+
+
+// -- Scene change proposals (0044) ----------------------------------
+export const sceneProposals = sqliteTable('scene_proposals', {
+  id: text('id').primaryKey(),
+  slotId: text('slot_id').notNull().references(() => slots.id),
+  sessionId: text('session_id').notNull().references(() => sessions.id),
+  baseRevision: integer('base_revision').notNull(),
+  summary: text('summary').notNull(),
+  changes: text('changes', { mode: 'json' }).$type<SceneChange[]>().notNull(),
+  status: text('status', { enum: ['open', 'resolved'] }).notNull(),
+  createdAt: integer('created_at').notNull(),
+}, t => [index('scene_proposals_slot_status').on(t.slotId, t.status), index('scene_proposals_status_slot').on(t.status, t.slotId)])

@@ -7,7 +7,7 @@ import { createSceneViewportController, viewportBinding } from './viewport-state
 
 const initial: SceneDoc = {
   ...EMPTY_SCENE, rev: 60,
-  views: [{ id: 'wide', name: 'Wide', aspectRatio: '16:9', still: null, camera: { position: [3, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 } }],
+  views: [{ id: 'wide', name: 'Wide', aspectRatio: '16:9', still: null, createdBy: 'user', userTouched: false, camera: { position: [3, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 } }],
 }
 const node = (doc: SceneDoc, revision: number): NodeView => ({
   nodeId: 'scene', kind: 'scene', x: 0, y: 0, w: 360, h: 280, z: 1, layoutRevision: 1,
@@ -17,7 +17,7 @@ function setup(doc = initial) {
   const host: SceneEditorHost = {
     node: node(doc, 7), nodes: [], assetUrl: id => id,
     upload: vi.fn(async () => 'picture'), importModel: vi.fn(), listModels: vi.fn(),
-    commit: vi.fn(async () => 'ok' as const), saveImage: vi.fn(), sendToPanel: vi.fn(), onClose: vi.fn(),
+    commit: vi.fn(async () => 'ok' as const), saveImage: vi.fn(), renderVideo: vi.fn(), sendToPanel: vi.fn(), onClose: vi.fn(),
   }
   const draft = createSceneDraft(host)
   const controller = createSceneViewportController(host)

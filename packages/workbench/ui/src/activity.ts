@@ -43,6 +43,7 @@ export function transcriptNotice(payload: { code?: string; message?: string; rea
     return describeError({ message, data: { reason: payload.reason, params } }, locale)
   }
   if (payload?.code === 'send_now_dispatch_unknown') return messagesFor(sessionMessages, locale).noticeSendNowUnknown
+  if (payload?.code === 'agent_inactive') return messagesFor(sessionMessages, locale).noticeAgentInactive
   if (locale === 'en') {
     const m = messagesFor(sessionMessages, locale)
     const notices: Record<string, string> = {

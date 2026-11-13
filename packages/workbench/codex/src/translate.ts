@@ -1,4 +1,4 @@
-import { skillReceipt, truncateReasoning } from '@vis/workbench-core'
+import { toolReceipts, truncateReasoning } from '@vis/workbench-core'
 
 export type TranslatedItem = {
   itemId: string
@@ -18,7 +18,7 @@ export function translate(phase: 'started' | 'completed', codexTurnId: string, i
   if (!item || typeof item.id !== 'string') return []
   const base = `cx:${codexTurnId}:${item.id}`
   const call = (name: string, input: unknown): TranslatedItem => ({ itemId: `${base}:call`, revision: 1, kind: 'tool_call', payload: { toolUseId: item.id, name, input } })
-  const result = (isError: boolean, text: string): TranslatedItem => ({ itemId: `${base}:result`, revision: 1, kind: 'tool_result', payload: { toolUseId: item.id, isError, text: truncate(text), ...(!isError ? skillReceipt(text) : {}) } })
+  const result = (isError: boolean, text: string): TranslatedItem => ({ itemId: `${base}:result`, revision: 1, kind: 'tool_result', payload: { toolUseId: item.id, isError, text: truncate(text), ...(!isError ? toolReceipts(text) : {}) } })
 
   switch (item.type) {
     case 'reasoning': {
@@ -48,6 +48,13 @@ export function translate(phase: 'started' | 'completed', codexTurnId: string, i
       }
       return items
     }
+    case 'webSearch': {
+      // Without these entries a claim that a page was unavailable cannot be checked (RFC 0048).
+      const action = item.action && typeof item.action === 'object' ? item.action : undefined
+      const items = [call('web_search', { query: item.query ?? '', ...(action ? { action } : {}) })]
+      if (phase === 'completed') items.push(result(false, webSearchText(item.query, action)))
+      return items
+    }
     default:
       return []
   }
@@ -56,6 +63,13 @@ export function translate(phase: 'started' | 'completed', codexTurnId: string, i
 function contentText(content: unknown): string {
   if (!Array.isArray(content)) return ''
   return content.map(c => (c && typeof c === 'object' && typeof c.text === 'string' ? c.text : c?.type === 'image' ? '[图片]' : '')).join('\n')
+}
+
+function webSearchText(query: unknown, action: any): string {
+  if (action?.type === 'openPage' && typeof action.url === 'string') return `openPage ${action.url}`
+  if (action?.type === 'findInPage') return `findInPage ${[action.url, action.pattern].filter(value => typeof value === 'string').join(' ')}`
+  const queries = Array.isArray(action?.queries) ? action.queries.filter((value: unknown) => typeof value === 'string') : []
+  return `search ${queries.length ? queries.join(' | ') : typeof action?.query === 'string' ? action.query : String(query ?? '')}`
 }
 
 function truncate(text: string): string {

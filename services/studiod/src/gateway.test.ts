@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { newId, VisError } from '@vis/domain'
 import { createFfmpegMedia, type MediaTools } from '@vis/assets'
 import { createMockProvider } from '@vis/generation'
-import { EMPTY_PREVIZ, EMPTY_SCENE, emptyPrevizPanel, GuideTopic, METHODS, PROTOCOL_VERSION, type AgentModelOption, type CanvasOp, type SceneDoc, type SceneObject, type TransientEvent } from '@vis/protocol'
+import { EMPTY_PREVIZ, EMPTY_SCENE, emptyPrevizPanel, GuideTopic, METHODS, PROTOCOL_VERSION, type AgentModelOption, type CanvasOp, type SceneDoc, type SceneObject, type SceneView, type TransientEvent } from '@vis/protocol'
 import { appSchema, openAppDb, currentSeq, eq, spaceSchema as s } from '@vis/storage'
 import type { AgentEvent, DispatchInput, RequestApproval } from '@vis/workbench-core'
 import { issueAgentToken } from './auth'
@@ -149,6 +149,168 @@ const until = async (check: () => boolean, ms = 2000) => {
 
 let req = 0
 const rid = () => `req_${++req}`
+
+describe('agent media purpose permissions', () => {
+  async function callers() {
+    const c = await ui()
+    await c.call('events.subscribe', { spaceId })
+    const { sessionId } = await c.call('session.create', { requestId: rid() })
+    await c.call('session.sendMessage', { requestId: rid(), sessionId, text: 'Prepare media', refs: [] })
+    await until(() => dispatched.some(turn => turn.sessionId === sessionId))
+    const a = await agent(dispatched.find(turn => turn.sessionId === sessionId)!.token)
+    return { c, a, sessionId, host: studiod.spaces.get(spaceId)! }
+  }
+
+  it.each(['image', 'video', 'audio'] as const)('refuses agent creation of a working %s without writing any part of the batch', async kind => {
+    const { c, a, host } = await callers()
+    try {
+      const before = host.canvas.get({})
+      const seq = currentSeq(host.db)
+      const operations = host.db.select().from(s.operations).all()
+      const slots = host.db.select().from(s.slots).all()
+      const requests = host.db.select().from(s.idempotencyKeys).all()
+      await expect(a.call('canvas.apply', { requestId: rid(), ops: [
+        { op: 'node.create', tempId: 'notes', kind: 'text', purpose: 'working' },
+        { op: 'node.create', tempId: 'media', kind, purpose: 'working' },
+      ] })).rejects.toMatchObject({
+        code: 'forbidden', message: expect.stringContaining('Leave purpose unset (artifact) for media'),
+        rpc: { data: { reason: 'canvas.working_media_forbidden', params: { tempId: 'media' } } },
+      })
+      expect(host.canvas.get({})).toEqual(before)
+      expect(currentSeq(host.db)).toBe(seq)
+      expect(host.db.select().from(s.operations).all()).toEqual(operations)
+      expect(host.db.select().from(s.slots).all()).toEqual(slots)
+      expect(host.db.select().from(s.idempotencyKeys).all()).toEqual(requests)
+    } finally { a.close(); c.close() }
+  })
+
+  it('allows agents to create working text, script and timeline documents', async () => {
+    const { c, a, host } = await callers()
+    try {
+      const result = await a.call('canvas.apply', { requestId: rid(), ops: ['text', 'script', 'timeline'].map(kind => ({ op: 'node.create', tempId: kind, kind, purpose: 'working' })) })
+      const nodes = host.canvas.get({ nodeIds: Object.values(result.idMap) }).nodes
+      expect(nodes).toHaveLength(3)
+      expect(nodes.every(node => node.purpose === 'working')).toBe(true)
+    } finally { a.close(); c.close() }
+  })
+
+  it.each(['image', 'video', 'audio'] as const)('allows agent metadata that keeps an already-working %s working', async kind => {
+    const { c, a, host } = await callers()
+    try {
+      const result = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', tempId: 'media', kind, purpose: 'working' }] })
+      const nodeId = result.idMap.media
+      await a.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.setMeta', nodeId, purpose: 'working', title: 'Author working media' }] })
+      expect(host.canvas.get({}).nodes[0]).toMatchObject({ nodeId, purpose: 'working', title: 'Author working media' })
+    } finally { a.close(); c.close() }
+  })
+
+  it('refuses re-hiding initially working media after promoting it within the batch', async () => {
+    const { c, a, host } = await callers()
+    try {
+      const result = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', tempId: 'media', kind: 'video', purpose: 'working' }] })
+      const nodeId = result.idMap.media
+      const before = host.canvas.get({})
+      const seq = currentSeq(host.db)
+      await expect(a.call('canvas.apply', { requestId: rid(), ops: [
+        { op: 'node.setMeta', nodeId, purpose: 'artifact' },
+        { op: 'node.setMeta', nodeId, purpose: 'working' },
+      ] })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'canvas.working_media_forbidden', params: { nodeId } } } })
+      expect(host.canvas.get({})).toEqual(before)
+      expect(currentSeq(host.db)).toBe(seq)
+    } finally { a.close(); c.close() }
+  })
+
+  it.each(['node.create', 'node.setMeta'] as const)('replays a legacy working-media %s result before applying new permission checks', async op => {
+    const { c, a, sessionId, host } = await callers()
+    try {
+      const created = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', tempId: 'existing', kind: 'video' }] })
+      const params = METHODS['canvas.apply'].params.parse({ requestId: rid(), ops: [op === 'node.create'
+        ? { op, tempId: 'legacy', kind: 'video', purpose: 'working' }
+        : { op, nodeId: created.idMap.existing, purpose: 'working' }] })
+      // Seed the persisted result through the trusted core, as an Agent could before the gateway policy existed.
+      const original = host.canvas.apply({ kind: 'agent', sessionId }, params)
+      const nodeId = op === 'node.create' ? original.idMap.legacy! : created.idMap.existing
+      await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.setMeta', nodeId, purpose: 'artifact' }] })
+      const before = host.canvas.get({})
+      const seq = currentSeq(host.db)
+      expect(await a.call('canvas.apply', params)).toEqual(original)
+      await expect(a.call('canvas.apply', { ...params, description: 'Different request content' })).rejects.toMatchObject({ code: 'idempotency_conflict' })
+      await expect(a.call('canvas.apply', { ...params, requestId: rid() })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'canvas.working_media_forbidden' } } })
+      expect(host.canvas.get({})).toEqual(before)
+      expect(currentSeq(host.db)).toBe(seq)
+    } finally { a.close(); c.close() }
+  })
+
+  it.each(['image', 'video', 'audio'] as const)('refuses agent working metadata on an existing %s atomically', async kind => {
+    const { c, a, host } = await callers()
+    try {
+      const result = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', tempId: 'media', kind }] })
+      const nodeId = result.idMap.media
+      const before = host.canvas.get({})
+      const seq = currentSeq(host.db)
+      await expect(a.call('canvas.apply', { requestId: rid(), ops: [
+        { op: 'node.layout', nodeId, x: 5000 },
+        { op: 'node.setMeta', nodeId, purpose: 'working' },
+      ] })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'canvas.working_media_forbidden', params: { nodeId } } } })
+      expect(host.canvas.get({})).toEqual(before)
+      expect(currentSeq(host.db)).toBe(seq)
+    } finally { a.close(); c.close() }
+  })
+
+  it('refuses working media in a batch that also takes the scene write path', async () => {
+    const { c, a, host } = await callers()
+    try {
+      const result = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', tempId: 'media', kind: 'image' }, { op: 'node.create', tempId: 'note', kind: 'text' }] })
+      const before = host.canvas.get({})
+      const seq = currentSeq(host.db)
+      // node.delete routes the batch through the scene checks, which must not skip the media guard.
+      await expect(a.call('canvas.apply', { requestId: rid(), ops: [
+        { op: 'node.delete', nodeId: result.idMap.note },
+        { op: 'node.setMeta', nodeId: result.idMap.media, purpose: 'working' },
+      ] })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'canvas.working_media_forbidden', params: { nodeId: result.idMap.media } } } })
+      expect(host.canvas.get({})).toEqual(before)
+      expect(currentSeq(host.db)).toBe(seq)
+    } finally { a.close(); c.close() }
+  })
+
+  it.each(['image', 'video', 'audio'] as const)('refuses working metadata through a new %s tempId', async kind => {
+    const { c, a, host } = await callers()
+    try {
+      const seq = currentSeq(host.db)
+      await expect(a.call('canvas.apply', { requestId: rid(), ops: [
+        { op: 'node.create', tempId: 'media', kind },
+        { op: 'node.setMeta', nodeId: 'media', purpose: 'working' },
+        { op: 'node.setMeta', nodeId: 'media', purpose: 'artifact' },
+      ] })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'canvas.working_media_forbidden', params: { nodeId: 'media' } } } })
+      expect(host.canvas.get({}).nodes).toEqual([])
+      expect(currentSeq(host.db)).toBe(seq)
+    } finally { a.close(); c.close() }
+  })
+
+  it('preserves author choices to create and mark media as working documents', async () => {
+    const { c, a, host } = await callers()
+    try {
+      const result = await c.call('canvas.apply', { requestId: rid(), ops: ['image', 'video', 'audio'].map(kind => ({ op: 'node.create', tempId: kind, kind, purpose: 'working' })) })
+      expect(host.canvas.get({}).nodes.every(node => node.purpose === 'working')).toBe(true)
+      for (const purpose of ['artifact', 'working']) {
+        await c.call('canvas.apply', { requestId: rid(), ops: Object.values(result.idMap).map(nodeId => ({ op: 'node.setMeta', nodeId, purpose })) })
+        expect(host.canvas.get({}).nodes.every(node => node.purpose === purpose)).toBe(true)
+      }
+    } finally { a.close(); c.close() }
+  })
+
+  it('allows agents to restore a working video to artifact and leaves other author metadata intact', async () => {
+    const { c, a, host } = await callers()
+    try {
+      const result = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', tempId: 'video', kind: 'video', purpose: 'working' }] })
+      const nodeId = result.idMap.video
+      await a.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.setMeta', nodeId, title: 'Video draft' }] })
+      expect(host.canvas.get({}).nodes[0]!.purpose).toBe('working')
+      await a.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.setMeta', nodeId, purpose: 'artifact' }] })
+      expect(host.canvas.get({}).nodes[0]).toMatchObject({ purpose: 'artifact', title: 'Video draft' })
+    } finally { a.close(); c.close() }
+  })
+})
 
 it('records streaming and authenticated gateway activity for the bound turn, and fences writes after a forced end', async () => {
   const c = await ui()
@@ -532,15 +694,15 @@ describe('Local media gateway', () => {
   it('delivers a mock generation operation to a connected new node with its operation in the view', async () => {
     const { c, host, params, node } = await setupMedia()
     const job = await c.call('generation.submit', {
-      requestId: rid(), kind: 'image', operation: 'image.upscale', prompt: `Use {{ref:${node.nodeId}}}`, inputs: [{ slotId: params.slotId }], params: { width: 64, height: 64 },
+      requestId: rid(), kind: 'image', operation: 'image.outpaint', prompt: `Use {{ref:${node.nodeId}}}`, inputs: [{ slotId: params.slotId }], params: { ratio: '16:9' },
     })
-    expect(job.bindings[0].target).toEqual({ kind: 'new_node', nearNodeId: node.nodeId })
+    expect(job.bindings[0].target).toEqual({ kind: 'new_node', nearNodeId: node.nodeId, nodeId: expect.any(String), slotId: expect.any(String) })
     let result = await c.call('generation.get', { jobId: job.jobId })
     await expect.poll(async () => {
       result = await c.call('generation.get', { jobId: job.jobId, waitMs: 1000 })
       return result.status
     }, { timeout: 10_000 }).toBe('succeeded')
-    expect(result.operation).toBe('image.upscale')
+    expect(result.operation).toBe('image.outpaint')
     expect(host.canvas.get({ nodeIds: [result.outputs[0].delivery.nodeId] }).nodes[0]!.inputs).toEqual([node.nodeId])
     expect(host.canvas.get({ nodeIds: [node.nodeId] }).nodes[0]!.slots[0]!.revision).toBe(1)
     const history = await c.call('slot.history', { slotId: result.outputs[0].delivery.slotId })
@@ -2131,44 +2293,277 @@ it('0015: UI can change approval mode and parent items, Agents cannot; public at
   } finally { c.close() }
 })
 
-it('allows Agent scene reads and refuses every scene write path atomically across operation batches', async () => {
+it('allows only the UI to create or restore a prompt slot and rejects agent batches atomically', async () => {
   const c = await ui()
   await c.call('events.subscribe', { spaceId })
   const host = studiod.spaces.get(spaceId)!
-  const created = await c.call('canvas.apply', { requestId: rid(), ops: [
-    { op: 'node.create', kind: 'scene', tempId: 'stage' },
-    { op: 'node.create', kind: 'image', tempId: 'picture' },
-  ] })
-  const nodeId = created.idMap.stage
-  const pictureId = created.idMap.picture
-  const slot = host.canvas.get({ nodeIds: [nodeId] }).nodes[0]!.slots[0]!
+  const { idMap } = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', tempId: 'legacy', kind: 'image' }] })
   const session = await c.call('session.create', { requestId: rid() })
-  await c.call('session.sendMessage', { requestId: rid(), sessionId: session.sessionId, text: 'Read the scene', refs: [] })
+  await c.call('session.sendMessage', { requestId: rid(), sessionId: session.sessionId, text: 'Inspect provenance', refs: [] })
   await until(() => dispatched.length === 1)
   const a = await agent(dispatched[0]!.token)
   try {
-    expect((await a.call('canvas.get', { nodeIds: [nodeId] })).nodes[0].slots[0].content).toEqual({ type: 'scene', doc: EMPTY_SCENE })
-    const set: CanvasOp = { op: 'scene.set', slotId: slot.slotId, expectedRevision: 1, doc: EMPTY_SCENE }
-    const remove: CanvasOp = { op: 'node.delete', nodeId }
-    const batches: CanvasOp[][] = [
-      [set], [remove], [{ op: 'node.create', kind: 'scene', tempId: 'fresh' }],
-      [{ op: 'node.layout', nodeId, x: 200 }, set],
-      [{ op: 'node.setMeta', nodeId, title: 'Changed' }, remove],
-      [{ op: 'node.delete', nodeId: pictureId }, set],
-      [remove, { op: 'node.create', kind: 'image', tempId: nodeId }],
-      [{ op: 'node.create', kind: 'image', tempId: nodeId }, remove],
-      [{ op: 'node.create', kind: 'scene', tempId: 'fresh' }, { op: 'scene.set', slotId: 'fresh:main', expectedRevision: 1, doc: EMPTY_SCENE }],
-      [{ op: 'node.create', kind: 'scene', tempId: 'fresh' }, { op: 'node.delete', nodeId: 'fresh' }],
-    ]
-    for (const ops of batches) {
-      const seq = currentSeq(host.db)
-      await expect(a.call('canvas.apply', { requestId: rid(), ops })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'scene.user_only' } } })
-      expect(currentSeq(host.db)).toBe(seq)
-    }
-    expect(host.canvas.get({ nodeIds: [nodeId, pictureId] }).nodes).toHaveLength(2)
-    expect(host.canvas.get({ nodeIds: [nodeId] }).nodes[0]).toMatchObject({ title: null, slots: [{ revision: 1 }] })
-    await expect(a.call('model.list', {})).rejects.toMatchObject({ code: 'forbidden' })
+    const seq = currentSeq(host.db)
+    const op = { op: 'node.setPrompt', nodeId: idMap.legacy, body: 'Restored {{ref:source}}', expectedRevision: 0 }
+    await expect(a.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.layout', nodeId: idMap.legacy, x: 900 }, op] })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'runtime.caller_forbidden' } } })
+    expect(currentSeq(host.db)).toBe(seq)
+    await c.call('canvas.apply', { requestId: rid(), ops: [op] })
+    const prompt = host.canvas.get({ nodeIds: [idMap.legacy] }).nodes[0]!.slots.find(slot => slot.slotKey === 'prompt')!
+    expect(prompt.content).toEqual({ type: 'text', body: op.body })
+    await expect(a.call('canvas.apply', { requestId: rid(), ops: [{ ...op, expectedRevision: prompt.revision }] })).rejects.toMatchObject({ code: 'forbidden' })
+    expect(host.canvas.get({ nodeIds: [idMap.legacy] }).nodes[0]!.slots.find(slot => slot.slotKey === 'prompt')).toEqual(prompt)
   } finally { a.close(); c.close() }
+})
+
+describe('Agent scene gateway permissions', () => {
+  const object = (fields: Partial<SceneObject> = {}): SceneObject => ({
+    id: 'figure', name: 'Figure', hidden: false, createdBy: 'agent', userTouched: false,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+    source: { type: 'figure', bodyId: 'human', heightM: 1.8, pose: {} }, ...fields,
+  })
+  const view = (fields: Partial<SceneView> = {}): SceneView => ({
+    id: 'wide', name: 'Wide', camera: { position: [0, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 },
+    aspectRatio: '16:9', still: null, createdBy: 'agent', userTouched: false, ...fields,
+  })
+  async function setup(doc: SceneDoc = EMPTY_SCENE) {
+    const c = await ui()
+    await c.call('events.subscribe', { spaceId })
+    const host = studiod.spaces.get(spaceId)!
+    const created = await c.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', kind: 'scene', tempId: 'stage' }] })
+    const nodeId = created.idMap.stage as string
+    const main = () => host.canvas.get({ nodeIds: [nodeId] }).nodes[0]!.slots[0]!
+    // Seed historical ownership through the trusted service, then exercise all writes through RPC.
+    host.canvas.apply({ kind: 'user' }, { requestId: rid(), ops: [{ op: 'scene.set', slotId: main().slotId, expectedRevision: 1, doc }] })
+    const session = await c.call('session.create', { requestId: rid() })
+    await c.call('session.sendMessage', { requestId: rid(), sessionId: session.sessionId, text: 'Work on the stage', refs: [] })
+    await until(() => dispatched.length === 1)
+    const a = await agent(dispatched[0]!.token)
+    const set = (next: SceneDoc): CanvasOp => ({ op: 'scene.set', slotId: main().slotId, expectedRevision: main().revision, doc: next })
+    const write = (next: SceneDoc, caller = a) => caller.call('canvas.apply', { requestId: rid(), ops: [set(next)] })
+    const refuse = async (ops: CanvasOp[], reason: string, params = {}, hint?: string) => {
+      const seq = currentSeq(host.db)
+      const before = host.canvas.get({})
+      await expect(a.call('canvas.apply', { requestId: rid(), ops })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason, params, ...(hint === undefined ? {} : { hint }) } } })
+      expect(currentSeq(host.db)).toBe(seq)
+      expect(host.canvas.get({})).toEqual(before)
+    }
+    return { c, a, host, nodeId, session, main, set, write, refuse, close() { a.close(); c.close() } }
+  }
+
+  it('offers protected proposals while keeping resolution UI-only under auto approval and checking session write gates', async () => {
+    const f = await setup({ ...EMPTY_SCENE, objects: [object({ userTouched: true })] })
+    try {
+      const { createdBy: _createdBy, userTouched: _userTouched, ...content } = object()
+      const params = { requestId: rid(), slotId: f.main().slotId, baseRevision: f.main().revision, summary: 'Move the figure', changes: [{ target: 'object', id: content.id, action: 'update', item: { ...content, name: 'Moved' } }] }
+      const before = f.main().content
+      const proposal = await f.a.call('scene.propose', params)
+      expect(proposal.sessionId).toBe(f.session.sessionId)
+      expect(f.main().content).toEqual(before)
+      expect((await f.a.call('scene.proposal.list', {})).proposals).toEqual([proposal])
+      f.host.db.update(s.sessions).set({ approvalMode: 'auto' }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      const resolve = { requestId: rid(), slotId: params.slotId, action: 'accept', expectedRevision: f.main().revision, changes: proposal.changes.map((change: any) => ({ proposalId: proposal.proposalId, changeId: change.changeId })) }
+      await expect(f.a.call('scene.proposal.resolve', resolve)).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'runtime.caller_forbidden' } } })
+      expect(f.main().content).toEqual(before)
+      expect((await f.c.call('scene.proposal.resolve', resolve)).revision).toBe(params.baseRevision + 1)
+      expect(f.main().content).toMatchObject({ type: 'scene', doc: { objects: [{ name: 'Moved', userTouched: true }] } })
+      await expect(f.a.call('canvas.apply', { requestId: rid(), ops: [f.set({ ...EMPTY_SCENE, objects: [object()] })] })).rejects.toMatchObject({ rpc: { data: { reason: 'scene.object_protected', hint: expect.stringContaining('scene.propose') } } })
+      const blocked = async (reason: string) => {
+        await expect(f.a.call('scene.propose', { ...params, requestId: rid(), baseRevision: f.main().revision })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason } } })
+      }
+      f.host.db.update(s.sessions).set({ workItemId: null }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      await blocked('runtime.work_item_required')
+      f.host.db.update(s.sessions).set({ workItemId: f.session.workItemId }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      f.host.db.update(s.workItems).set({ status: 'todo' }).where(eq(s.workItems.id, f.session.workItemId)).run()
+      await blocked('work.execution_forbidden')
+      f.host.db.update(s.workItems).set({ status: 'in_progress' }).where(eq(s.workItems.id, f.session.workItemId)).run()
+      f.host.db.update(s.sessions).set({ archivedAt: Date.now() }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      await blocked('runtime.session_inactive')
+    } finally { f.close() }
+  })
+
+  it('creates scenes in temp-slot batches, stamps Agent additions and discards forged stills and metadata', async () => {
+    const f = await setup()
+    try {
+      expect((await f.a.call('canvas.get', { nodeIds: [f.nodeId] })).nodes[0].slots[0].content).toEqual({ type: 'scene', doc: EMPTY_SCENE })
+      const doc: SceneDoc = { ...EMPTY_SCENE, objects: [object({ createdBy: 'user', userTouched: true })], views: [view({ createdBy: 'user', userTouched: true, still: 'nonexistent-forged-still' })] }
+      const params = { requestId: rid(), ops: [
+        { op: 'node.create', kind: 'scene', tempId: 'fresh' },
+        { op: 'scene.set', slotId: 'fresh:main', expectedRevision: 1, doc },
+      ] }
+      const created = await f.a.call('canvas.apply', params)
+      expect(await f.a.call('canvas.apply', params)).toEqual(created)
+      expect(f.host.canvas.get({ nodeIds: [created.idMap.fresh] }).nodes[0]!.slots[0]!.content).toEqual({ type: 'scene', doc: { ...EMPTY_SCENE, objects: [object()], views: [view()] } })
+      await f.write(doc)
+      expect(f.main().content).toEqual({ type: 'scene', doc: { ...EMPTY_SCENE, objects: [object()], views: [view()] } })
+      await expect(f.a.call('model.list', {})).rejects.toMatchObject({ code: 'forbidden' })
+    } finally { f.close() }
+  })
+
+  it('replays original scene requests after later author edits without recomputing stamps or overwriting work', async () => {
+    const f = await setup({ ...EMPTY_SCENE, objects: [object()], views: [view()] })
+    try {
+      const params = { requestId: rid(), ops: [f.set({ ...EMPTY_SCENE, objects: [object({ name: 'Agent revision', createdBy: 'user', userTouched: true })], views: [view({ still: 'forged' })] })] }
+      const written = await f.a.call('canvas.apply', params)
+      const still = f.host.assets.registerVersion(f.host.db, { staged: await f.host.assets.stageBytes(Buffer.from('saved frame')), kind: 'image', mime: 'image/png', origin: 'import' }).assetVersionId
+      const authorParams = { requestId: rid(), ops: [f.set({ ...EMPTY_SCENE, objects: [object({ name: 'Author revision' })], views: [view({ still })] })] }
+      const authorWrite = await f.c.call('canvas.apply', authorParams)
+      const saved = f.main()
+      expect(await f.a.call('canvas.apply', params)).toEqual(written)
+      expect(f.main()).toEqual(saved)
+      await expect(f.a.call('canvas.apply', { ...params, ops: [f.set(EMPTY_SCENE)] })).rejects.toMatchObject({ code: 'idempotency_conflict' })
+      await f.write({ ...EMPTY_SCENE, objects: [object({ name: 'Later author revision' })], views: [view({ still })] }, f.c)
+      const later = f.main()
+      expect(await f.c.call('canvas.apply', authorParams)).toEqual(authorWrite)
+      expect(f.main()).toEqual(later)
+    } finally { f.close() }
+  })
+
+  it.each([{ createdBy: 'user' as const, userTouched: false }, { createdBy: 'agent' as const, userTouched: true }])('protects existing object edits, tracks and deletion atomically: %j', async protection => {
+    const doc: SceneDoc = { ...EMPTY_SCENE, durationS: 5, objects: [object(protection)] }
+    const f = await setup(doc)
+    try {
+      for (const objects of [[], [object({ name: 'Forged name' })], [object({ hidden: true })],
+        [object({ transform: { ...object().transform, position: [1, 0, 0] } })],
+        [object({ source: { type: 'primitive', shape: 'box', size: [1, 1, 1] } })],
+        [object({ tracks: { hidden: [{ t: 3, value: true }] } })]]) {
+        await f.refuse([{ op: 'node.layout', nodeId: f.nodeId, x: 999 }, f.set({ ...doc, objects })], 'scene.object_protected', { name: 'Figure' })
+      }
+      await f.write({ ...doc, objects: [object()] })
+      expect(f.main().content).toEqual({ type: 'scene', doc })
+    } finally { f.close() }
+  })
+
+  it.each([{ createdBy: 'user' as const, userTouched: false }, { createdBy: 'agent' as const, userTouched: true }])('protects existing view content and camera keys while preserving saved stills: %j', async protection => {
+    const f = await setup()
+    try {
+      const still = f.host.assets.registerVersion(f.host.db, { staged: await f.host.assets.stageBytes(Buffer.from('saved frame')), kind: 'image', mime: 'image/png', origin: 'import' }).assetVersionId
+      const doc: SceneDoc = { ...EMPTY_SCENE, durationS: 5, views: [view({ ...protection, still })] }
+      f.host.canvas.apply({ kind: 'user' }, { requestId: rid(), ops: [f.set(doc)] })
+      for (const views of [[], [view({ name: 'Forged' })], [view({ aspectRatio: '1:1' })],
+        [view({ camera: { ...view().camera, focalLengthMm: 85 } })],
+        [view({ cameraKeys: [{ t: 3, value: view().camera, ease: 'hold' }] })]]) {
+        await f.refuse([f.set({ ...doc, views })], 'scene.view_protected', { name: 'Wide' })
+      }
+      await f.write({ ...doc, views: [view({ still: 'nonexistent-forged-still' })] })
+      expect(f.main().content).toEqual({ type: 'scene', doc })
+    } finally { f.close() }
+  })
+
+  it('allows reordering protected objects and views, and editing or removing untouched Agent content', async () => {
+    const doc: SceneDoc = { ...EMPTY_SCENE, durationS: 5,
+      objects: [object({ createdBy: 'user' }), object({ id: 'agent' })],
+      views: [view({ userTouched: true }), view({ id: 'agent' })] }
+    const f = await setup(doc)
+    try {
+      const edited: SceneDoc = { ...doc,
+        objects: [object({ id: 'agent', name: 'Walker', tracks: { pose: { leftKnee: [{ t: 2, value: [0, 0, 0, 1], ease: 'linear' }] } } }), doc.objects[0]!],
+        views: [view({ id: 'agent', name: 'Tracking', still: 'forged', cameraKeys: [{ t: 2, value: view().camera, ease: 'easeInOut' }] }), doc.views[0]!] }
+      await f.write(edited)
+      expect(f.main().content).toEqual({ type: 'scene', doc: { ...edited, views: [{ ...edited.views[0], still: null }, doc.views[0]] } })
+      await f.write({ ...doc, objects: [doc.objects[0]!], views: [doc.views[0]!] })
+      expect(f.main().content).toEqual({ type: 'scene', doc: { ...doc, objects: [doc.objects[0]], views: [doc.views[0]] } })
+    } finally { f.close() }
+  })
+
+  it('protects duration against every protected track kind, allows boundary shortening and trims Agent keys', async () => {
+    const f = await setup()
+    try {
+      for (const protection of [{ createdBy: 'user' as const }, { userTouched: true }]) {
+        const tracks: NonNullable<SceneObject['tracks']>[] = [
+          { transform: [{ t: 4, value: object().transform, ease: 'linear' }] },
+          { hidden: [{ t: 4, value: false }] },
+          { pose: { leftKnee: [{ t: 4, value: [0, 0, 0, 1], ease: 'hold' }] } },
+        ]
+        const docs: SceneDoc[] = [
+          ...tracks.map(tracks => ({ ...EMPTY_SCENE, durationS: 5, objects: [object({ ...protection, tracks })] })),
+          { ...EMPTY_SCENE, durationS: 5, views: [view({ ...protection, cameraKeys: [{ t: 4, value: view().camera, ease: 'linear' }] })] },
+        ]
+        for (const doc of docs) {
+          f.host.canvas.apply({ kind: 'user' }, { requestId: rid(), ops: [f.set(doc)] })
+          const pruned = { ...doc, objects: doc.objects.map(({ tracks: _tracks, ...item }) => item), views: doc.views.map(({ cameraKeys: _keys, ...item }) => item) }
+          await f.refuse([f.set({ ...pruned, durationS: 3 })], 'scene.duration_protected')
+          const { durationS: _duration, ...staticDoc } = pruned
+          await f.refuse([f.set(staticDoc)], 'scene.duration_protected')
+          await f.write({ ...doc, durationS: 4 })
+          await f.write({ ...doc, durationS: 7 })
+        }
+      }
+      const editable: SceneDoc = { ...EMPTY_SCENE, durationS: 5, objects: [object({ tracks: { hidden: [{ t: 4, value: true }] } })], views: [view({ createdBy: 'user' })] }
+      f.host.canvas.apply({ kind: 'user' }, { requestId: rid(), ops: [f.set(editable)] })
+      await f.write({ ...editable, durationS: 2, objects: [object()] })
+      const staticDoc = { ...EMPTY_SCENE, objects: [object()], views: editable.views }
+      await f.write(staticDoc)
+      await f.write({ ...staticDoc, durationS: 3 })
+    } finally { f.close() }
+  })
+
+  it('deletes empty and fully Agent-owned scenes while refusing scenes containing any protected item', async () => {
+    const f = await setup()
+    const hint = 'Ask the author to delete the scene, or use scene.propose to propose deleting individual objects or views for the author to review'
+    try {
+      for (const doc of [
+        { ...EMPTY_SCENE, objects: [object({ createdBy: 'user' })] },
+        { ...EMPTY_SCENE, objects: [object({ userTouched: true })] },
+        { ...EMPTY_SCENE, views: [view({ createdBy: 'user' })] },
+        { ...EMPTY_SCENE, views: [view({ userTouched: true })] },
+      ]) {
+        f.host.canvas.apply({ kind: 'user' }, { requestId: rid(), ops: [f.set(doc)] })
+        await f.refuse([{ op: 'node.setMeta', nodeId: f.nodeId, title: 'Changed' }, { op: 'node.delete', nodeId: f.nodeId }], 'scene.user_only', {}, hint)
+      }
+      await f.a.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.create', kind: 'image', tempId: f.nodeId }, { op: 'node.delete', nodeId: f.nodeId }] })
+      expect(f.host.canvas.get({ nodeIds: [f.nodeId] }).nodes).toHaveLength(1)
+      for (const doc of [EMPTY_SCENE, { ...EMPTY_SCENE, objects: [object()], views: [view()] }]) {
+        f.host.canvas.apply({ kind: 'user' }, { requestId: rid(), ops: [f.set(doc)] })
+        const params = { requestId: rid(), ops: [{ op: 'node.create', kind: 'scene', tempId: 'fresh' }, { op: 'scene.set', slotId: 'fresh:main', expectedRevision: 1, doc }, { op: 'node.delete', nodeId: 'fresh' }] }
+        const result = await f.a.call('canvas.apply', params)
+        expect(f.host.canvas.get({ nodeIds: [result.idMap.fresh] }).nodes).toEqual([])
+      }
+      await f.write({ ...EMPTY_SCENE, objects: [object({ name: 'Author revision' })], views: [view()] }, f.c)
+      await f.refuse([{ op: 'node.delete', nodeId: f.nodeId }], 'scene.user_only', {}, hint)
+      f.host.canvas.apply({ kind: 'user' }, { requestId: rid(), ops: [f.set({ ...EMPTY_SCENE, objects: [object()], views: [view()] })] })
+      await f.a.call('canvas.apply', { requestId: rid(), ops: [{ op: 'node.delete', nodeId: f.nodeId }] })
+      expect(f.host.canvas.get({ nodeIds: [f.nodeId] }).nodes).toEqual([])
+    } finally { f.close() }
+  })
+
+  it('stamps UI views from content diffs, retaining Agent ownership and ignoring still-only changes', async () => {
+    const doc: SceneDoc = { ...EMPTY_SCENE, durationS: 5, objects: [object()], views: [view(), view({ id: 'already-touched', userTouched: true })] }
+    const f = await setup(doc)
+    try {
+      const still = f.host.assets.registerVersion(f.host.db, { staged: await f.host.assets.stageBytes(Buffer.from('saved frame')), kind: 'image', mime: 'image/png', origin: 'import' }).assetVersionId
+      const saved: SceneDoc = { ...doc, views: [view({ id: 'already-touched' }), view({ createdBy: 'user', userTouched: true, still })] }
+      await f.write(saved, f.c)
+      expect(f.main().content).toEqual({ type: 'scene', doc: { ...saved, views: [doc.views[1], view({ still })] } })
+      await f.write({ ...saved, views: [view({ cameraKeys: [{ t: 3, value: view().camera, ease: 'linear' }] }), view({ id: 'new', still })] }, f.c)
+      expect(f.main().content).toMatchObject({ type: 'scene', doc: { objects: [object()], views: [
+        { id: 'wide', createdBy: 'agent', userTouched: true }, { id: 'new', createdBy: 'user', userTouched: true, still },
+      ] } })
+      await f.refuse([f.set(doc)], 'scene.view_protected', { name: 'Wide' })
+    } finally { f.close() }
+  })
+
+  it('retains linked-session, active-workspace, archived-session and project write gates', async () => {
+    const f = await setup()
+    try {
+      const blocked = async (ops: CanvasOp[], reason: string) => {
+        const before = f.host.canvas.get({})
+        await expect(f.a.call('canvas.apply', { requestId: rid(), ops })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason } } })
+        expect(f.host.canvas.get({})).toEqual(before)
+      }
+      f.host.db.update(s.sessions).set({ workItemId: null }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      await blocked([f.set(EMPTY_SCENE)], 'runtime.work_item_required')
+      await blocked([{ op: 'node.create', kind: 'scene', tempId: 'fresh' }], 'runtime.work_item_required')
+      await blocked([{ op: 'node.delete', nodeId: f.nodeId }], 'runtime.work_item_required')
+      f.host.db.update(s.sessions).set({ workItemId: f.session.workItemId }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      f.host.db.update(s.workItems).set({ status: 'todo' }).where(eq(s.workItems.id, f.session.workItemId)).run()
+      await blocked([f.set(EMPTY_SCENE)], 'work.execution_forbidden')
+      f.host.db.update(s.workItems).set({ status: 'in_progress' }).where(eq(s.workItems.id, f.session.workItemId)).run()
+      f.host.db.update(s.sessions).set({ archivedAt: Date.now() }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      await blocked([f.set(EMPTY_SCENE)], 'runtime.session_inactive')
+      f.host.db.update(s.sessions).set({ archivedAt: null }).where(eq(s.sessions.id, f.session.sessionId)).run()
+      await expect(f.a.call('canvas.apply', { requestId: rid(), spaceId: 'other-project', ops: [f.set(EMPTY_SCENE)] })).rejects.toMatchObject({ code: 'forbidden', rpc: { data: { reason: 'runtime.agent_project_forbidden' } } })
+    } finally { f.close() }
+  })
 })
 
 it('lists only the latest project model versions through the UI gateway', async () => {

@@ -108,6 +108,7 @@ describe.skipIf(!ready)('Web UI', () => {
   let extendedId: string
   let inputTextId: string
   let uploadedId: string
+  let toolbarGenerationId: string
   const evidenceDirs = new Set<string>()
   const agentEvidence = (workDir: string) => {
     evidenceDirs.add(workDir)
@@ -512,7 +513,7 @@ describe.skipIf(!ready)('Web UI', () => {
     await expect.poll(() => node.locator('.vis-node-problem').count()).toBe(0)
   })
 
-  it('text input generates a new node with live source edges and minimap; rewriting or deletion removes edges', async () => {
+  it('generation and media clearing switch between source and input edges without duplication; deletion removes the pair', async () => {
     const { idMap } = await admin.call('canvas.apply', { requestId: `source-${Date.now()}`, ops: [{ op: 'node.create', tempId: 'source', kind: 'text', x: -400, y: 0, w: 320, h: 200, content: { text: '屋顶花园' } }] })
     const [source] = (await admin.call('canvas.get', { nodeIds: [idMap.source] })).nodes
     const before = await page.locator('.react-flow__edge').count()
@@ -522,23 +523,30 @@ describe.skipIf(!ready)('Web UI', () => {
     await page.locator(`.react-flow__node[data-id="${product.nodeId}"] img`).waitFor()
     await expect.poll(() => page.locator('.react-flow__edge').count()).toBe(before + 1)
     const edge = page.locator(`.react-flow__edge[data-id="source-${source.nodeId}-${product.nodeId}"]`)
+    const inputEdge = page.locator(`.react-flow__edge[data-id="input-${source.nodeId}-${product.nodeId}"]`)
     await expect.poll(() => edge.count()).toBe(1)
     expect(await page.locator('.react-flow__minimap').isVisible()).toBe(true)
     await page.reload()
     await edge.waitFor()
     await admin.call('canvas.apply', { requestId: `clear-${Date.now()}`, ops: [{ op: 'slot.clear', slotId: product.slots[0].slotId, expectedRevision: product.slots[0].revision }] })
     await expect.poll(() => edge.count()).toBe(0)
-    const nextJob = await agentGenerate({ kind: 'image', prompt: '再次生成', inputs: [{ slotId: source.slots[0].slotId }] })
+    await expect.poll(() => inputEdge.count()).toBe(1)
+    await expect.poll(() => page.locator('.react-flow__edge').count()).toBe(before + 1)
+    const nextJob = await agentGenerate({ kind: 'image', prompt: '再次生成', inputs: [{ slotId: source.slots[0].slotId }], targets: [{ outputIndex: 0, kind: 'slot', slotId: product.slots[0].slotId }] })
     await until(admin.nodes, nodes => nodes.some(n => n.slots[0]?.source?.jobId === nextJob), 10_000)
+    await expect.poll(() => edge.count()).toBe(1)
+    await expect.poll(() => inputEdge.count()).toBe(0)
     await expect.poll(() => page.locator('.react-flow__edge').count()).toBe(before + 1)
     await admin.call('canvas.apply', { requestId: `delete-${Date.now()}`, ops: [{ op: 'node.delete', nodeId: source.nodeId }] })
     await expect.poll(() => page.locator('.react-flow__edge').count()).toBe(before)
   })
 
   it('toolbar image generation disables empty prompts, then generates and fills the current node after saving', async () => {
+    const before = new Set((await admin.nodes()).map(node => node.nodeId))
     await page.getByRole('button', { name: '生图', exact: true }).click()
-    const nodes = await until(admin.nodes, nodes => nodes.some(n => n.slots.some((s: any) => s.slotKey === 'prompt')))
-    const created = nodes.find(n => n.slots.some((s: any) => s.slotKey === 'prompt'))
+    const nodes = await until(admin.nodes, nodes => nodes.some(node => !before.has(node.nodeId) && node.slots.some((slot: any) => slot.slotKey === 'prompt')))
+    const created = nodes.find(node => !before.has(node.nodeId) && node.slots.some((slot: any) => slot.slotKey === 'prompt'))
+    toolbarGenerationId = created.nodeId
     const node = page.locator(`.react-flow__node[data-id="${created.nodeId}"]`)
     await node.waitFor()
     await node.locator('.vis-node-label').click()
@@ -558,7 +566,7 @@ describe.skipIf(!ready)('Web UI', () => {
   })
 
   it('generation prompt conflicts preserve the other version and block generation', async () => {
-    const created = (await admin.nodes()).find(n => n.slots.some((s: any) => s.slotKey === 'prompt'))
+    const created = (await admin.nodes()).find(node => node.nodeId === toolbarGenerationId)
     const prompt = created.slots.find((s: any) => s.slotKey === 'prompt')
     const main = created.slots.find((s: any) => s.slotKey === 'main')
     const node = page.locator(`.react-flow__node[data-id="${created.nodeId}"]`)

@@ -107,7 +107,7 @@ export function ScriptNodeContent({ view, slot, doc, deco, nodes, actions, selec
         <button aria-label={m.exportMarkdown} onClick={() => exportDoc('md')}>{m.markdown}</button>
       </div>
     </NodeToolbar> : null}
-    <div className="vis-script-card nodrag nopan" onDoubleClick={event => { event.stopPropagation(); setExpanded(true) }}>
+    <div className="vis-script-card" onDoubleClick={event => { event.stopPropagation(); setExpanded(true) }}>
       <div className="vis-script-card-summary"><Icon kind="script" size={22} /><strong>{m.summary(format.number(currentDoc.shots.length), format.number(currentDoc.shots.reduce((total, shot) => total + (shot.durationSec ?? 0), 0)), currentDoc.shots.length)}</strong></div>
       {currentDoc.shots.length ? <ol>{currentDoc.shots.slice(0, 3).map((shot, index) => <li key={shot.id}><span>{format.number(index + 1)}</span><p><AssetText text={shot.description} assets={currentDoc.assets} /></p></li>)}</ol> : <p className="vis-script-card-empty">{m.empty}</p>}
       <footer><span>{m.assetCount(format.number(currentDoc.assets.length), currentDoc.assets.length)}</span><button ref={expand} aria-label={m.openEditor} onClick={() => setExpanded(true)}>{m.openEditor}</button></footer>

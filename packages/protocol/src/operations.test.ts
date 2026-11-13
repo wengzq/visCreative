@@ -81,7 +81,7 @@ describe('0021 operation catalog', () => {
     expect(submit.safeParse({ requestId: 'r', kind: 'image', operation: 'image.blur', prompt: 'p' }).success).toBe(false)
     const catalog = METHODS['providers.list'].result
     const provider = { id: 'mock', type: 'mock', label: 'Mock', needsKey: false, available: true, hasKey: true, models: [{ id: 'm', label: 'M', kind: 'image', paramsSchema: {}, operations: ['generate', 'image.upscale'] }] }
-    expect(catalog.safeParse({ providerTypes: [], providers: [provider], defaults: {} }).success).toBe(true)
+    expect(catalog.safeParse({ videoReferences: 'hosting_required', providerTypes: [], providers: [provider], defaults: {} }).success).toBe(true)
   })
 
   it('node titles and prompt references', () => {

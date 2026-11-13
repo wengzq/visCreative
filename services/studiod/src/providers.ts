@@ -1,9 +1,12 @@
 import type { MediaTools } from '@vis/assets'
 import { VisError } from '@vis/domain'
-import { createProviderTypeRegistry, paramsSchemaOf, type ProviderAdapter, type ProviderDefaults, type ProviderType } from '@vis/generation'
+import { createProviderTypeRegistry, modelDocsFor, operationSpecOf, paramsSchemaOf, type ProviderAdapter, type ProviderDefaults, type ProviderType, type HostedInputs } from '@vis/generation'
 import { BUILTIN_MODELS, endpointOverrideValid, MediaKind, ProviderConfigSchema, type MethodResult, type ProviderConfig } from '@vis/protocol'
 import { loadProviderConfig, saveProviderConfig } from './provider-config'
 import type { SecretStore } from './secret-store'
+import type { HostingManager } from './hosting'
+import { redactHostingText } from './hosting-redaction'
+import { loadHostingConfig } from './hosting-config'
 
 export type ProviderManager = ReturnType<typeof createProviderManager>
 
@@ -12,12 +15,21 @@ export function createProviderManager(opts: {
   builtins: ProviderAdapter[]
   defaults: ProviderDefaults
   secrets: SecretStore
+  hosting?: HostingManager
   media: MediaTools
   providerTypes?: readonly ProviderType[]
   onChange(providers: ProviderAdapter[], defaults: ProviderDefaults, limits: ProviderConfig['limits']): void
 }) {
   let config = loadProviderConfig(opts.dataDir)
   const types = createProviderTypeRegistry(opts.providerTypes)
+  const unavailable = () => VisError.of('unavailable', 'hosting.not_configured', {}, 'Media hosting is not configured')
+  const redactionConfig = opts.hosting ? null : loadHostingConfig(opts.dataDir)
+  const hosted: HostedInputs = opts.hosting?.inputs ?? {
+    configured: false,
+    async url() { throw unavailable() },
+    async release() { throw unavailable() },
+    redact(text) { return redactHostingText(text, redactionConfig) },
+  }
   function validate(entry: ProviderConfig['providers'][number]) {
     const type = types.get(entry.type)
     if (!type) throw VisError.of('invalid_params', 'provider.type_unavailable', { type: entry.type }, `Generation service type ${entry.type} is not registered`)
@@ -59,7 +71,7 @@ export function createProviderManager(opts: {
     let adapter = adapterCache.get(cacheKey)
     if (!adapter) {
       adapter = {
-        ...type.create(validated, { dataDir: opts.dataDir, getKey: () => opts.secrets.get(configuration.id), media: opts.media }),
+        ...type.create(validated, { dataDir: opts.dataDir, getKey: () => opts.secrets.get(configuration.id), media: opts.media, hosted }),
         configuration,
       }
       adapterCache.set(cacheKey, adapter)
@@ -108,14 +120,38 @@ export function createProviderManager(opts: {
         needsKey: entry ? types.get(entry.type)!.needsKey : false,
         available: true,
         hasKey: entry ? await opts.secrets.has(entry.id) : false,
-        models: models.map(m => ({ ...m, operations: [...(adapter.operationsFor?.(m.kind, m.id) ?? ['generate'])], frameModes: [...(adapter.frameModesFor?.(m.kind, m.id) ?? [])], paramsSchema: paramsSchemaOf(adapter, m.kind, m.id).toJSONSchema({ io: 'input', unrepresentable: 'any' }) })),
+        models: models.map(m => {
+          const operations = [...(adapter.operationsFor?.(m.kind, m.id) ?? ['generate'])]
+          const specs = operations.filter(operation => operation !== 'generate').map(operation => {
+            const spec = operationSpecOf(adapter, m.kind, m.id, operation)
+            return [operation, { paramsSchema: spec.paramsSchema.toJSONSchema({ io: 'input', unrepresentable: 'any' }), prompt: spec.prompt }]
+          })
+          let referenceInputs = adapter.referenceLimitsFor?.(m.kind, m.id)
+          if (!referenceInputs) {
+            const image = adapter.referenceImageLimitFor?.(m.kind, m.id)
+            if (image !== undefined && Number.isInteger(image) && image >= 0) referenceInputs = { image }
+          }
+          const docs = entry ? modelDocsFor(types.get(entry.type), m.kind, m.id) : undefined
+          return {
+            ...m, operations,
+            ...(referenceInputs ? { referenceInputs } : {}),
+            ...(docs ? { docs: [...docs] } : {}),
+            ...(specs.length ? { operationSpecs: Object.fromEntries(specs) } : {}),
+            frameModes: [...(adapter.frameModesFor?.(m.kind, m.id) ?? [])],
+            paramsSchema: paramsSchemaOf(adapter, m.kind, m.id).toJSONSchema({ io: 'input', unrepresentable: 'any' }),
+          }
+        }),
       })
     }
     for (const entry of snapshot.providers.filter(entry => unavailableReason(entry))) {
       const { imageModels, videoModels, audioModels, ...fields } = entry
       services.push({
         ...fields, needsKey: types.get(entry.type)?.needsKey ?? false, available: false, unavailableReason: unavailableReason(entry), hasKey: false,
-        models: [{ kind: 'image' as const, models: imageModels }, { kind: 'video' as const, models: videoModels }, { kind: 'audio' as const, models: audioModels }].flatMap(({ kind, models }) => models.map(model => ({ ...model, kind, paramsSchema: {} }))),
+        models: [{ kind: 'image' as const, models: imageModels }, { kind: 'video' as const, models: videoModels }, { kind: 'audio' as const, models: audioModels }].flatMap(({ kind, models }) => models.map(model => {
+          // Pages stay readable while a service is unavailable, so an Agent can still explain the model to the author.
+          const docs = modelDocsFor(types.get(entry.type), kind, model.id)
+          return { ...model, kind, paramsSchema: {}, ...(docs ? { docs: [...docs] } : {}) }
+        })),
       })
     }
     const order = [...opts.builtins.map(provider => provider.id), ...snapshot.providers.map(provider => provider.id)]
@@ -130,11 +166,15 @@ export function createProviderManager(opts: {
       if (model) resultDefaults[kind] = { provider: selected.provider, model }
     }
     const unavailableDefaults = MediaKind.options.filter(kind => snapshot.defaults[kind] && !available.some(adapter => adapter.id === snapshot.defaults[kind]!.provider))
-    return { providerTypes: types.descriptors, providers: services, defaults: resultDefaults, ...(unavailableDefaults.length ? { unavailableDefaults } : {}), limits: snapshot.limits, agentIsolation: process.platform === 'darwin' ? 'sandbox' : 'none' }
+    const videoReferences = await opts.hosting?.ready() ? 'ready' : 'hosting_required'
+    return { videoReferences, providerTypes: types.descriptors, providers: services, defaults: resultDefaults, ...(unavailableDefaults.length ? { unavailableDefaults } : {}), limits: snapshot.limits, agentIsolation: process.platform === 'darwin' ? 'sandbox' : 'none' }
   }
 
   return {
     adapters, defaults, resolve, list, limits: () => config.limits,
+    refreshHosting() {
+      opts.onChange(adapters(), defaults(), config.limits)
+    },
     async update(next: ProviderConfig) {
       const parsed = ProviderConfigSchema.parse(next)
       for (const entry of parsed.providers) {

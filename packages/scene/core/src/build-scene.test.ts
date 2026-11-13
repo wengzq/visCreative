@@ -4,7 +4,7 @@ import {
   Box3, BoxGeometry, BufferGeometry, Euler, Group, Material, Mesh, MeshBasicMaterial, MeshStandardMaterial,
   Quaternion, Scene, ShaderMaterial, SphereGeometry, Texture, Vector3,
 } from 'three'
-import { buildScene, createSceneCamera, sceneAspect } from './build-scene'
+import { applyBodyPose, buildScene, createSceneCamera, sceneAspect } from './build-scene'
 import { BUILTIN_PROPS, HUMAN_BODY } from './descriptors'
 import { disposeScene } from './dispose'
 import type { BodyDescriptor } from './types'
@@ -16,7 +16,7 @@ const object = (id: string, source: SceneObject['source'], fields: Partial<Scene
 })
 const doc = (objects: SceneObject[] = [], views: SceneView[] = []): SceneDoc => ({ version: 1, rev: 0, objects, views })
 const view = (aspectRatio: SceneView['aspectRatio'] = '16:9'): SceneView => ({
-  id: 'wide', name: 'Wide', aspectRatio, still: null,
+  id: 'wide', name: 'Wide', aspectRatio, still: null, createdBy: 'user', userTouched: false,
   camera: { position: [3, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 },
 })
 const scenes: Scene[] = []
@@ -234,4 +234,14 @@ it('cleans partially built scenes after an invalid descriptor', async () => {
   await expect(buildScene(doc([object('bad', { type: 'prop', propId: 'missing' })]), null)).rejects.toThrow('Unknown scene prop')
   const cyclic: BodyDescriptor = { id: 'cycle', heightM: 1, poses: [], joints: [{ id: 'a', parent: 'a', offset: [0, 0, 0], parts: [], limits: { min: [0, 0, 0], max: [0, 0, 0] } }] }
   await expect(buildScene(doc([object('bad', { type: 'figure', bodyId: cyclic.id, heightM: 1, pose: {} })]), null, { bodies: [cyclic] })).rejects.toThrow('Cyclic body joints')
+})
+
+it('reposes built joints exactly as a fresh build of the new pose would', async () => {
+  const sitting = presetPose(HUMAN_BODY, 'sitting')
+  const built = await build(doc([object('hero', { type: 'figure', bodyId: 'human', heightM: 1.8, pose: presetPose(HUMAN_BODY, 'pointing') })]), null)
+  const fresh = await build(doc([object('hero', { type: 'figure', bodyId: 'human', heightM: 1.8, pose: sitting })]), null)
+  applyBodyPose(built.joints.get('hero')!, HUMAN_BODY, sitting)
+  for (const joint of HUMAN_BODY.joints) expect(built.joints.get('hero')!.get(joint.id)!.quaternion.toArray()).toEqual(fresh.joints.get('hero')!.get(joint.id)!.quaternion.toArray())
+  applyBodyPose(built.joints.get('hero')!, HUMAN_BODY, {})
+  expect(built.joints.get('hero')!.get('leftKnee')!.quaternion.toArray()).toEqual([0, 0, 0, 1])
 })

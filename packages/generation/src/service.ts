@@ -1,7 +1,7 @@
 import type { AssetStore } from '@vis/assets'
 import { type CanvasDeliveryPort, VisError } from '@vis/domain'
 import { GENERATION_MAX_WAIT_MS, type GenerationLimits, type GenerationTarget, type MethodParams, type MethodResult } from '@vis/protocol'
-import { and, eq, runIdempotent, spaceSchema as s, type SpaceDb, type SpaceTx } from '@vis/storage'
+import { and, eq, isNull, runIdempotent, spaceSchema as s, type SpaceDb, type SpaceTx } from '@vis/storage'
 import type { ProviderAdapter } from './providers/types'
 import { DEFAULT_GENERATION_LIMITS, localDate, paidJobCount, type GenerationQuota } from './quota'
 import { JobRunner } from './runner'
@@ -26,7 +26,11 @@ export type GenerationServiceDeps = {
 export interface GenerationService {
   configure(providers: ProviderAdapter[], defaults: ProviderDefaults, limits?: GenerationLimits): void
   submit(caller: SubmitCaller, params: MethodParams<'generation.submit'>, authorize?: (tx: SpaceTx, result: MethodResult<'generation.submit'>) => void): MethodResult<'generation.submit'>
-  cancel(caller: SubmitCaller, params: MethodParams<'generation.cancel'>): Promise<MethodResult<'generation.cancel'>>
+  /**
+   * releasePlaceholders: a direct cancel of this job removes its still-empty result nodes (RFC 0047 decision 1).
+   * Cancellations caused by recall, stop, work deletion or batch cancel leave the canvas alone.
+   */
+  cancel(caller: SubmitCaller, params: MethodParams<'generation.cancel'>, opts?: { releasePlaceholders?: boolean }): Promise<MethodResult<'generation.cancel'>>
   regenerate(caller: SubmitCaller, params: MethodParams<'generation.regenerate'>): MethodResult<'generation.regenerate'>
   recheck(caller: SubmitCaller, params: MethodParams<'generation.recheck'>): MethodResult<'generation.recheck'>
   usage(): MethodResult<'generation.usage'>
@@ -147,7 +151,7 @@ export function createGenerationService(deps: GenerationServiceDeps): Generation
     let result: MethodResult<'generation.submit'>
     try {
       result = runIdempotent(db, request, tx => build(tx, {
-        providers, defaults, now: now(), limits,
+        providers, defaults, now: now(), limits, delivery: deps.delivery,
         ...(deps.quota ? { reserve: (jobId, kind, byAgent) => {
           deps.quota!.reserve({ jobId, kind, now: now(), byAgent })
           reservedJobId = jobId
@@ -181,12 +185,13 @@ export function createGenerationService(deps: GenerationServiceDeps): Generation
       })
     },
 
-    async cancel(caller, params) {
+    async cancel(caller, params, opts) {
       ownedJob(caller, params.jobId)
       runIdempotent(db, { requestId: params.requestId, method: 'generation.cancel', params }, tx => {
         const job = ownedJob(caller, params.jobId, tx)
         if (TERMINAL_STATUSES.includes(job.status)) throw VisError.of('job_terminal', 'generation.job_terminal', {}, 'Job has already ended and cannot be cancelled')
         runner.requestCancel(tx, params.jobId)
+        if (opts?.releasePlaceholders) deps.delivery.releasePlaceholders?.(tx, { jobId: params.jobId })
         return { jobId: params.jobId }
       }, now)
       schedules.delete(params.jobId)
@@ -215,28 +220,39 @@ export function createGenerationService(deps: GenerationServiceDeps): Generation
       return submitIdempotent({ requestId: params.requestId, method: 'generation.regenerate', params }, (tx, ctx) => {
         const original = ownedJob(caller, params.jobId, tx)
         if (!TERMINAL_STATUSES.includes(original.status)) throw VisError.of('invalid_params', 'generation.job_running', {}, 'Wait for the job to finish or cancel it before regenerating')
-        const stored = original.params as { prompt: string; providerConfiguration?: unknown } & Record<string, unknown>
+        const stored = { ...(original.params as { prompt: string; providerConfiguration?: unknown } & Record<string, unknown>) }
+        let targetSlotId: string | undefined
+        if (params.targetNodeId) {
+          const node = tx.select().from(s.nodes).where(eq(s.nodes.id, params.targetNodeId)).get()
+          if (!node || node.deletedAt !== null) throw VisError.of('invalid_params', 'generation.regenerate_node_missing', { nodeId: params.targetNodeId }, 'The regeneration target node does not exist or has been deleted')
+          if (node.kind !== original.kind) throw VisError.of('invalid_params', 'generation.regenerate_kind_mismatch', { nodeId: node.id, kind: original.kind, nodeKind: node.kind }, 'The regeneration target node must match the job media kind')
+          const slot = tx.select().from(s.slots).where(and(eq(s.slots.nodeId, node.id), eq(s.slots.slotKey, 'main'))).get()
+          if (!slot || slot.deletedAt !== null) throw VisError.of('invalid_params', 'generation.regenerate_main_missing', { nodeId: node.id }, 'The regeneration target node has no active main slot')
+          targetSlotId = slot.id
+          if (typeof stored.n === 'number' && stored.n > 1) stored.n = 1
+        }
         let adapter: ProviderAdapter | undefined
         try { adapter = deps.resolveProvider?.(original.provider, stored.providerConfiguration) ?? providers.get(original.provider) } catch { /* Return an explicit error below */ }
         if (!adapter) throw VisError.of('invalid_params', 'generation.provider_unavailable', { providerId: original.provider }, `Original generation service ${original.provider} is unavailable`)
         const inputs = tx.select().from(s.jobInputs).where(eq(s.jobInputs.jobId, original.id)).orderBy(s.jobInputs.ordinal).all()
         const bindings = tx.select().from(s.deliveryBindings).where(eq(s.deliveryBindings.jobId, original.id)).orderBy(s.deliveryBindings.outputIndex).all()
         const outputCount = typeof stored.n === 'number' ? stored.n : 1
-        const targets: GenerationTarget[] = bindings.filter(binding => binding.outputIndex < outputCount).map(binding => {
+        const targets: GenerationTarget[] = targetSlotId ? [{ outputIndex: 0, kind: 'slot', slotId: targetSlotId }] : bindings.filter(binding => binding.outputIndex < outputCount).map(binding => {
           if (binding.targetKind === 'slot') return { outputIndex: binding.outputIndex, kind: 'slot', slotId: binding.slotId! }
           const slot = binding.createdNodeId && tx.select({ id: s.slots.id }).from(s.slots)
-            .where(and(eq(s.slots.nodeId, binding.createdNodeId), eq(s.slots.slotKey, 'main'))).get()
+            .where(and(eq(s.slots.nodeId, binding.createdNodeId), eq(s.slots.slotKey, 'main'), isNull(s.slots.deletedAt))).get()
+          // A deleted result node, such as a placeholder removed on cancel, gets a fresh one
           if (slot) return { outputIndex: binding.outputIndex, kind: 'slot', slotId: slot.id }
           const nearNodeId = (binding.placement as { nearNodeId?: string } | null)?.nearNodeId
           return { outputIndex: binding.outputIndex, kind: 'new_node', ...(nearNodeId ? { nearNodeId } : {}) }
         })
-        const { prompt, frameRefs, resolvedPrompt: _resolvedPrompt, providerConfiguration: _configuration, actualPrompt: _actualPrompt, ...providerParams } = stored
+        const { prompt, frameRefs, resolvedPrompt: _resolvedPrompt, providerConfiguration: _configuration, actualPrompt: _actualPrompt, revisedPrompt: _revisedPrompt, ...providerParams } = stored
         const frames = frameRefs as MethodParams<'generation.submit'>['frames']
         return submitJob(tx, caller, {
           requestId: params.requestId, kind: original.kind, provider: original.provider, model: original.model,
           operation: original.operation,
           prompt, params: providerParams, inputs: (frames ? inputs.slice(0, -(frames.last ? 2 : 1)) : inputs).map(input => input.assetVersionId ? { assetVersionId: input.assetVersionId } : { slotId: input.slotId!, revision: input.slotRevision! }), ...(frames ? { frames } : {}), targets,
-        }, { ...ctx, source: { job: original, adapter } })
+        }, { ...ctx, source: { job: { ...original, params: stored }, adapter } })
       })
     },
 

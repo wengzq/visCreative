@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { detectVideoEncoder, type EncoderRunner } from './encoders'
+import { detectVideoEncoder, SOFTWARE_FIRST_H264_ENCODERS, type EncoderRunner } from './encoders'
 
 let sequence = 0
 const all = ['h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_mf', 'h264_videotoolbox', 'h264_vaapi', 'libx264', 'libopenh264']
@@ -17,6 +17,24 @@ function options(exec: EncoderRunner, platform: NodeJS.Platform = 'win32') {
 const trials = (exec: ReturnType<typeof runner>) => exec.mock.calls.filter(([, args]) => !args.includes('-encoders')).map(([, args]) => args[args.indexOf('-c:v') + 1])
 
 describe('Video encoder selection', () => {
+  it.each([
+    [[], 'libx264'],
+    [['libx264'], 'h264_videotoolbox'],
+    [['libx264', 'h264_videotoolbox'], 'libopenh264'],
+  ])('uses the software-first priority and falls back after failed trials: %j', async (failing, expected) => {
+    const exec = runner(all, failing as string[])
+    const opts = options(exec, 'darwin')
+    const priority = SOFTWARE_FIRST_H264_ENCODERS
+    expect(await detectVideoEncoder({ ...opts, priority })).toMatchObject({ name: expected })
+    expect(trials(exec)).toEqual([...failing, expected])
+    const count = exec.mock.calls.length
+    await detectVideoEncoder({ ...opts, priority: [...priority] })
+    expect(exec).toHaveBeenCalledTimes(count)
+    // Timeline exports on the same binary keep their own hardware-first detection.
+    await detectVideoEncoder(opts)
+    expect(exec.mock.calls.length).toBeGreaterThan(count)
+  })
+
   it.each([
     ['win32', ['h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_mf', 'libx264', 'libopenh264']],
     ['darwin', ['h264_videotoolbox', 'libx264', 'libopenh264']],
@@ -63,6 +81,15 @@ describe('Video encoder selection', () => {
   it('uses a reason-coded error when ffmpeg is missing', async () => {
     const exec = vi.fn<EncoderRunner>().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
     await expect(detectVideoEncoder(options(exec))).rejects.toMatchObject({ code: 'unavailable', details: { reason: 'media.encoder_missing' } })
+  })
+
+  it('retries after a rejected probe instead of caching the failure', async () => {
+    const exec = runner(['libx264'])
+    exec.mockRejectedValueOnce(new Error('Temporary probe failure'))
+    const opts = options(exec)
+    await expect(detectVideoEncoder(opts)).rejects.toMatchObject({ code: 'unavailable' })
+    expect(await detectVideoEncoder(opts)).toMatchObject({ name: 'libx264' })
+    expect(exec).toHaveBeenCalledTimes(3)
   })
 
   it('shares concurrent detection and caches the result by ffmpeg path', async () => {

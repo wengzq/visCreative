@@ -1,15 +1,19 @@
 import { type CanvasDeliveryPort, type DeliveryOutcome, VisError } from '@vis/domain'
-import type { MethodParams, MethodResult } from '@vis/protocol'
+import type { CanvasOp, MethodParams, MethodResult } from '@vis/protocol'
 import { runIdempotent, type SpaceDb, type SpaceTx } from '@vis/storage'
 import { type Actor, applyOps } from './apply'
 import { changeHistory } from './undo'
-import { deliverOutput } from './delivery'
+import { deliverOutput, releasePlaceholders, reservePlaceholder } from './delivery'
 import { readNodes, readSlotHistory, readSnapshotNodes } from './views'
 
-export interface CanvasService extends CanvasDeliveryPort<SpaceTx> {
+export interface CanvasService extends Required<CanvasDeliveryPort<SpaceTx>> {
   undo(params: MethodParams<'canvas.undo'>): MethodResult<'canvas.undo'>
   redo(params: MethodParams<'canvas.redo'>): MethodResult<'canvas.redo'>
-  apply(actor: Actor, params: MethodParams<'canvas.apply'>): MethodResult<'canvas.apply'>
+  /**
+   * Gateway checks and stamps run inside the write transaction after idempotency replay, for new requests only.
+   * Returning ops replaces the request's ops; replay still uses the original request fingerprint.
+   */
+  apply(actor: Actor, params: MethodParams<'canvas.apply'>, prepare?: (tx: SpaceTx) => CanvasOp[] | void): MethodResult<'canvas.apply'>
   /** `snapshot: 'turn'` requires the calling turn's input snapshot */
   get(params: MethodParams<'canvas.get'>, ctx?: { inputSnapshotId: string | null }): MethodResult<'canvas.get'>
   history(params: MethodParams<'slot.history'>): MethodResult<'slot.history'>
@@ -25,8 +29,13 @@ export function createCanvasService(deps: { db: SpaceDb; now?: () => number; onC
     redo(params) {
       return runIdempotent(db, { requestId: params.requestId, method: 'canvas.redo', params }, tx => { const result = changeHistory(tx, 'redo', params.requestId, now()); deps.onChanged?.(tx); return result }, now)
     },
-    apply(actor, params) {
-      return runIdempotent(db, { requestId: params.requestId, method: 'canvas.apply', params }, tx => { const result = applyOps(tx, actor, params, now()); deps.onChanged?.(tx); return result }, now)
+    apply(actor, params, prepare) {
+      return runIdempotent(db, { requestId: params.requestId, method: 'canvas.apply', params }, tx => {
+        const ops = prepare?.(tx)
+        const result = applyOps(tx, actor, ops ? { ...params, ops } : params, now())
+        deps.onChanged?.(tx)
+        return result
+      }, now)
     },
     get(params, ctx) {
       if (params.snapshot !== 'turn') return { nodes: db.transaction(tx => readNodes(tx, params.nodeIds)) }
@@ -41,6 +50,12 @@ export function createCanvasService(deps: { db: SpaceDb; now?: () => number; onC
     },
     deliverOutput(tx, input): DeliveryOutcome {
       return deliverOutput(tx, input, now())
+    },
+    reservePlaceholder(tx, input) {
+      reservePlaceholder(tx, input, now())
+    },
+    releasePlaceholders(tx, input) {
+      releasePlaceholders(tx, input, now())
     },
   }
 }

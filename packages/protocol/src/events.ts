@@ -39,6 +39,8 @@ export const EVENT_TYPES = [
   'entity.proposalChanged',
   // 0031: manuscript review states changed; payload { proposalId, slotId }
   'text.proposalChanged',
+  // 0044: scene review states changed; payload { proposalId, slotId }
+  'scene.proposalChanged',
 ] as const
 export const EventType = z.enum(EVENT_TYPES)
 export type EventType = z.infer<typeof EventType>

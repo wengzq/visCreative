@@ -6,7 +6,7 @@ import { sceneEditorHost } from './scene-editor'
 import type { SpaceConnection } from './space'
 
 const sceneDoc: SceneDoc = { ...EMPTY_SCENE, rev: 5, views: [{
-  id: 'wide', name: 'Wide', still: 'frame', aspectRatio: '16:9',
+  id: 'wide', name: 'Wide', still: 'frame', aspectRatio: '16:9', createdBy: 'user', userTouched: false,
   camera: { position: [0, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 },
 }] }
 const scene: NodeView = { nodeId: 'scene', kind: 'scene', x: 0, y: 0, w: 360, h: 280, z: 1, layoutRevision: 1, slots: [
@@ -80,6 +80,29 @@ describe('Scene editor host', () => {
         }],
       } }] }],
     ])
+  })
+
+  it('renders the committed scene slot and selected camera to a new adjacent video node', async () => {
+    const { host, call } = fixture()
+    await host.renderVideo({ viewId: 'wide', revision: 8, width: 1920, height: 1080, fps: 24, prompt: 'Scene "Stage" · view "Wide"' })
+    expect(call).toHaveBeenCalledExactlyOnceWith('generation.submit', {
+      requestId: expect.any(String), provider: 'render', model: 'scene', kind: 'video', prompt: 'Scene "Stage" · view "Wide"',
+      inputs: [{ slotId: 'scene-main', revision: 8 }],
+      params: { viewId: 'wide', width: 1920, height: 1080, fps: 24 },
+      targets: [{ outputIndex: 0, kind: 'new_node', nearNodeId: 'scene' }],
+    })
+  })
+
+  it('retries an unacknowledged render idempotently and starts a fresh job on the next deliberate render', async () => {
+    const { host, call } = fixture()
+    const options = { viewId: 'wide', revision: 8, width: 1920, height: 1080, fps: 24 as const, prompt: 'Scene "Stage" · view "Wide"' }
+    call.mockRejectedValueOnce(new RpcError('unavailable', 'Acknowledgment lost'))
+    await expect(host.renderVideo(options)).rejects.toThrow('Acknowledgment lost')
+    await host.renderVideo(options)
+    await host.renderVideo(options)
+    const ids = call.mock.calls.map(([, params]) => (params as { requestId: string }).requestId)
+    expect(ids[1]).toBe(ids[0])
+    expect(ids[2]).not.toBe(ids[0])
   })
 
   it('rereads once on a conflict and preserves newer panel edits and additional panels', async () => {

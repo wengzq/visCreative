@@ -78,6 +78,11 @@ function addParts(parent: Object3D, parts: readonly (BodyPart & { name?: string 
   }
 }
 
+/** Sets each joint's rotation from the pose. A built figure can be reposed in place with the same result as a rebuild. */
+export function applyBodyPose(joints: ReadonlyMap<string, Object3D>, body: BodyDescriptor, pose: Record<string, Quat>) {
+  for (const descriptor of body.joints) joints.get(descriptor.id)?.quaternion.fromArray(poseRotation(body, pose, descriptor))
+}
+
 function addBody(parent: Group, body: BodyDescriptor, heightM: number, pose: Record<string, Quat>): ReadonlyMap<string, Group> {
   if (!(body.heightM > 0)) throw new Error(`Invalid body height: ${body.id}`)
   const rig = new Group()
@@ -91,9 +96,9 @@ function addBody(parent: Group, body: BodyDescriptor, heightM: number, pose: Rec
     joint.name = descriptor.id
     joint.userData.jointId = descriptor.id
     joint.position.fromArray(descriptor.offset)
-    joint.quaternion.fromArray(poseRotation(body, pose, descriptor))
     joints.set(descriptor.id, joint)
   }
+  applyBodyPose(joints, body, pose)
   for (const descriptor of body.joints) {
     const joint = joints.get(descriptor.id)!
     const seen = new Set([descriptor.id])

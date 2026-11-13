@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lowTextDetail, TEXT_DETAIL_ZOOM, textSummary, markdownOpening } from './text-detail'
+import { lowTextDetail, TEXT_DETAIL_ZOOM, textOverview, textSummary, markdownOpening } from './text-detail'
 
 describe('Zoomed-out text detail', () => {
   it('Switches only when crossing the detail threshold and restores Markdown on zooming in', () => {
@@ -35,4 +35,12 @@ it('retains complete opening Markdown blocks without parsing the long body or cu
   expect(markdownOpening('# Heading\n\n```txt\ncode\n\nstill code'.padEnd(300, 'x'), 60)).toBe('# Heading')
   expect(markdownOpening('**long '.repeat(1000), 50).startsWith('\\*\\*long')).toBe(true)
   expect(markdownOpening('x'.repeat(200_000), 50)).toBe('x'.repeat(50))
+})
+
+it('takes the zoomed-out title from the node title, else a leading heading', () => {
+  expect(textOverview('# 第一镜：清晨\n\n小黄莺走进**院子**')).toEqual({ title: '第一镜：清晨', summary: '小黄莺走进院子' })
+  expect(textOverview('# Heading\n\nBody', 'Node title')).toEqual({ title: 'Node title', summary: 'Heading Body' })
+  expect(textOverview('Plain opening\n# Later heading')).toEqual({ title: '', summary: 'Plain opening Later heading' })
+  expect(textOverview('## *Styled* ##')).toEqual({ title: 'Styled', summary: '' })
+  expect(textOverview('# Learn C#\n\nBody')).toEqual({ title: 'Learn C#', summary: 'Body' })
 })

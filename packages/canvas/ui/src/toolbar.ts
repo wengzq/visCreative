@@ -31,6 +31,35 @@ export function toolbarFocusIndex(key: string, index: number, count: number): nu
   if (key === 'ArrowLeft' || key === 'ArrowUp') return (index - 1 + count) % count
 }
 
+type ToolbarRect = { left: number; top: number; right: number; bottom: number }
+
+/** Clamping a wide bar below a fixed header must not put it over its own card or version controls. */
+export function placeFloatingToolbar(bounds: ToolbarRect, area: ToolbarRect, obstacles: readonly ToolbarRect[]) {
+  const width = bounds.right - bounds.left
+  const height = bounds.bottom - bounds.top
+  const clampX = (left: number) => Math.max(area.left + 8, Math.min(left, area.right - width - 8))
+  const clampY = (top: number) => Math.max(area.top + 8, Math.min(top, area.bottom - height - 8))
+  const overlap = (left: number, top: number) => obstacles.reduce((sum, rect) => sum
+    + Math.max(0, Math.min(left + width, rect.right + 8) - Math.max(left, rect.left - 8))
+    * Math.max(0, Math.min(top + height, rect.bottom + 8) - Math.max(top, rect.top - 8)), 0)
+  let best = { left: clampX(bounds.left), top: clampY(bounds.top) }
+  let covered = overlap(best.left, best.top)
+  if (covered === 0) return { x: best.left - bounds.left, y: best.top - bounds.top }
+  let distance = Math.hypot(best.left - bounds.left, best.top - bounds.top)
+  const lefts = new Set([best.left, clampX(area.left), clampX(area.right), ...obstacles.flatMap(rect => [clampX(rect.left - width - 8), clampX(rect.right + 8)])])
+  const tops = new Set([best.top, clampY(area.top), clampY(area.bottom), ...obstacles.flatMap(rect => [clampY(rect.top - height - 8), clampY(rect.bottom + 8)])])
+  for (const left of lefts) for (const top of tops) {
+    const nextCovered = overlap(left, top)
+    const nextDistance = Math.hypot(left - bounds.left, top - bounds.top)
+    if (nextCovered < covered || (nextCovered === covered && nextDistance < distance)) {
+      best = { left, top }
+      covered = nextCovered
+      distance = nextDistance
+    }
+  }
+  return { x: best.left - bounds.left, y: best.top - bounds.top }
+}
+
 /** Keep the floating toolbar from covering another node's title or body. Offsets are screen pixels. */
 export function toolbarOffset(nodeId: string, nodes: readonly NodeView[], zoom: number, size: { w: number; h: number }) {
   const view = nodes.find(node => node.nodeId === nodeId)

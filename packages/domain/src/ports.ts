@@ -11,4 +11,11 @@ export type DeliveryOutcome =
  */
 export interface CanvasDeliveryPort<Tx> {
   deliverOutput(tx: Tx, input: { bindingId: string; assetVersionId: string }): DeliveryOutcome
+  /**
+   * Creates the empty result node of a pending new_node binding and points the binding at its main slot (RFC 0047).
+   * The canvas service implements both placeholder methods; a double without them keeps create-on-delivery.
+   */
+  reservePlaceholder?(tx: Tx, input: { bindingId: string }): void
+  /** Removes a cancelled job's placeholders whose main slot is still empty and still awaits that job (RFC 0047 decision 1) */
+  releasePlaceholders?(tx: Tx, input: { jobId: string }): void
 }

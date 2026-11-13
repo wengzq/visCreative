@@ -1,15 +1,69 @@
 import { describe, expect, it } from 'vitest'
-import { defaultParams, fitParams, parameterFields, segmentOptions, resolveChoice, type ProviderCatalog } from './params'
+import { defaultParams, fitParams, parameterDescription, parameterFields, parameterLabel, parameterOption, parameterSummary, schemaFields, segmentOptions, resolveChoice, type ProviderCatalog } from './params'
 
-const catalog: ProviderCatalog = { providerTypes: [], providers: [
+const catalog: ProviderCatalog = { videoReferences: 'hosting_required', providerTypes: [], providers: [
   { id: 'mock', type: 'mock', label: 'Mock', needsKey: false, available: true, hasKey: false, models: [{ id: 'mock-image-1', label: 'Mock', kind: 'image', paramsSchema: { properties: { n: { type: 'integer', default: 1 } } } }] },
   { id: 'ark', type: 'volcengine-ark', label: '方舟', needsKey: true, available: true, hasKey: true, models: [{ id: 'ep-image', label: '图片', kind: 'image', paramsSchema: { properties: { size: { type: 'string', default: '2K' } } } }] },
 ], defaults: { image: { provider: 'ark', model: 'ep-image' } }, limits: { maxConcurrent: 3, dailyImage: 50, dailyAudio: 20, dailyVideo: 10 } }
 
 describe('Generation parameter selection', () => {
+  it('resolves schema copy before legacy dictionaries, titles and raw names in both locales', () => {
+    const field = schemaFields({ properties: { audio: {
+      type: 'boolean', title: 'Legacy title', description: 'Agent description',
+      'x-vis-label': { zh: '生成音频', en: 'Generate audio' },
+      'x-vis-description': { zh: '同步声音', en: 'Synchronized audio' },
+      'x-vis-options': { true: { zh: '有声', en: 'With sound' } },
+    } } })[0]![1]
+    expect(parameterLabel('audio', field, 'en', () => 'Legacy label')).toBe('Generate audio')
+    expect(parameterLabel('audio', field, 'zh-CN', () => 'Legacy label')).toBe('生成音频')
+    expect(parameterDescription(field, 'en')).toBe('Synchronized audio')
+    expect(parameterDescription(field, 'zh-CN')).toBe('同步声音')
+    expect(parameterOption('audio', true, field, 'en', () => 'Legacy option')).toBe('With sound')
+    expect(parameterOption('audio', true, field, 'zh-CN', () => 'Legacy option')).toBe('有声')
+    expect(parameterLabel('audio', { type: 'boolean', title: 'Title' }, 'en', () => 'Legacy label')).toBe('Legacy label')
+    expect(parameterLabel('custom', { type: 'boolean', title: 'Title' }, 'en', name => name)).toBe('Title')
+    expect(parameterLabel('custom', { type: 'boolean' }, 'en', name => name)).toBe('custom')
+    expect(parameterDescription({ type: 'string', description: 'Agent description' }, 'zh-CN')).toBe('Agent description')
+    expect(parameterOption('custom', 'raw', { type: 'string' }, 'en', (_name, value) => value)).toBe('raw')
+  })
+  it('ignores malformed annotations without discarding valid copy or supported field shapes', () => {
+    const field = schemaFields({ properties: { custom: {
+      type: 'string', title: 'Title',
+      'x-vis-label': { zh: '标签', en: 'Label' },
+      'x-vis-description': { zh: '说明' },
+      'x-vis-options': { auto: { zh: '', en: 'Auto' } },
+    } } })[0]![1]
+    expect(parameterLabel('custom', field, 'en', name => name)).toBe('Label')
+    expect(parameterDescription(field, 'en')).toBeUndefined()
+    expect(parameterOption('custom', 'auto', field, 'en', (_name, value) => value)).toBe('auto')
+    const malformed = schemaFields({ properties: { custom: { type: 'string', title: 'Title', 'x-vis-label': 'wrong' } } })[0]![1]
+    expect(parameterLabel('custom', malformed, 'en', name => name)).toBe('Title')
+  })
+  it('uses localized string, numeric and boolean schema option names in summaries', () => {
+    const schema = { properties: { imageMode: {
+      type: 'string', default: 'auto',
+      'x-vis-options': { auto: { zh: '自动', en: 'Automatic selection' } },
+    }, mode: {
+      type: 'integer', default: -1,
+      'x-vis-options': { '-1': { zh: '自动', en: 'Automatic duration' } },
+    }, audio: {
+      type: 'boolean', default: true,
+      'x-vis-options': { true: { zh: '有声', en: 'With sound' } },
+    } } }
+    expect(parameterSummary(schema, {}, {
+      number: String, boolean: String, label: name => name, value: (label, value) => `${label} ${value}`,
+      option: (name, value, field) => parameterOption(name, value, field, 'en', (_name, raw) => raw),
+    })).toBe('Automatic selection · mode Automatic duration · audio With sound')
+  })
   it('never offers unavailable service models even when saved settings or defaults point to them', () => {
     const removed = { ...catalog, providers: catalog.providers.map(provider => ({ ...provider, available: provider.id !== 'ark' })) }
     expect(resolveChoice(removed, 'image', { provider: 'ark', model: 'ep-image' })?.provider).toBe('mock')
+  })
+  it('never offers render/scene as a prompt model, even when saved on a node or first in the catalog', () => {
+    const scene = { id: 'scene', label: 'Scene', kind: 'image' as const, paramsSchema: {} }
+    const withScene = { ...catalog, providers: [{ ...catalog.providers[0]!, id: 'render', available: true, models: [scene] }, ...catalog.providers] }
+    expect(resolveChoice(withScene, 'image', { provider: 'render', model: 'scene' })?.model).not.toBe('scene')
+    expect(resolveChoice({ ...withScene, defaults: {} }, 'image', null)?.model).not.toBe('scene')
   })
   it('Audio duration uses the default or saved music/sound-effect model without borrowing an image model', () => {
     const audio: ProviderCatalog = { ...catalog, defaults: { audio: { provider: 'mock', model: 'mock-music-1' } }, providers: [

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createKeychainSecretStore, createMemorySecretStore, type SecurityCommandRunner } from './secret-store'
+import { createKeychainSecretStore, createMemorySecretStore, createWindowsCredentialStore, type SecurityCommandRunner } from './secret-store'
 
 describe('In-memory SecretStore', () => {
   it('read, update, existence, deletion and provider isolation', async () => {
@@ -85,5 +85,41 @@ describe('macOS Keychain SecretStore (fake commands only)', () => {
     await expect(store.set('ark', 'key')).rejects.toThrow('not supported')
     await expect(store.delete('ark')).rejects.toThrow('not supported')
     expect(run).not.toHaveBeenCalled()
+  })
+})
+
+describe('Hosting credential service (fake commands only)', () => {
+  it('uses the hosting service and tos account for every Keychain operation, with secrets only on stdin', async () => {
+    const run = vi.fn<SecurityCommandRunner>().mockResolvedValue({ stdout: 'testSK\n', exitCode: 0 })
+    const store = createKeychainSecretStore({ platform: 'darwin', run, service: 'vis-creative.hosting.test' })
+    try {
+      await store.set('tos', 'testSK')
+      expect(await store.get('tos')).toBe('testSK')
+      expect(await store.has('tos')).toBe(true)
+    } finally { await store.delete('tos') }
+    expect(run.mock.calls).toEqual([
+      [['-i'], 'add-generic-password -U -s "vis-creative.hosting.test" -a "tos" -w "testSK"\n'],
+      [['find-generic-password', '-s', 'vis-creative.hosting.test', '-a', 'tos', '-w'], undefined],
+      [['find-generic-password', '-s', 'vis-creative.hosting.test', '-a', 'tos'], undefined],
+      [['delete-generic-password', '-s', 'vis-creative.hosting.test', '-a', 'tos'], undefined],
+    ])
+    expect(run.mock.calls.flatMap(([args]) => args)).not.toContain('testSK')
+  })
+
+  it('uses the independent hosting resource in PasswordVault through the existing stdin script', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: Buffer.from('testSK').toString('base64'), exitCode: 0 })
+    const store = createWindowsCredentialStore({ platform: 'win32', run, resource: 'vis-creative.hosting.test' })
+    try {
+      await store.set('tos', 'testSK')
+      expect(await store.get('tos')).toBe('testSK')
+      expect(await store.has('tos')).toBe(true)
+    } finally { await store.delete('tos') }
+    for (const [args, script] of run.mock.calls) {
+      expect(args).toEqual(['-NoProfile', '-NonInteractive', '-Command', '-'])
+      expect(script).toContain(Buffer.from('vis-creative.hosting.test').toString('base64'))
+      expect(script).toContain(Buffer.from('tos').toString('base64'))
+      expect(script).not.toContain(Buffer.from('vis-creative.provider').toString('base64'))
+    }
+    expect(run.mock.calls[2]![1]).not.toContain('RetrievePassword')
   })
 })

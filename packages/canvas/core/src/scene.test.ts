@@ -21,7 +21,7 @@ const object = (assetVersionId: string): SceneObject => ({
   source: { type: 'model', assetVersionId },
 })
 const view = (still: string | null): SceneView => ({
-  id: 'wide', name: 'Wide', camera: { position: [0, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 }, aspectRatio: '16:9', still,
+  id: 'wide', name: 'Wide', camera: { position: [0, 2, 5], target: [0, 1, 0], roll: 0, focalLengthMm: 35 }, aspectRatio: '16:9', still, createdBy: 'user', userTouched: false,
 })
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'vis-scene-validation-'))

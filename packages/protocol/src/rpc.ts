@@ -43,6 +43,7 @@ export const ErrorData = z.object({
   resolution: WorkMessageView.optional(),
   // 0018: the UI translates errors into the current language using this; falls back to message when reason is absent.
   reason: z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/).optional(),
+  hint: z.string().optional(),
   params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
 })
 export type ErrorData = z.infer<typeof ErrorData>

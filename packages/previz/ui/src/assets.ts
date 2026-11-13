@@ -1,4 +1,4 @@
-import type { PrevizDoc } from '@vis/protocol'
+import type { PrevizDoc, PrevizPanel } from '@vis/protocol'
 
 export const pictureKeys = ['underlay', 'sketch', 'image', 'blockout'] as const
 export function mapPictures(doc: PrevizDoc, resolve: (id: string) => string): PrevizDoc {
@@ -47,6 +47,8 @@ export function fitImage(context: CanvasRenderingContext2D, image: CanvasImageSo
   context.drawImage(image, (width - image.width * scale) / 2, (height - image.height * scale) / 2, image.width * scale, image.height * scale)
 }
 export const png = (canvas: HTMLCanvasElement) => new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode the panel')), 'image/png'))
+/** The picture drawn under the sketch. An imported or canvas underlay is the author's own choice, so it wins over a blockout frame. */
+export const backdrop = (panel: Pick<PrevizPanel, 'underlay' | 'blockout'>) => panel.underlay ?? panel.blockout
 export async function flatten(underlay: string | null, sketch: string | null, ratio: string, url: (id: string) => string): Promise<Blob> {
   const { width, height } = panelSize(ratio)
   const canvas = document.createElement('canvas')

@@ -124,7 +124,8 @@ export function createMcpServer(env: Record<string, string | undefined>): McpSer
 
 function toolError(code: string, message: string, requestId?: unknown, conflicts?: unknown, data?: import('@vis/protocol').ErrorData) {
   const error = { code, message, ...(conflicts !== undefined ? { conflicts } : {}),
-    ...(data?.reason !== undefined ? { reason: data.reason } : {}), ...(data?.params !== undefined ? { params: data.params } : {}) }
+    ...(data?.reason !== undefined ? { reason: data.reason } : {}), ...(data?.params !== undefined ? { params: data.params } : {}),
+    ...(data?.hint !== undefined ? { hint: data.hint } : {}) }
   return { content: [{ type: 'text', text: JSON.stringify({ error, ...(requestId === undefined ? {} : { requestId }) }) }], isError: true }
 }
 

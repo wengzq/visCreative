@@ -69,6 +69,16 @@ describe('Local endpoint', () => {
     expect(script).toContain(`"${join(cli, 'vis.mjs').replace(/%/g, '%%')}" %*`)
     expect(script).toContain('DisableDelayedExpansion')
   })
+
+  it.runIf(process.platform === 'win32')('Windows: inside the desktop app vis.cmd runs Electron as Node, scoped by setlocal (RFC 0046)', () => {
+    const dir = temporary()
+    const plain = readFileSync(join(prepareAgentCli(dir, join(dir, 'cli'), {}, false).cliBinDir, 'vis.cmd'), 'utf8')
+    expect(plain).not.toContain('ELECTRON_RUN_AS_NODE')
+    const script = readFileSync(join(prepareAgentCli(dir, join(dir, 'cli'), {}, true).cliBinDir, 'vis.cmd'), 'utf8')
+    const lines = script.split('\r\n')
+    expect(lines.indexOf('set "ELECTRON_RUN_AS_NODE=1"')).toBeGreaterThan(lines.findIndex(line => line.startsWith('setlocal')))
+    expect(lines.indexOf('set "ELECTRON_RUN_AS_NODE=1"')).toBeLessThan(lines.findIndex(line => line.includes('vis.mjs')))
+  })
 })
 
 describe('Windows Credential Manager (fake commands)', () => {

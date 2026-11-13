@@ -1,9 +1,10 @@
 import type { SceneAspectRatio } from '@vis/protocol'
 import { sceneAspect } from '@vis/scene-core'
 
-export function captureDimensions(ratio: SceneAspectRatio, longEdge = 1920) {
+export function captureDimensions(ratio: SceneAspectRatio, longEdge = 1920, pixelStep = 1) {
   const aspect = sceneAspect(ratio)
-  return aspect >= 1 ? { width: longEdge, height: Math.round(longEdge / aspect) } : { width: Math.round(longEdge * aspect), height: longEdge }
+  const round = (value: number) => Math.round(value / pixelStep) * pixelStep
+  return aspect >= 1 ? { width: longEdge, height: round(longEdge / aspect) } : { width: round(longEdge * aspect), height: longEdge }
 }
 
 export function cameraViewport(width: number, height: number, aspect: number) {

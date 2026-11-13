@@ -1,6 +1,6 @@
 import type { Vec3 } from '@vis/protocol'
 import {
-  clampJointRotation, jointEuler, jointQuaternion, mirrorPose, pairedJoints, poseRotation, presetPose, resetJointPose,
+  jointEuler, mirrorPose, pairedJoints, poseRotation, presetPose, resetJointPose, setJointAxis,
   type BodyDescriptor, type BodyPose,
 } from '@vis/scene-core'
 import { useMessages } from '@vis/ui-kit'
@@ -47,11 +47,7 @@ export function PoseInspector({ body, pose, controller, disabled, change }: {
       <legend>{m.jointName(selected.id)}</legend>
       <div>{(['x', 'y', 'z'] as const).map((axis, index) => <NumberField key={`${selected.id}-${axis}`} label={m.jointRotation(m.jointName(selected.id), m[axis])} caption={m[axis]}
         value={degrees[index]!} disabled={disabled} min={MathUtils.radToDeg(selected.limits.min[index]!)} max={MathUtils.radToDeg(selected.limits.max[index]!)} commitOnBlur
-        onChange={value => change(pose => {
-          const angles = jointEuler(poseRotation(body, pose, selected))
-          angles[index] = MathUtils.degToRad(value)
-          return { ...pose, [selected.id]: clampJointRotation(selected, jointQuaternion(angles)) }
-        })} />)}</div>
+        onChange={value => change(pose => ({ ...pose, [selected.id]: setJointAxis(selected, poseRotation(body, pose, selected), index as 0 | 1 | 2, MathUtils.degToRad(value)) }))} />)}</div>
     </fieldset> : null}
     {selected ? <div className="vis-sc-button-row">
       <button aria-label={m.resetJoint} disabled={disabled} onClick={() => change(pose => resetJointPose(body, pose, selected.id))}>{m.resetJoint}</button>

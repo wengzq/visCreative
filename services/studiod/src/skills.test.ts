@@ -110,7 +110,7 @@ it.runIf(process.platform !== 'win32')('POSIX: preserves executable bits', () =>
   expect(existsSync(join(root, 'skills/示例/.git'))).toBe(false)
 })
 
-it('rejects symlinks, excessive depth, file count and size, with relative paths in errors', () => {
+it('rejects symlinks and excessive depth, with relative paths in errors', () => {
   const source = skill(join(dir, 'source'))
   symlinkSync(join(source, 'SKILL.md'), join(source, 'link'))
   expect(() => service.stage({ path: source })).toThrow(/link.*[Ss]ymlinks/)
@@ -118,17 +118,26 @@ it('rejects symlinks, excessive depth, file count and size, with relative paths 
   const deep = join(source, ...Array.from({ length: 17 }, () => 'd'))
   mkdirSync(deep, { recursive: true })
   expect(() => service.stage({ path: source })).toThrow(/depth/)
-  rmSync(join(source, 'd'), { recursive: true })
+  expect(readdirSync(join(data, 'skill-staging'))).toEqual([])
+})
+
+// Staging copies every file before the count trips, so this is 10,000 real copies; on a two-CPU Windows runner
+// with Defender scanning each one that has exceeded a minute.
+it('rejects more than 10000 files', () => {
+  const source = skill(join(dir, 'source'))
   for (let i = 0; i < 10_000; i++) writeFileSync(join(source, `${i}.txt`), '')
   expect(() => service.stage({ path: source })).toThrow(/10000/)
-  rmSync(source, { recursive: true })
-  skill(source)
+  expect(readdirSync(join(data, 'skill-staging'))).toEqual([])
+}, 180_000)
+
+it('rejects more than 512 MiB from file metadata', () => {
+  const source = skill(join(dir, 'source'))
   // Sparse: the limit is read from file metadata before any content.
   writeFileSync(join(source, 'big'), '')
   truncateSync(join(source, 'big'), 512 * 1024 * 1024)
   expect(() => service.stage({ path: source })).toThrow(/512 MiB/)
   expect(readdirSync(join(data, 'skill-staging'))).toEqual([])
-}, 60_000)
+})
 
 it('writes nothing on name conflicts without replacement; replacement backs up original directories by frontmatter name', () => {
   skill(join(root, 'skills/old-dir'), '同名', '旧描述')

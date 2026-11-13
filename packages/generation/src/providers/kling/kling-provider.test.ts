@@ -33,12 +33,16 @@ describe('Kling adapter', () => {
     return dir
   }
 
+  it('keeps Kling 4.0 image limits separate from the documented video file limit', () => {
+    expect(KLING_MODELS.find(model => model.id === 'kling-4.0')).toMatchObject({ inputBytes: 300_000_000, imageInputBytes: 30_000_000 })
+  })
+
   it('registers both hosts, confirmed models and an unverified descriptor', () => {
     const registry = createProviderTypeRegistry()
     expect(registry.get('kling')).toBe(klingProviderType)
     expect(registry.descriptors.find(type => type.type === 'kling')).toMatchObject({ needsKey: true, verified: false, allowCustomBaseUrl: true, kinds: ['video', 'image'] })
     expect(klingProviderType.regions.map(region => region.baseUrl)).toEqual(['https://api-beijing.klingai.com', 'https://api-singapore.klingai.com'])
-    expect(klingProviderType.knownModels).toEqual(KLING_MODELS.map(({ id, label, kind }) => ({ id, label, kind })))
+    expect(klingProviderType.knownModels.map(({ id, label, kind }) => ({ id, label, kind }))).toEqual(KLING_MODELS.map(({ id, label, kind }) => ({ id, label, kind })))
   })
 
   it.each(KLING_REGIONS)('uses the $id endpoint and refuses unsafe endpoints', async region => {
@@ -90,7 +94,7 @@ describe('Kling adapter', () => {
     ['video', 'kling-3.0', { duration: 15, resolution: '4k', audio: 'native' }, { duration: 16 }],
     ['video', 'kling-3.0-omni', { duration: 3, audio: 'off' }, { audio: 'original' }],
     ['video', 'kling-4.0', { duration: 30, resolution: '1080p', aspect_ratio: '21:9' }, { audio: 'off' }],
-    ['image', 'kling-v3-omni', { n: 4, resolution: '4k' }, { n: 5 }],
+    ['image', 'kling-v3-omni', { n: 9, resolution: '4k' }, { n: 10 }],
   ] as const)('validates parameters for %s %s', (kind, model, valid, invalid) => {
     const schema = klingParamsSchema(kind, model)
     expect(schema.safeParse(valid).success).toBe(true)
@@ -145,8 +149,8 @@ describe('Kling adapter', () => {
     const path = join(fixture.dir, 'input.png')
     await writeFile(path, PNG)
     const input = { type: 'asset' as const, kind: 'image' as const, mime: 'image/png', path }
-    await fixture.adapter.submit({ ...fixture.request, inputs: [input], params: { n: 4 } }, { idempotencyKey: 'image' })
-    expect(fixture.requests[0]).toMatchObject({ path: '/v1/images/omni-image', body: { model_name: 'kling-v3-omni', prompt: fixture.request.prompt, external_task_id: klingExternalId('image'), n: 4, result_type: 'single', image_list: [{ image: PNG.toString('base64') }] } })
+    await fixture.adapter.submit({ ...fixture.request, inputs: [input], params: { n: 9 } }, { idempotencyKey: 'image' })
+    expect(fixture.requests[0]).toMatchObject({ path: '/v1/images/omni-image', body: { model_name: 'kling-v3-omni', prompt: fixture.request.prompt, external_task_id: klingExternalId('image'), n: 9, result_type: 'single', image_list: [{ image: PNG.toString('base64') }] } })
     for (const model of ['kling-3.0-omni', 'kling-4.0']) {
       await fixture.adapter.submit({ ...fixture.request, kind: 'video', model, inputs: [input, input], params: { imageMode: 'reference' } }, { idempotencyKey: model })
       expect(fixture.requests.at(-1)?.path).toBe(`/omni-video/${model}`)

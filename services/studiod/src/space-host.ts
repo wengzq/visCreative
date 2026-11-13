@@ -1,7 +1,9 @@
+import { refreshReviews } from './reviews'
 import { createSkillLibrary, type SkillLibrary } from './skill-library'
-import { createTextDeletionService, refreshTextDeletionApprovals } from './text-deletion'
+import { createTextDeletionService } from './text-deletion'
 import { readSeriesTexts } from './series-text'
-import { createTextProposalService, refreshTextProposals } from './text-proposals'
+import { createTextProposalService } from './text-proposals'
+import { createSceneProposalService } from './scene-proposals'
 import { createSkillService, type SkillService } from './skills'
 import { attachmentPath } from './attachment'
 import { createSpaceLifecycle } from './space-lifecycle'
@@ -111,6 +113,7 @@ export type SpaceHost = {
   mediaTasks: MediaTaskService
   mediaPreviews: MediaPreviewService
   textDeletion: ReturnType<typeof createTextDeletionService>
+  sceneProposals: ReturnType<typeof createSceneProposalService>
   textProposals: ReturnType<typeof createTextProposalService>
   canvas: CanvasService
   entities: EntityService
@@ -151,7 +154,8 @@ export function openSpaceHost(spaceId: string, dir: string, opts: SpaceHostOptio
   const skills = createSkillService(rootPath, dir, now)
   const assets = createAssetStore({ blobsDir: join(dir, 'blobs'), now })
   const library = createLibraryService({ db, blobPath: hash => assets.blobPath(hash), now })
-  const canvas = createCanvasService({ db, now, onChanged: tx => { refreshTextProposals(tx, now()); refreshTextDeletionApprovals(tx, now()) } })
+  const canvas = createCanvasService({ db, now, onChanged: tx => { refreshReviews(tx, now()) } })
+  const sceneProposals = createSceneProposalService(db, now)
   const textProposals = createTextProposalService(db, now)
   const textDeletion = createTextDeletionService(db, now)
   const ownSeriesLibrary = opts.seriesLibraries ? undefined : createSeriesLibrary({ dataDir: dir, now })
@@ -213,7 +217,7 @@ export function openSpaceHost(spaceId: string, dir: string, opts: SpaceHostOptio
   if (!pendingRecovery && !opts.suspended) { generation.start(); scriptBatches.startScheduler() }
 
   return {
-    spaceId, rootPath, workDir, db, assets, canvas, textProposals, textDeletion, entities, seriesEntities, generation, mediaTasks, mediaPreviews, scriptBatches, sessions, work, workDeletion, skills, library,
+    spaceId, rootPath, workDir, db, assets, canvas, sceneProposals, textProposals, textDeletion, entities, seriesEntities, generation, mediaTasks, mediaPreviews, scriptBatches, sessions, work, workDeletion, skills, library,
     async close() {
       textDeletion.close()
       workDeletion.close()

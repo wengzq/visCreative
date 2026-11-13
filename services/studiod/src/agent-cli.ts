@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { delimiter, join, resolve } from 'node:path'
 
 /** Windows shell tool entry points live in the runtime directory; Agent adapters still enforce the environment allowlist. */
-export function prepareAgentCli(dataDir: string, cliBinDir: string, source: NodeJS.ProcessEnv = process.env): {
+export function prepareAgentCli(dataDir: string, cliBinDir: string, source: NodeJS.ProcessEnv = process.env, electron = Boolean(process.versions.electron)): {
   cliBinDir: string
   env: NodeJS.ProcessEnv
 } {
@@ -14,7 +14,9 @@ export function prepareAgentCli(dataDir: string, cliBinDir: string, source: Node
   }
   const command = `${quote(process.execPath)} ${quote(resolve(cliBinDir, 'vis.mjs'))} %*`
   mkdirSync(runtimeBin, { recursive: true })
-  writeFileSync(join(runtimeBin, 'vis.cmd'), `@echo off\r\nsetlocal DisableDelayedExpansion\r\n${command}\r\n`, 'utf8')
+  // RFC 0046: in the desktop app process.execPath is Electron, which runs vis.mjs as Node only with this variable.
+  const asNode = electron ? 'set "ELECTRON_RUN_AS_NODE=1"\r\n' : ''
+  writeFileSync(join(runtimeBin, 'vis.cmd'), `@echo off\r\nsetlocal DisableDelayedExpansion\r\n${asNode}${command}\r\n`, 'utf8')
   // Windows environment variable names are case-insensitive; avoid passing both PATH / Path and making Node pick the wrong value.
   const env = { ...source }
   const pathKey = Object.keys(source).find(key => key.toUpperCase() === 'PATH')

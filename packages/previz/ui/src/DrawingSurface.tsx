@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PrevizPanel } from '@vis/protocol'
 import { useMessages } from '@vis/ui-kit'
-import { fitImage, loadImage, panelSize, png } from './assets'
+import { backdrop, fitImage, loadImage, panelSize, png } from './assets'
 import { previzMessages } from './messages'
 
 export function DrawingSurface({ panel, ratio, url, tool, colour, size, disabled, sameSketch, onDraw, onError, onBusy }: {
@@ -16,6 +16,7 @@ export function DrawingSurface({ panel, ratio, url, tool, colour, size, disabled
   const drawn = useRef<string | null>(null)
   const saves = useRef({ pending: 0, queue: Promise.resolve() })
   const { width, height } = panelSize(ratio)
+  const under = backdrop(panel)
   useEffect(() => {
     // The canvas already shows its own strokes. Reloading them, or their uploaded version, would wipe newer ink.
     if (panel.sketch && drawn.current && sameSketch(drawn.current, panel.sketch)) { drawn.current = panel.sketch; return }
@@ -68,7 +69,7 @@ export function DrawingSurface({ panel, ratio, url, tool, colour, size, disabled
     })
   }
   return <div className="vis-pv-paper" style={{ aspectRatio: ratio.replace(':', ' / ') }}>
-    {panel.underlay ? <img src={url(panel.underlay)} alt="" draggable={false} /> : null}
+    {under ? <img src={url(under)} alt="" draggable={false} /> : null}
     <canvas ref={canvas} width={width} height={height} role="img" aria-label={m.surface} aria-disabled={disabled || loading} tabIndex={0}
       onPointerDown={event => {
         // Control-click is a right click on macOS.

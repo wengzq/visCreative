@@ -109,4 +109,12 @@ describe('Automatic approval path boundaries', () => {
   it.each(['network', 'other'] as const)('%s always prompts even with a path inside the directory', kind => {
     expect(approve({ kind, cwd: workDir, paths: [join(workDir, 'new.txt')] })).toBe(false)
   })
+
+  it('Native read-only web search and fetch pass; other network requests and blocked ones still prompt (RFC 0048)', () => {
+    expect(approve({ kind: 'network', webRead: true })).toBe(true)
+    expect(approve({ kind: 'network', webRead: true, autoApprovalBlocked: true })).toBe(false)
+    expect(approve({ kind: 'network' })).toBe(false)
+    expect(approve({ kind: 'other', webRead: true })).toBe(false)
+    expect(approve({ kind: 'command', webRead: true, cwd: join(dir, 'outside') })).toBe(false)
+  })
 })

@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Mesh, MeshBasicMaterial, Quaternion, Raycaster, Vector3, type Object3D } from 'three'
 import type { Quat, SceneDoc } from '@vis/protocol'
-import { jointEuler, jointQuaternion, HUMAN_BODY } from '@vis/scene-core'
+import { jointEuler, jointQuaternion, HUMAN_BODY, sampleScene } from '@vis/scene-core'
 import { createSceneDraft } from './draft'
 import { SceneViewport, type SceneViewportProps } from './SceneViewport'
 import { createSceneViewportController } from './viewport-state'
@@ -188,6 +188,28 @@ const figureDoc = (): SceneDoc => ({ version: 1, rev: 1, views: [], objects: [{
   source: { type: 'figure', bodyId: 'human', heightM: 1.8, pose: {} },
 }] })
 
+it('applies sampled motion to the existing stage without rebuilding geometry on each frame', async () => {
+  const doc = figureDoc()
+  doc.durationS = 2
+  const object = doc.objects[0]!
+  object.tracks = {
+    transform: [{ t: 0, value: object.transform, ease: 'linear' }, { t: 2, value: { ...object.transform, position: [4, 0, 0] }, ease: 'linear' }],
+    pose: { leftElbow: [{ t: 0, value: [0, 0, 0, 1], ease: 'linear' }, { t: 2, value: jointQuaternion([-0.8, 0, 0]), ease: 'linear' }] },
+    hidden: [{ t: 0, value: false }, { t: 2, value: true }],
+  }
+  const { controller, render } = mount(sampleScene(doc, 0))
+  await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('ready'))
+  const figure = controls.transform.object as Object3D
+  const elbow = figure.getObjectByName('leftElbow')!
+  render({ doc: sampleScene(doc, 1) })
+  expect(controls.transform.object).toBe(figure)
+  expect(figure.position.x).toBe(2)
+  expect(jointEuler(elbow.quaternion.toArray())[0]).toBeCloseTo(-0.4)
+  render({ doc: sampleScene(doc, 2) })
+  expect(figure.visible).toBe(false)
+  expect(controls.transform.object).toBeUndefined()
+})
+
 it('keeps a joint drag attached through a save echo, clamps each sample and commits a local rotation once', async () => {
   const doc = figureDoc()
   const { props, controller, render } = mount(doc)
@@ -366,6 +388,26 @@ it('switches from Move to Rotate when a joint marker is selected explicitly', as
   expect(controller.getSnapshot()).toMatchObject({ selectedId: 'box', selectedJointId: 'leftElbow', tool: 'rotate' })
 })
 
+it('selects a joint marker that lies under the gizmo, but a gizmo click on bare space keeps the selection', async () => {
+  const { controller } = mount(figureDoc())
+  await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('ready'))
+  controller.selectJoint('leftHip')
+  const helpers = controls.transform.helper.parent as Object3D
+  const marker = helpers.children.flatMap(child => child.children).find(child => child.userData.jointId === 'leftKnee')!
+  const target = hooks.element as EventTarget
+  const click = () => {
+    target.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, clientX: 320, clientY: 180 }))
+    target.dispatchEvent(Object.assign(new Event('pointerup'), { button: 0, clientX: 320, clientY: 180 }))
+  }
+  controls.transform.axis = 'X'
+  vi.spyOn(Raycaster.prototype, 'intersectObjects').mockReturnValueOnce([{ object: marker, distance: 1, point: new Vector3() }])
+  click()
+  expect(controller.getSnapshot()).toMatchObject({ selectedId: 'box', selectedJointId: 'leftKnee', tool: 'rotate' })
+  vi.spyOn(Raycaster.prototype, 'intersectObjects').mockReturnValue([])
+  click()
+  expect(controller.getSnapshot()).toMatchObject({ selectedId: 'box', selectedJointId: 'leftKnee' })
+})
+
 it('skips joint world-matrix traversal on frames without a selected figure', async () => {
   const { controller } = mount({ version: 1, rev: 0, views: [], objects: [{
     ...figureDoc().objects[0]!, source: { type: 'primitive', shape: 'box', size: [1, 1, 1] },
@@ -402,4 +444,77 @@ it('shares marker geometry and two materials across selections and disposes each
   expect(geometryDisposed).toHaveBeenCalledOnce()
   expect(materialDisposed).toHaveBeenCalledOnce()
   expect(selectedDisposed).toHaveBeenCalledOnce()
+})
+
+it('applies a placement-only change in place and keeps the gizmo attached', async () => {
+  const doc = figureDoc()
+  const { controller, render } = mount(doc)
+  await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('ready'))
+  const transform = controls.transform!
+  const figure = transform.object!
+  const moved = { position: [0.5, 0, -0.25], rotation: [0, Math.SQRT1_2, 0, Math.SQRT1_2], scale: [1.05, 1.05, 1.05] } as const
+  render({ doc: { ...doc, rev: 2, objects: [{ ...doc.objects[0]!, userTouched: true, transform: { position: [...moved.position], rotation: [...moved.rotation], scale: [...moved.scale] } }] } })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(transform.object).toBe(figure)
+  expect(figure.position.toArray()).toEqual([0.5, 0, -0.25])
+  expect(figure.scale.toArray()).toEqual([1.05, 1.05, 1.05])
+  expect(figure.quaternion.angleTo(new Quaternion(0, Math.SQRT1_2, 0, Math.SQRT1_2))).toBeCloseTo(0)
+  expect(figure.matrixWorld.elements[12]).toBe(0.5)
+  expect(controller.getSnapshot()).toMatchObject({ status: 'ready', dragging: false })
+})
+
+it('applies a pose-only change to the joint in place and keeps the joint gizmo attached', async () => {
+  const doc = figureDoc()
+  const { controller, render } = mount(doc)
+  await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('ready'))
+  controller.selectJoint('leftKnee')
+  const transform = controls.transform!
+  const knee = transform.object!
+  expect(knee.name).toBe('leftKnee')
+  const bent = jointQuaternion([0.5, 0, 0])
+  const object = doc.objects[0]!
+  if (object.source.type !== 'figure') throw new Error('Expected a figure')
+  render({ doc: { ...doc, rev: 2, objects: [{ ...object, source: { ...object.source, pose: { leftKnee: bent } } }] } })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(transform.object).toBe(knee)
+  expect(new Quaternion(...bent).angleTo(knee.quaternion)).toBeCloseTo(0)
+  // Undoing back to the empty pose returns the knee to the standing rotation, as a rebuild would.
+  render({ doc: { ...doc, rev: 3 } })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(transform.object).toBe(knee)
+  expect(knee.quaternion.toArray()).toEqual([0, 0, 0, 1])
+})
+
+it('still rebuilds when anything besides placement or pose changes', async () => {
+  const doc = figureDoc()
+  const { controller, render } = mount(doc)
+  await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('ready'))
+  const transform = controls.transform!
+  const figure = transform.object!
+  const object = doc.objects[0]!
+  if (object.source.type !== 'figure') throw new Error('Expected a figure')
+  render({ doc: { ...doc, rev: 2, objects: [{ ...object, transform: { ...object.transform, position: [1, 0, 0] }, source: { ...object.source, heightM: 1.5 } }] } })
+  await vi.waitFor(() => expect(transform.object).not.toBe(figure))
+  expect(transform.object!.position.toArray()).toEqual([1, 0, 0])
+})
+
+it.each(['translate', 'rotate'] as const)('keeps the selection and %s tool when a small gizmo drag that committed ends over a joint marker', async tool => {
+  const { props, controller } = mount(figureDoc())
+  await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('ready'))
+  if (tool === 'rotate') controller.selectJoint('leftHip')
+  const transform = controls.transform!
+  const helpers = transform.helper.parent as Object3D
+  const marker = helpers.children.flatMap(child => child.children).find(child => child.userData.jointId === 'leftKnee')!
+  const target = hooks.element as EventTarget
+  transform.axis = 'X'
+  target.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, clientX: 320, clientY: 180 }))
+  transform.emit('mouseDown')
+  if (tool === 'rotate') transform.object.quaternion.fromArray(jointQuaternion([-0.05, 0, 0]))
+  else transform.object.position.x = 0.02
+  // TransformControls registers its pointerup first, so its mouseUp commits before the viewport sees the release.
+  transform.emit('mouseUp')
+  vi.spyOn(Raycaster.prototype, 'intersectObjects').mockReturnValue([{ object: marker, distance: 1, point: new Vector3() }])
+  target.dispatchEvent(Object.assign(new Event('pointerup'), { button: 0, clientX: 322, clientY: 181 }))
+  expect(tool === 'rotate' ? props.onJointRotation : props.onTransform).toHaveBeenCalledOnce()
+  expect(controller.getSnapshot()).toMatchObject({ selectedId: 'box', selectedJointId: tool === 'rotate' ? 'leftHip' : null, tool })
 })

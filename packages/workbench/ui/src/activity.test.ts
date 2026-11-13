@@ -84,3 +84,10 @@ it('localizes uncertain interrupted delivery without claiming Send now paused th
   // english-exempt: Chinese UI copy assertion verifies the queue notice in its original locale.
   expect(transcriptNotice(notice, 'zh-CN')).toContain('优先发送')
 })
+
+it('localizes the inactivity failure notice in both languages', () => {
+  const notice = { code: 'agent_inactive', message: 'Fallback notice' }
+  expect(transcriptNotice(notice, 'en')).toBe('The Agent sent no activity for too long. This turn failed and its process was stopped.')
+  // english-exempt: Chinese UI copy assertion verifies the inactivity notice in its original locale.
+  expect(transcriptNotice(notice, 'zh-CN')).toBe('Agent 长时间没有活动，本回合已失败并停止其进程。')
+})

@@ -164,12 +164,25 @@ describe.skipIf(!ready)('Audio assets and generation', () => {
     await page.getByRole('button', { name: '生成', exact: true }).click()
     await expect.poll(() => requests.find(request => request.kind === 'video')).toMatchObject({
       kind: 'video', model: 'mock-video-1', prompt: '风铃声中的夏日庭院',
-      inputs: expect.arrayContaining([{ type: 'asset', kind: 'audio', mime: 'audio/wav', path: expect.any(String), durationMs: expect.any(Number) }]),
+      inputs: expect.arrayContaining([{ type: 'asset', kind: 'audio', mime: 'audio/wav', path: expect.any(String), durationMs: expect.any(Number), bytes: (await import('node:fs')).statSync(join(dir, 'tone.wav')).size }]),
     })
     const node = page.locator(`.react-flow__node-video[data-id="${video.nodeId}"]`)
     await node.hover()
     await node.locator('video').waitFor({ timeout: 10_000 })
     await expect.poll(() => node.locator('video').evaluate(video => (video as HTMLVideoElement).videoWidth)).toBeGreaterThan(0)
     expect(pageErrors).toEqual([])
+  })
+
+  it('moves an audio node dragged by its player body', async () => {
+    await fitCanvas()
+    const original = (await nodes()).find(node => node.nodeId === uploaded.nodeId)!
+    // The time readout sits on the player body, outside the seek strip and play button that keep the pointer.
+    const handle = page.locator(`.react-flow__node-audio[data-id="${uploaded.nodeId}"] .vis-audio-controls > span`).first()
+    await handle.hover()
+    const box = (await handle.boundingBox())!
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 80, { steps: 12 })
+    await page.mouse.up()
+    await expect.poll(async () => (await nodes()).find(node => node.nodeId === uploaded.nodeId)!.x, { timeout: 5000 }).toBeGreaterThan(original.x)
   })
 })

@@ -14,6 +14,7 @@ import { and, appendEvent, desc, eq, inArray, spaceSchema as s, sql, type SpaceD
 import { ProviderError, type ProviderAdapter, type ProviderInput, type ProviderOutputRef } from './providers/types'
 import { localRunningCount, type GenerationQuota } from './quota'
 import { isRecheckable, readJobView } from './view'
+import { sceneModelVersionIds } from './providers/render/scene'
 
 export type RunnerDeps = {
   db: SpaceDb
@@ -66,7 +67,7 @@ export class JobRunner {
   }
 
   terminalCleanupJobIds(): string[] {
-    return this.deps.db.select().from(s.generationJobs).where(inArray(s.generationJobs.status, ['succeeded', 'failed', 'cancelled'])).all().flatMap(job => {
+    return this.deps.db.select().from(s.generationJobs).where(inArray(s.generationJobs.status, ['succeeded', 'failed', 'cancelled', 'unknown'])).all().flatMap(job => {
       try { return this.adapterFor(job)?.cleanup ? [job.id] : [] } catch { return [] }
     })
   }
@@ -84,7 +85,7 @@ export class JobRunner {
 
   private async cleanup(jobId: string): Promise<void> {
     const job = this.deps.db.select().from(s.generationJobs).where(eq(s.generationJobs.id, jobId)).get()
-    if (!job || (job.status !== 'succeeded' && job.status !== 'failed' && job.status !== 'cancelled')) return
+    if (!job || (job.status !== 'succeeded' && job.status !== 'failed' && job.status !== 'cancelled' && job.status !== 'unknown')) return
     const attempt = this.latestAttempt(jobId)
     if (!attempt) return
     try { await this.adapterFor(job)?.cleanup?.({ idempotencyKey: attempt.id, status: job.status }) }
@@ -289,7 +290,7 @@ export class JobRunner {
   }
 
   private buildRequest(job: Job) {
-    const { prompt, resolvedPrompt, frameRefs, providerConfiguration: _configuration, actualPrompt: _actualPrompt, ...params } = job.params as { prompt: string; resolvedPrompt?: string; frameRefs?: { last?: unknown } } & Record<string, unknown>
+    const { prompt, resolvedPrompt, frameRefs, providerConfiguration: _configuration, actualPrompt: _actualPrompt, revisedPrompt: _revisedPrompt, ...params } = job.params as { prompt: string; resolvedPrompt?: string; frameRefs?: { last?: unknown } } & Record<string, unknown>
     const inputs = this.readInputs(job.id)
     const frames = frameRefs ? inputs.splice(-(frameRefs.last ? 2 : 1)) : []
     return { kind: job.kind, operation: job.operation, model: job.model, prompt: resolvedPrompt ?? prompt, params, inputs, ...(frames[0] ? { frames: { first: frames[0], ...(frames[1] ? { last: frames[1] } : {}) } } : {}) }
@@ -300,20 +301,34 @@ export class JobRunner {
     const rows = this.deps.db
       .select({
         textBody: s.slotRevisions.textBody,
+        sceneDoc: s.slotRevisions.sceneDoc,
+        assetVersionId: s.assetVersions.id,
         mime: s.assetVersions.mime,
         blobHash: s.assetVersions.blobHash,
         kind: s.assets.kind,
         durationMs: s.assetVersions.durationMs,
+        width: s.assetVersions.width,
+        height: s.assetVersions.height,
+        fps: s.assetVersions.fps,
+        bytes: s.blobs.byteSize,
       })
       .from(s.jobInputs)
       .leftJoin(s.slotRevisions, and(eq(s.slotRevisions.slotId, s.jobInputs.slotId), eq(s.slotRevisions.revision, s.jobInputs.slotRevision)))
       .leftJoin(s.assetVersions, eq(s.assetVersions.id, sql`coalesce(${s.jobInputs.assetVersionId}, ${s.slotRevisions.assetVersionId})`))
       .leftJoin(s.assets, eq(s.assets.id, s.assetVersions.assetId))
+      .leftJoin(s.blobs, eq(s.blobs.hash, s.assetVersions.blobHash))
       .where(eq(s.jobInputs.jobId, jobId))
       .orderBy(s.jobInputs.ordinal)
       .all()
     return rows.flatMap((r): ProviderInput[] => {
-      if (r.blobHash && r.mime && r.kind && isMediaKind(r.kind)) return [{ type: 'asset', kind: r.kind, mime: r.mime, path: this.deps.assets.blobPath(r.blobHash), ...(r.durationMs !== null ? { durationMs: r.durationMs } : {}) }]
+      if (r.sceneDoc) {
+        const models = sceneModelVersionIds(r.sceneDoc).flatMap(id => {
+          const model = rows.find(row => row.assetVersionId === id && row.kind === 'model')
+          return model?.blobHash && model.mime ? [{ assetVersionId: id, mime: model.mime, path: this.deps.assets.blobPath(model.blobHash) }] : []
+        })
+        return [{ type: 'scene', doc: r.sceneDoc, models }]
+      }
+      if (r.blobHash && r.mime && r.kind && isMediaKind(r.kind)) return [{ type: 'asset', kind: r.kind, mime: r.mime, path: this.deps.assets.blobPath(r.blobHash), ...(r.durationMs !== null ? { durationMs: r.durationMs } : {}), ...(r.width !== null ? { width: r.width } : {}), ...(r.height !== null ? { height: r.height } : {}), ...(r.fps !== null ? { fps: r.fps } : {}), ...(r.bytes !== null ? { bytes: r.bytes } : {}) }]
       if (r.textBody !== null) return [{ type: 'text', text: r.textBody }]
       return []
     })
@@ -349,12 +364,21 @@ export class JobRunner {
     if (state.state === 'failed') return this.settle(job, 'failed', state.error, attempt)
     if (state.state !== 'succeeded') return { next: 'poll', delayMs: adapter.pollIntervalMs ?? this.deps.pollIntervalMs }
 
-    this.deps.db.transaction(tx => this.setJobStatus(tx, job.id, 'finalizing', this.deps.now()), { behavior: 'immediate' })
+    this.deps.db.transaction(tx => {
+      this.storeRevisedPrompt(tx, job.id, state.revisedPrompt)
+      this.setJobStatus(tx, job.id, 'finalizing', this.deps.now())
+    }, { behavior: 'immediate' })
     this.deps.onJobChanged(job.id)
     return this.finalizeOutputs({ ...job, status: 'finalizing' }, adapter, attempt, state.outputs)
   }
 
   // -- Delivery ---------------------------------------------------
+
+  private storeRevisedPrompt(tx: SpaceTx, jobId: string, prompt?: string): void {
+    if (prompt === undefined) return
+    const params = tx.select({ params: s.generationJobs.params }).from(s.generationJobs).where(eq(s.generationJobs.id, jobId)).get()!.params as Record<string, unknown>
+    tx.update(s.generationJobs).set({ params: { ...params, revisedPrompt: prompt.trim().slice(0, 20_000) } }).where(eq(s.generationJobs.id, jobId)).run()
+  }
 
   private async finalizeStep(job: Job, adapter: ProviderAdapter): Promise<StepResult> {
     const attempt = this.latestAttempt(job.id)!
@@ -366,6 +390,7 @@ export class JobRunner {
         return this.settle(job, 'unknown', { code: 'external_state_changed', message: `Generation service returned ${state.state}, inconsistent with the completed record` }, attempt)
       }
       // Do not reset retries here: successful queries are not progress, or persistent download failures would retry forever
+      this.deps.db.transaction(tx => this.storeRevisedPrompt(tx, job.id, state.revisedPrompt), { behavior: 'immediate' })
       return this.finalizeOutputs(job, adapter, attempt, state.outputs)
     } catch (error) {
       if (error instanceof ProviderError && error.kind === 'not_found') {

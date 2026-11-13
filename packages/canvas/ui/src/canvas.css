@@ -256,6 +256,13 @@ dialog.vis-shortcut-dialog { width: min(760px, 90vw); max-height: 85vh; overflow
 .vis-working-toggle[aria-pressed="true"] { background: var(--vis-accent-soft); border-color: var(--vis-accent); }
 .vis-node-markdown { white-space: normal; font-size: 13px; }
 .vis-node-text-summary { display: block; white-space: pre-wrap; overflow: hidden; }
+/* Zoomed out, text cards keep a readable on-screen size: title and summary sizes divide by --vis-zoom, and the word-count bar gives
+   way. The canvas sets --vis-zoom only in low detail, so zooming at normal detail restyles nothing, and floors it at 0.2 so a title
+   still fits a card at the minimum zoom. */
+.vis-canvas-wrap.is-low-detail .vis-text-card-content > .vis-writing-card-bar { display: none; }
+.vis-canvas-wrap.is-low-detail .vis-node-text-body:has(> .vis-node-text-summary) { overflow: hidden; padding: calc(6px / var(--vis-zoom)); }
+.vis-node-text-summary > .vis-node-text-overview-title { font-weight: 600; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: calc(14px / var(--vis-zoom, 1)); line-height: 1.3; margin-bottom: calc(4px / var(--vis-zoom, 1)); }
+.vis-node-text-summary > span:not(.vis-node-text-overview-title) { display: block; font-size: calc(12px / var(--vis-zoom, 1)); line-height: 1.4; color: var(--vis-text-dim); }
 .vis-node-markdown > :first-child { margin-top: 0; }
 .vis-node-markdown > :last-child { margin-bottom: 0; }
 .vis-node-markdown :is(h1, h2, h3, h4, h5, h6) { font-size: 14px; line-height: 1.4; margin: .8em 0 .4em; }

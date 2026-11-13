@@ -232,6 +232,20 @@
       "when": 1794022549578,
       "tag": "0032_rare_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794367875014,
+      "tag": "0033_mean_molly_hayes",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1794369826960,
+      "tag": "0034_large_retro_girl",
+      "breakpoints": true
     }
   ]
 }

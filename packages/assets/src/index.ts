@@ -1,7 +1,7 @@
 export * from './assets'
 export { assetVersionView } from './views'
 export { createFfmpegMedia, type ExtractedFrame, type MediaInfo, type MediaTools, type MediaRunOptions, type ProcessedMedia, mimeOf } from './media'
-export { detectVideoEncoder, type EncoderRunner } from './encoders'
+export { detectVideoEncoder, SOFTWARE_FIRST_H264_ENCODERS, type EncoderRunner } from './encoders'
 export type { VideoEncoder } from './video-encoder'
 export { audioPeaks, filmstrip, poster, createPreviewCache, type AudioPeaks, type Filmstrip, type CachedFilmstrip, type Poster, type CachedPoster } from './preview'
 export { planTimelineRender, probeTimelineSource, renderTimeline, type TimelineSource, type ProbedStreams, type TimelinePlan, type RenderedTimeline } from './timeline-render'

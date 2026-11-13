@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import type { MethodResult } from '@vis/protocol'
 
 export type Options = {
-  agents: ('codex' | 'deepseek')[]
+  agents: ('codex' | 'deepseek' | 'minimax-code' | 'codebuddy')[]
   scenarios: string[]
   dataDir: string
   /** Project roots live outside the data dir: studiod drops agents to read-only when a work dir is inside it. */
@@ -48,8 +48,8 @@ export function parseOptions(args: string[], ids: string[], env: NodeJS.ProcessE
   }
   if (!flags.has('--data-dir')) throw new Error('--data-dir is required; use a fresh isolated directory')
   const agents = [...new Set((flags.get('--agents') ?? 'codex,deepseek').split(','))]
-  if (agents.includes('claude')) throw new Error('Claude evaluation is deferred by RFC 0026; choose codex or deepseek')
-  if (agents.some(agent => !['codex', 'deepseek'].includes(agent))) throw new Error('Agents must be codex or deepseek')
+  if (agents.includes('claude')) throw new Error('Claude evaluation is deferred by RFC 0026; choose codex, deepseek, minimax-code or codebuddy')
+  if (agents.some(agent => !['codex', 'deepseek', 'minimax-code', 'codebuddy'].includes(agent))) throw new Error('Agents must be codex, deepseek, minimax-code or codebuddy')
   if (dryRun && (agents.length !== 1 || agents[0] !== 'codex')) throw new Error('--dry-run requires --agents codex')
   const scenarios = [...new Set((flags.get('--scenarios') ?? ids.join(',')).split(','))]
   if (scenarios.some(id => !ids.includes(id))) throw new Error(`Unknown scenario; choose ${ids.join(',')}`)

@@ -1,6 +1,12 @@
-import type { NodeView, SceneDoc, SceneView } from '@vis/protocol'
+import type { NodeView, SceneDoc, SceneView, SceneProposal, SceneChangeRef } from '@vis/protocol'
 
 export type SceneEditorHost = {
+  proposals?: readonly SceneProposal[]
+  initialProposalId?: string
+  sessionName?(sessionId: string): string | undefined
+  // The host flushes any mounted draft once before acceptance and reports a localized save failure.
+  resolveProposal?(action: 'accept' | 'reject', changes: SceneChangeRef[]): Promise<void>
+  registerDraft?(handle: { flush(): Promise<number | null>; adopt(doc: SceneDoc, revision: number, expectedRevision: number): void }): () => void
   initialViewId?: string
   initialTarget?: { nodeId: string; panelId: string }
   node: NodeView
@@ -12,6 +18,7 @@ export type SceneEditorHost = {
   commit(doc: SceneDoc, expectedRevision: number): Promise<'ok' | 'conflict'>
   // Creates an image node with the scene as its input.
   saveImage(assetVersionId: string, name: string): Promise<void>
+  renderVideo(options: { viewId: string; revision: number; width: number; height: number; fps: 24; prompt: string }): Promise<void>
   // Writes the frame to panel.blockout and records the panel's sceneRef.
   sendToPanel(target: { nodeId: string; panelId: string }, source: { viewId: string; assetVersionId: string; sceneRev: number }): Promise<void>
   lastWriter?(): string | undefined
@@ -26,12 +33,14 @@ export type SceneDraft = {
   saveState: 'saved' | 'saving' | 'unsaved' | 'conflict'
   saveError: unknown
   conflict: { theirs: SceneDoc; revision: number } | null
-  edit(next: SceneDoc, immediate?: boolean): void
+  // Edits sharing a run, such as one held key's repeats, make a single undo step.
+  edit(next: SceneDoc, immediate?: boolean, run?: string): void
   beginEdit(): void
   undo(): void
   canUndo: boolean
   loadTheirs(): void
   flush(): Promise<boolean>
+  adopt(doc: SceneDoc, revision: number, expectedRevision: number): void
 }
 
 export type SceneTool = 'translate' | 'rotate' | 'scale'

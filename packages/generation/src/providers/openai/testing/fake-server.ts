@@ -1,5 +1,4 @@
-import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { createIsolatedHttpServer } from '../../../../../../scripts/testing/isolated-http'
 
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6nJkAAAAASUVORK5CYII=', 'base64')
 export type Scenario = 'normal' | 'lost' | 'slow' | 'moderation' | 'output-moderation' | 'unknown-moderation' | 'quota' | 'credit_balance_exhausted' | 'organization_spend_limit_exceeded' | 'project_spend_limit_exceeded' | 'organization_usage_limit_exceeded' | 'rate' | 'auth' | 'verification' | 'forbidden' | 'server' | 'invalid' | 'secret-error' | 'unparseable' | 'invalid-base64' | 'url-output' | 'wrong-mime' | 'oversized'
@@ -10,7 +9,7 @@ export async function fakeOpenAI(initial: Scenario = 'normal') {
   const requests: { path: string; fields: Record<string, unknown>; images: { name: string; type: string; data: Buffer }[]; trace: string | undefined }[] = []
   let count = 0
   const timers = new Set<ReturnType<typeof setTimeout>>()
-  const server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const chunks: Buffer[] = []
     for await (const chunk of req) chunks.push(Buffer.from(chunk))
     const body = Buffer.concat(chunks)
@@ -79,9 +78,10 @@ export async function fakeOpenAI(initial: Scenario = 'normal') {
       timers.add(timer)
     } else send()
   })
+  const { server } = isolated
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   return {
-    baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+    baseUrl: `${isolated.baseUrl}/v1`,
     requests, creates: () => count, setScenario: (next: Scenario) => { scenario = next },
     setResponse: (response: NonNullable<typeof override>) => { override = response },
     async close() {

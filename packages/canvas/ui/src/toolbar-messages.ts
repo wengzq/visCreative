@@ -2,6 +2,8 @@ import { defineMessages } from '@vis/ui-kit'
 
 export const toolbarMessages = defineMessages({
   toolbar: '节点工具条',
+  regenerate: '重新生成',
+  regenerateHint: '用相同的提示词和设置重新生成（新版本）',
   'image.crop': '裁剪',
   'image.gridSplit': '宫格切分',
   'video.trim': '截取',
@@ -64,6 +66,8 @@ export const toolbarMessages = defineMessages({
   loadFailed: '无法读取图片',
 }, {
   toolbar: 'Node operations',
+  regenerate: 'Regenerate',
+  regenerateHint: 'Regenerate with the same prompt and settings (new version)',
   'image.crop': 'Crop',
   'image.gridSplit': 'Grid split',
   'video.trim': 'Trim',

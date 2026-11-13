@@ -1,10 +1,11 @@
-import { newId, VisError } from '@vis/domain'
-import { isMediaKind, numberReferences, operationKind, PROMPT_REF_PATTERN, type GenerationLimits, type MediaKind, type MethodParams, type MethodResult, type ResolvedTarget } from '@vis/protocol'
+import { type CanvasDeliveryPort, newId, VisError } from '@vis/domain'
+import { isMediaKind, numberReferences, operationKind, PROMPT_REF_PATTERN, type GenerationLimits, type MediaKind, type MethodParams, type MethodResult, type ResolvedTarget, type SceneDoc } from '@vis/protocol'
 import { and, appendEvent, eq, inArray, isNull, spaceSchema as s, sql, type SpaceTx } from '@vis/storage'
-import { paramsSchemaOf, ProviderError, referenceImageLimit, type ProviderAdapter, type ProviderInputMetadata } from './providers/types'
+import { operationSpecOf, paramsSchemaOf, ProviderError, referenceImageLimit, type ProviderAdapter, type ProviderInputMetadata } from './providers/types'
 import { checkLocalQuota, isPaidProvider, localDate } from './quota'
 import { readJobView } from './view'
 import { withScriptSettings } from './script-inputs'
+import { sceneModelVersionIds, validateSceneRender } from './providers/render/scene'
 
 /** Trusted agent caller identity, resolved by the gateway from the runtime token (0003 "Caller identity") */
 export type SubmitCaller = { sessionId: string | null; turnId: string | null; inputSnapshotId: string | null; settingsResolved?: boolean }
@@ -21,6 +22,8 @@ export type SubmitContext = {
   now: number
   limits: GenerationLimits
   reserve?: (jobId: string, kind: MediaKind, byAgent: boolean) => void
+  /** Creates new_node result placeholders in this transaction (RFC 0047) */
+  delivery?: Pick<CanvasDeliveryPort<SpaceTx>, 'reservePlaceholder'>
   /** Regeneration reuses original service configuration and validated parameters, unaffected by current configuration changes. */
   source?: { job: Job; adapter: ProviderAdapter }
 }
@@ -65,15 +68,23 @@ export function submitJob(
     throw VisError.of('invalid_params', 'generation.frame_mode_unsupported', {}, 'The model does not support the requested frame mode')
   }
 
-  const schema = paramsSchemaOf(adapter, params.kind, model)
-  let parsed = schema.safeParse(params.params ?? saved?.params ?? {})
-  if (!parsed.success && !params.params && saved?.params) {
-    // Stored node settings may no longer fit narrowed model capabilities: remove invalid fields and fill defaults; explicit parameters still report errors
-    const invalid = new Set(parsed.error.issues.map(issue => String(issue.path[0])))
-    parsed = schema.safeParse(Object.fromEntries(Object.entries(saved.params).filter(([key]) => !invalid.has(key))))
+  let providerParams: Record<string, unknown>
+  if (ctx.source) providerParams = params.params ?? {}
+  else {
+    const spec = operation !== 'generate' ? operationSpecOf(adapter, params.kind, model, operation) : undefined
+    if (spec?.prompt === 'required' && !params.prompt.trim()) throw VisError.of('invalid_params', 'generation.prompt_required', {}, 'This operation requires a prompt')
+    if (spec?.prompt === 'none' && params.prompt.trim()) throw VisError.of('invalid_params', 'generation.prompt_unsupported', {}, 'This operation does not accept a prompt')
+    const schema = spec?.paramsSchema ?? paramsSchemaOf(adapter, params.kind, model)
+    const savedParams = operation === 'generate' ? saved?.params : undefined
+    let parsed = schema.safeParse(params.params ?? savedParams ?? {})
+    if (!parsed.success && !params.params && savedParams) {
+      // Stored node settings may no longer fit narrowed model capabilities: remove invalid fields and fill defaults; explicit parameters still report errors
+      const invalid = new Set(parsed.error.issues.map(issue => String(issue.path[0])))
+      parsed = schema.safeParse(Object.fromEntries(Object.entries(savedParams).filter(([key]) => !invalid.has(key))))
+    }
+    if (!parsed.success) throw VisError.of('invalid_params', 'generation.invalid_params', { detail: parsed.error.message }, `Invalid generation parameters: ${parsed.error.message}`)
+    providerParams = parsed.data
   }
-  if (!ctx.source && !parsed.success) throw VisError.of('invalid_params', 'generation.invalid_params', { detail: parsed.error.message }, `Invalid generation parameters: ${parsed.error.message}`)
-  const providerParams = ctx.source ? params.params ?? {} : parsed.data!
   const outputCount = typeof providerParams.n === 'number' ? providerParams.n : 1
   const paid = isPaidProvider(adapter)
   const byAgent = caller.sessionId !== null
@@ -86,10 +97,12 @@ export function submitJob(
   const frameRefs = params.frames ? [params.frames.first, ...(params.frames.last ? [params.frames.last] : [])] : []
   const pinnedFrames: { slotId: string; revision: number }[] = []
   const jobInputs: (typeof s.jobInputs.$inferInsert)[] = []
+  const sceneRender = adapter.type === 'render' && model === 'scene'
+  let sceneDoc: SceneDoc | undefined
   const directAliases = new Map<string, string>()
   const directIds = [...new Set((params.inputs ?? []).flatMap(input => 'assetVersionId' in input ? [input.assetVersionId] : []))]
-  const directAssets = directIds.length ? tx.select({ id: s.assetVersions.id, kind: s.assets.kind, mime: s.assetVersions.mime, durationMs: s.assetVersions.durationMs })
-    .from(s.assetVersions).innerJoin(s.assets, eq(s.assets.id, s.assetVersions.assetId)).where(inArray(s.assetVersions.id, directIds)).all() : []
+  const directAssets = directIds.length ? tx.select({ id: s.assetVersions.id, kind: s.assets.kind, mime: s.assetVersions.mime, durationMs: s.assetVersions.durationMs, width: s.assetVersions.width, height: s.assetVersions.height, fps: s.assetVersions.fps, bytes: s.blobs.byteSize })
+    .from(s.assetVersions).innerJoin(s.assets, eq(s.assets.id, s.assetVersions.assetId)).innerJoin(s.blobs, eq(s.blobs.hash, s.assetVersions.blobHash)).where(inArray(s.assetVersions.id, directIds)).all() : []
   const directById = new Map(directAssets.map(asset => [asset.id, asset]))
   if (directIds.length) {
     const sources = tx.select({ nodeId: s.slots.nodeId, assetVersionId: s.slotRevisions.assetVersionId }).from(s.slots)
@@ -105,10 +118,14 @@ export function submitJob(
     if ('assetVersionId' in input) {
       const asset = directById.get(input.assetVersionId)
       if (!asset) throw VisError.of('not_found', 'generation.input_asset_not_found', { assetVersionId: input.assetVersionId }, 'The input asset version does not exist in this project')
+      if (sceneRender && ctx.source && asset.kind === 'model') {
+        jobInputs.push({ jobId, ordinal, assetVersionId: input.assetVersionId, fromSnapshot: false })
+        continue
+      }
       if (!isMediaKind(asset.kind)) throw VisError.of('invalid_params', 'generation.input_not_media', { assetVersionId: input.assetVersionId }, 'Fonts cannot be generation inputs')
       if (ordinal === 0 && operation !== 'generate') throw VisError.of('invalid_params', 'generation.subject_required', {}, 'Media operations require a subject node main slot')
       const kind = asset.kind
-      inputMetadata.push({ kind, mime: asset.mime, ...(asset.durationMs !== null ? { durationMs: asset.durationMs } : {}) })
+      inputMetadata.push({ kind, mime: asset.mime, ...(asset.durationMs !== null ? { durationMs: asset.durationMs } : {}), ...(asset.width !== null ? { width: asset.width } : {}), ...(asset.height !== null ? { height: asset.height } : {}), ...(asset.fps !== null ? { fps: asset.fps } : {}), bytes: asset.bytes })
       referenceInputs.push({ nodeId: input.assetVersionId, kind, hasAsset: true })
       jobInputs.push({ jobId, ordinal, assetVersionId: input.assetVersionId, fromSnapshot: false })
       continue
@@ -123,22 +140,26 @@ export function submitJob(
     const revision = input.revision ?? snapshotRevisions.get(slot.id) ?? slot.currentRevision
     if (revision < 1) throw VisError.of('invalid_params', 'generation.input_slot_empty', { slotId: input.slotId }, `Slot ${input.slotId} is empty and cannot be used as input`)
     const exists = tx
-      .select({ r: s.slotRevisions.revision, assetVersionId: s.slotRevisions.assetVersionId })
+      .select({ r: s.slotRevisions.revision, assetVersionId: s.slotRevisions.assetVersionId, sceneDoc: s.slotRevisions.sceneDoc })
       .from(s.slotRevisions)
       .where(and(eq(s.slotRevisions.slotId, slot.id), eq(s.slotRevisions.revision, revision)))
       .get()
     if (!exists) throw VisError.of('not_found', 'generation.input_revision_not_found', { slotId: input.slotId, revision }, `Slot ${input.slotId} has no revision ${revision}`)
+    if (exists.sceneDoc) {
+      if (!sceneRender || ordinal !== 0) throw VisError.of('invalid_params', 'generation.render_scene_input_required', {}, 'A scene slot must be the first input of render/scene')
+      sceneDoc = exists.sceneDoc
+    }
     if (ordinal === 0 && operation !== 'generate' && !exists.assetVersionId) throw VisError.of('invalid_params', 'generation.subject_required', {}, 'The first input must contain the subject media asset')
     if (exists.assetVersionId) {
-      const asset = tx.select({ kind: s.assets.kind, mime: s.assetVersions.mime, durationMs: s.assetVersions.durationMs })
-        .from(s.assetVersions).innerJoin(s.assets, eq(s.assets.id, s.assetVersions.assetId)).where(eq(s.assetVersions.id, exists.assetVersionId)).get()
+      const asset = tx.select({ kind: s.assets.kind, mime: s.assetVersions.mime, durationMs: s.assetVersions.durationMs, width: s.assetVersions.width, height: s.assetVersions.height, fps: s.assetVersions.fps, bytes: s.blobs.byteSize })
+        .from(s.assetVersions).innerJoin(s.assets, eq(s.assets.id, s.assetVersions.assetId)).innerJoin(s.blobs, eq(s.blobs.hash, s.assetVersions.blobHash)).where(eq(s.assetVersions.id, exists.assetVersionId)).get()
       if (isFrame && asset?.kind !== 'image') throw VisError.of('invalid_params', 'generation.frame_image_required', {}, 'Video frames must contain image assets')
       // Font assets never sit in node slots; guard anyway so a font can never reach a provider
       if (asset) {
         const kind = asset.kind
         if (!isMediaKind(kind)) throw VisError.of('invalid_params', 'media.kind_mismatch', { slotId: input.slotId, kind }, 'Font assets cannot be generation inputs')
         if (isFrame) pinnedFrames.push({ slotId: slot.id, revision })
-        inputMetadata.push({ kind, mime: asset.mime, ...(asset.durationMs !== null ? { durationMs: asset.durationMs } : {}), ...(isFrame ? { frameRole: ordinal === (params.inputs?.length ?? 0) ? 'first' as const : 'last' as const } : {}) })
+        inputMetadata.push({ kind, mime: asset.mime, ...(asset.durationMs !== null ? { durationMs: asset.durationMs } : {}), ...(asset.width !== null ? { width: asset.width } : {}), ...(asset.height !== null ? { height: asset.height } : {}), ...(asset.fps !== null ? { fps: asset.fps } : {}), bytes: asset.bytes, ...(isFrame ? { frameRole: ordinal === (params.inputs?.length ?? 0) ? 'first' as const : 'last' as const } : {}) })
         referenceInputs.push({ nodeId: slot.nodeId, kind, hasAsset: true })
       }
     }
@@ -147,6 +168,17 @@ export function submitJob(
     firstInputNodeId ??= slot.nodeId
   }
   try {
+    if (sceneRender) {
+      if (!sceneDoc) throw new ProviderError('rejected', 'The first input must be a scene slot', 'generation.render_scene_input_required')
+      validateSceneRender(params.kind, sceneDoc, providerParams)
+      const modelIds = sceneModelVersionIds(sceneDoc)
+      const models = modelIds.length ? tx.select({ id: s.assetVersions.id, kind: s.assets.kind }).from(s.assetVersions)
+        .innerJoin(s.assets, eq(s.assets.id, s.assetVersions.assetId)).where(inArray(s.assetVersions.id, modelIds)).all() : []
+      for (const id of modelIds) {
+        if (!models.some(model => model.id === id && model.kind === 'model') || jobInputs.some(input => input.assetVersionId === id)) continue
+        jobInputs.push({ jobId, ordinal: jobInputs.length, assetVersionId: id, fromSnapshot: false })
+      }
+    }
     adapter.validateInputs?.(params.kind, model, inputMetadata, providerParams, operation)
   } catch (error) {
     if (error instanceof ProviderError && error.kind === 'rejected') {
@@ -155,6 +187,7 @@ export function submitJob(
     throw error
   }
   if (paid && byAgent && !ctx.reserve) checkLocalQuota(tx, params.kind, now, ctx.limits)
+  const { actualPrompt: _actualPrompt, revisedPrompt: _revisedPrompt, ...sourceParams } = (ctx.source?.job.params ?? {}) as Record<string, unknown>
   tx.insert(s.generationJobs)
     .values({
       id: jobId,
@@ -165,7 +198,7 @@ export function submitJob(
       provider: providerId,
       model,
       operation,
-      params: ctx.source ? ctx.source.job.params : { prompt: params.prompt, ...providerParams, ...(adapter.configuration ? { providerConfiguration: adapter.configuration } : {}) },
+      params: ctx.source ? sourceParams : { prompt: params.prompt, ...providerParams, ...(adapter.configuration ? { providerConfiguration: adapter.configuration } : {}) },
       status: 'queued',
       quotaDate: paid ? localDate(now) : null,
       createdAt: now,
@@ -179,7 +212,7 @@ export function submitJob(
     const input = references.get(nodeId)
     if (!input) throw VisError.of('invalid_params', 'generation.prompt_reference_missing', { nodeId }, 'A prompt reference is not among this submission media inputs')
     const label = { image: '图片', video: '视频', audio: '音频' }[input.kind]
-    return `${label} ${input.number}`
+    return adapter.referenceLabelFor?.(params.kind, model, input) ?? `${label} ${input.number}`
   })
   if (!ctx.source) tx.update(s.generationJobs).set({ params: { prompt: params.prompt, ...(resolvedPrompt !== params.prompt ? { resolvedPrompt } : {}), ...providerParams, ...(pinnedFrames.length ? { frameRefs: { first: pinnedFrames[0], ...(pinnedFrames[1] ? { last: pinnedFrames[1] } : {}) } } : {}), ...(adapter.configuration ? { providerConfiguration: adapter.configuration } : {}) } }).where(eq(s.generationJobs.id, jobId)).run()
 
@@ -208,10 +241,12 @@ export function submitJob(
       tx.update(s.slots).set({ acceptedBindingId: bindingId }).where(eq(s.slots.id, slot.id)).run()
     } else {
       const nearNodeId = t?.kind === 'new_node' ? t.nearNodeId : firstInputNodeId
-      target = { kind: 'new_node', ...(nearNodeId ? { nearNodeId } : {}) }
       tx.insert(s.deliveryBindings)
         .values({ id: bindingId, jobId, outputIndex, targetKind: 'new_node', placement: nearNodeId ? { nearNodeId } : null, status: 'pending' })
         .run()
+      ctx.delivery?.reservePlaceholder?.(tx, { bindingId })
+      const placeholder = tx.select({ nodeId: s.deliveryBindings.nodeId, slotId: s.deliveryBindings.slotId }).from(s.deliveryBindings).where(eq(s.deliveryBindings.id, bindingId)).get()
+      target = { kind: 'new_node', ...(nearNodeId ? { nearNodeId } : {}), ...(placeholder?.nodeId && placeholder.slotId ? { nodeId: placeholder.nodeId, slotId: placeholder.slotId } : {}) }
     }
     bindings.push({ bindingId, outputIndex, target })
   }

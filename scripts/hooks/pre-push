@@ -1,0 +1,20 @@
+#!/bin/sh
+# Privacy check of pushes to the public mirror (RFC 0042): changed files, messages and noreply commit identities.
+# The mirror is the remote named in VIS_PUBLIC_REMOTE, `public` by default. Archive pushes are not checked here:
+# their merge messages name branches, and pre-commit already checks every committed file.
+remote="$1"
+[ "$remote" = "${VIS_PUBLIC_REMOTE:-public}" ] || exit 0
+script="$(git rev-parse --show-toplevel)/scripts/check-privacy.mjs"
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$remote_sha" = "$zero" ]; then
+    # A new remote branch: check the commits this push introduces to the remote.
+    base=$(git rev-list "$local_sha" --not --remotes="$remote" | tail -n 1)
+    [ -z "$base" ] && continue
+    if git rev-parse -q --verify "$base^" >/dev/null; then range="$base^..$local_sha"; else range="$(git hash-object -t tree /dev/null)..$local_sha"; fi
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  node "$script" --range "$range" --public || exit 1
+done

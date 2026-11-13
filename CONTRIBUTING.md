@@ -33,6 +33,20 @@ Tests use scripted fake Agents, mock/local render providers and local fake vendo
 - CI fetches the fonts and provisions ffmpeg/ffprobe. Linux Chrome sees the fetched CJK fonts through a temporary Fontconfig configuration and cache; no system-wide font installation is needed. The macOS runner is explicitly `macos-15` because the ffmpeg setup action supplies x64 macOS builds. CI prints tool versions and whether ASS is available in the job summary. If a downloaded build has no ASS filter, `packages/assets/src/timeline-captions.integration.test.ts` skips real caption rendering; `apps/web/e2e/timeline-text.e2e.ts` also skips it on Linux. The remaining caption logic tests still run. Missing Chrome or ffmpeg fails the CI tool check instead of silently skipping browser/media coverage.
 - Encoder-specific `libopenh264` tests skip when that encoder is absent; benchmark tests remain opt-in. The CLI integration test in `services/studiod/src/cli.e2e.test.ts` skips on a clean checkout until `pnpm build` creates the CLI. Windows/macOS CI runs unit tests and build only, so their full browser suites remain local acceptance work. The first hosted Linux run passed check/build and exposed e2e platform/fixture/timing issues; its fixes need a hosted rerun, and Windows runner PasswordVault availability remains unverified; Linux CI is test coverage, not a claim of full Linux product support.
 
+## Privacy and the public repository
+
+Everything you commit, and everything you write on GitHub, is public and permanent. `pnpm check:privacy` (run by `pnpm check` and CI) rejects private network addresses, real-looking email addresses, home directory paths and key-shaped strings in tracked files. Its output names the rule and the place, never the matched value. Use placeholders such as `me@example.com` or `<project dir>`; for a value that is public on purpose, add `privacy-allow: <reason>` on the same line or the line before.
+
+Install the hooks once per clone:
+
+```sh
+git config core.hooksPath scripts/hooks
+```
+
+`pre-commit` checks staged changes. `pre-push` checks pushes to the `public` remote (or `VIS_PUBLIC_REMOTE`), including commit messages and noreply identities. Locally the check also matches your git name and email, your home directory name, and terms you list in `~/.config/vis-creative/private-words.txt` (one per line, `#` comments, `!term` to take back an automatic term). That file never leaves your machine; CI runs only the generic rules.
+
+The maintainer publishes with `scripts/release-public.mjs` (RFC 0042 §2), which turns a verified `main` into a single snapshot commit on the public repository under a noreply identity. Contributors never push to it directly. Report security problems through GitHub private vulnerability reporting, as described in [SECURITY.md](SECURITY.md).
+
 ## Design and review
 
 Design decisions live in [docs/rfc](docs/rfc/). Read the relevant RFC before changing behavior. Propose a new RFC for a new design or update the existing one for an agreed change; an RFC takes precedence over AGENTS.md, and any disagreement must be corrected in the same change. New RFCs are in English. When behavior or a contract changes, update its RFC and both README roadmaps in the same change.

@@ -42,6 +42,22 @@ function workTool(tool, args = {}) {
 }
 
 async function workScenario(turnId, text, script) {
+  if (script.scenario === 'generation-provenance') {
+    const { nodes } = await workTool('canvas_get')
+    const reference = nodes.find(node => node.nodeId === script.referenceId)
+    const input = reference?.slots.find(slot => slot.slotKey === 'main')
+    if (!input) throw new Error('The provenance scenario needs a reference node')
+    const result = await workTool('gen_submit', {
+      kind: 'image', provider: 'mock', model: 'mock-image-1',
+      prompt: script.prompt, params: { width: 128, height: 128 },
+      inputs: [{ slotId: input.slotId, revision: input.revision }],
+      targets: [{ outputIndex: 0, kind: 'new_node', nearNodeId: reference.nodeId }],
+    })
+    let job = await workTool('gen_get', { jobId: result.jobId, waitMs: 30000 })
+    while (['queued', 'running', 'finalizing'].includes(job.status)) job = await workTool('gen_get', { jobId: result.jobId, waitMs: 30000 })
+    if (job.status !== 'succeeded') throw new Error(`Provenance generation failed: ${job.status}`)
+    return replyNow(turnId, 'The provenance image is ready.')
+  }
   if (script.scenario === 'unreported') return replyNow(turnId, 'Should I use option A or option B?')
   if (script.scenario === 'reply-unreported') {
     await workTool('work_reply', { workItemId: script.workItemId, body: `工作代理检查：${JSON.stringify({ scenario: 'hold' })}` })
@@ -296,6 +312,55 @@ async function runTurn(turnId, text) {
       else await workTool('entity_create', setting)
     }
     return replyNow(turnId, `Extracted settings; existing settings preserved: ${existing.join(', ')}`)
+  }
+  const protectedWrite = text.match(/^scene-protected-write (.+)$/m)
+  if (protectedWrite) {
+    const payload = JSON.parse(protectedWrite[1])
+    const { nodes } = await workTool('canvas_get', { nodeIds: [payload.nodeId] })
+    const slot = nodes[0]?.slots.find(slot => slot.slotKey === 'main')
+    if (slot?.content.type !== 'scene') throw new Error('The protected write scenario needs a scene')
+    const doc = slot.content.doc
+    const bench = doc.objects.find(object => object.id === 'bench')
+    const view = doc.views.find(view => view.id === 'wide')
+    if (!bench || !view) throw new Error('The protected write scenario needs a bench and a view')
+    const attempt = async (id, ops) => {
+      const args = { ops }
+      const item = { id: `scene-protected-${id}`, type: 'mcpToolCall', server: 'vis', tool: 'canvas_apply', arguments: args, status: 'inProgress' }
+      notify('item/started', { threadId: thread, turnId, item })
+      let failure
+      try { await workTool('canvas_apply', args) } catch (error) { failure = error }
+      if (!failure) throw new Error(`Protected scene write succeeded: ${id}`)
+      notify('item/completed', { threadId: thread, turnId, item: { ...item, status: 'failed', result: { isError: true, content: [{ type: 'text', text: failure.message }] } } })
+    }
+    const set = next => ({ op: 'scene.set', slotId: slot.slotId, expectedRevision: slot.revision, doc: next })
+    if (payload.mode === 'object') {
+      await attempt('object', [set({ ...doc, objects: doc.objects.map(object => object.id === bench.id
+        ? { ...object, transform: { ...object.transform, position: [object.transform.position[0] + 1, ...object.transform.position.slice(1)] } } : object) })])
+    } else if (payload.mode === 'view') {
+      await attempt('view', [set({ ...doc, views: doc.views.map(item => item.id === view.id
+        ? { ...item, camera: { ...item.camera, focalLengthMm: item.camera.focalLengthMm + 10 } } : item) })])
+    } else if (payload.mode === 'delete') {
+      await attempt('delete-object', [set({ ...doc, objects: doc.objects.filter(object => object.id !== bench.id) })])
+      await attempt('delete-node', [{ op: 'node.delete', nodeId: payload.nodeId }])
+    } else throw new Error(`Unknown protected scene write mode: ${payload.mode}`)
+    return replyNow(turnId, `Completed scene-protected-write ${payload.mode}`)
+  }
+  const sceneProposal = text.match(/^scene-proposal (.+)$/m)
+  if (sceneProposal) {
+    const payload = JSON.parse(sceneProposal[1])
+    const { nodes } = await workTool('canvas_get', { nodeIds: [payload.nodeId] })
+    const slot = nodes[0]?.slots.find(slot => slot.slotKey === 'main')
+    if (slot?.content.type !== 'scene') throw new Error('The proposal scenario needs a scene')
+    const bench = slot.content.doc.objects.find(object => object.id === 'bench')
+    if (!bench) throw new Error('The proposal scenario needs a bench')
+    const { createdBy, userTouched, ...content } = bench
+    const args = { slotId: slot.slotId, baseRevision: slot.revision, summary: payload.summary,
+      changes: [{ target: 'object', id: bench.id, action: 'update', item: { ...content, transform: { ...content.transform, position: [payload.x, 0, 0] } } }] }
+    const item = { id: 'scene-proposal', type: 'mcpToolCall', server: 'vis', tool: 'scene_propose', arguments: args, status: 'inProgress' }
+    notify('item/started', { threadId: thread, turnId, item })
+    const result = await workTool('scene_propose', args)
+    notify('item/completed', { threadId: thread, turnId, item: { ...item, status: 'completed', result: { content: [{ type: 'text', text: JSON.stringify(result) }] } } })
+    return replyNow(turnId, `Completed ${payload.summary}`)
   }
   const writingAction = text.match(/^Writing task: (rewrite|continue|expand|ask)\nnodeId: ([^\n]+)\nslotId: ([^\n]+)\nChapter: ([^\n]+)\nSelection: ([^\n]+)\nInstruction: ([^\n]+)/m)
   const writingProbe = text.match(/^writing-(propose|nonunique|refuse|own|series|delete)\s+(.+)$/m)

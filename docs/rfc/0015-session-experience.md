@@ -54,6 +54,8 @@
 
 已确认（2026-10-29）：按上面的范围收窄，不做「全部放行」。
 
+> Revised by [RFC 0048](0048-agent-native-capabilities.md) (2026-11-12): in `auto`, a `network` request from an Agent's own read-only web search or fetch tool (ACP `fetch` kind) is auto-approved and recorded. Other `network` requests still ask.
+
 ### 3. 对话排版
 
 先出样式对比再定，不在 RFC 里拍板。会出三版静态截图（1600×1000，deviceScaleFactor 2），同一段真实对话：

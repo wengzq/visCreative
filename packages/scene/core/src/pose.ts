@@ -30,6 +30,14 @@ export function clampJointRotation(joint: BodyJoint, rotation: Quat): Quat {
   return jointQuaternion(angles)
 }
 
+// Clamp the one axis before conversion: an angle past ±90° on Y re-decomposes with X and Z flipped by 180°, and the
+// final clamp would then snap to an unrelated pose.
+export function setJointAxis(joint: BodyJoint, rotation: Quat, axis: 0 | 1 | 2, radians: number): Quat {
+  const angles = jointEuler(rotation)
+  angles[axis] = Math.max(joint.limits.min[axis]!, Math.min(joint.limits.max[axis]!, radians))
+  return clampJointRotation(joint, jointQuaternion(angles))
+}
+
 export function standingRotation(body: BodyDescriptor, joint: BodyJoint): Quat {
   const standing = body.poses.find(pose => pose.id === 'standing') ?? body.poses[0]
   return clampJointRotation(joint, standing?.joints[joint.id] ?? identity)

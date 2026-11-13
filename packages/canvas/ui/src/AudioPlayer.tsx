@@ -41,19 +41,22 @@ export function AudioPlayer({ assetId, src, selected = false, onMetadata, onPrev
     window.addEventListener('keydown', key, true)
     return () => window.removeEventListener('keydown', key, true)
   }, [selected])
-  return <div className="vis-audio-player nodrag nopan" onDoubleClick={event => event.stopPropagation()}>
+  return <div className="vis-audio-player" onDoubleClick={event => event.stopPropagation()}>
     <audio ref={audio} src={src} preload="metadata" onLoadedMetadata={event => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); setTime(0); setError(false); onMetadata?.(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0) }} onTimeUpdate={event => setTime(event.currentTarget.currentTime)} onPlay={event => {
       if (playingAudio !== event.currentTarget) playingAudio?.pause()
       playingAudio = event.currentTarget
       setPlaying(true)
       setError(false)
     }} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setError(true)} />
-    <PeaksTimeline peaks={peaks} timeMs={durationMs(time)} durationMs={durationMs(duration)} onSeek={value => {
-      if (audio.current) { audio.current.currentTime = value / 1000; setTime(audio.current.currentTime) }
-    }} />
+    {/* Only the seek strip and play button keep the pointer; the rest of the player stays a drag surface for its node */}
+    <div className="nodrag nopan">
+      <PeaksTimeline peaks={peaks} timeMs={durationMs(time)} durationMs={durationMs(duration)} onSeek={value => {
+        if (audio.current) { audio.current.currentTime = value / 1000; setTime(audio.current.currentTime) }
+      }} />
+    </div>
     <div className="vis-audio-controls vis-media-times">
       <span>{mediaTime(time)}</span>
-      <button aria-label={playing ? m.pause : m.play} onClick={toggle}><Icon kind={playing ? 'pause' : 'play'} size={18} /></button>
+      <button className="nodrag nopan" aria-label={playing ? m.pause : m.play} onClick={toggle}><Icon kind={playing ? 'pause' : 'play'} size={18} /></button>
       <span>{mediaTime(duration)}</span>
     </div>
     {error ? <span role="status">{m.cannotPlayAudio}</span> : null}

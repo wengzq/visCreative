@@ -11,7 +11,7 @@ canvas_apply node.create uses a batch-unique tempId and kind. The returned idMap
 
 title is optional, 1–60 characters. Rename with node.setMeta.title; null clears it. Duplicating preserves the original title; the UI adds its copy suffix. Optional category can describe a character, scene, prop, shot, storyboard, copy or other material. Text format is plain, markdown or code; use code for HTML. node.setMeta edits category, purpose and format.
 
-Deliverables default to purpose: 'artifact'. Communication, progress and plans belong in replies or work_report (vis work report in the CLI), rather than report text nodes. If a working document needs to persist on the canvas, use purpose: 'working'.
+Deliverables default to purpose: 'artifact'. Communication, progress and plans belong in replies or work_report (vis work report in the CLI), rather than report text nodes. If a text, script or timeline working document needs to persist on the canvas, use purpose: 'working'. Agents cannot create media nodes (image, video or audio) with purpose: 'working' or change media from artifact to working; the whole batch is refused with forbidden (canvas.working_media_forbidden). Setting working on media that is already working is allowed. Identical retries replay their first result before this permission check. Leave purpose unset (artifact) for media so results stay visible. Only the author can mark media as working.
 Child workspace text, including code, is always created as a working document; only the parent or user can make it a deliverable.
 
 ## Provenance and layout

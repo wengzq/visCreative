@@ -180,10 +180,16 @@ for (const mock of [false, true]) describe.skipIf(!ready)(`Node toolbar with ${m
     it('shows the mock upscale entry and delivers a new node linked to the source', async () => {
       await select()
       await page.getByRole('toolbar', { name: 'Node operations' }).getByRole('button', { name: 'Upscale', exact: true }).click()
+      const panel = page.getByRole('region', { name: 'Upscale', exact: true })
+      await panel.getByRole('button', { name: 'Model and parameters', exact: true }).waitFor()
+      expect(await nodes()).toHaveLength(1)
+      await panel.getByRole('button', { name: 'Upscale', exact: true }).click()
       await expect.poll(nodes, { timeout: 10_000 }).toHaveLength(2)
+      // The result node exists from submission (RFC 0047); wait for the upscaled image to fill it
+      const resultMain = async () => (await nodes()).find(node => node.nodeId !== source.nodeId)!.slots.find(slot => slot.slotKey === 'main')
+      await expect.poll(async () => (await resultMain())?.content.type, { timeout: 10_000 }).toBe('asset')
       const result = (await nodes()).find(node => node.nodeId !== source.nodeId)!
       expect(result.inputs).toEqual([source.nodeId])
-      expect(result.slots.find(slot => slot.slotKey === 'main')?.content.type).toBe('asset')
       const jobId = result.slots.find(slot => slot.slotKey === 'main')?.source?.jobId
       expect(jobId).toBeTruthy()
       const job = await admin.call('generation.get', { jobId })

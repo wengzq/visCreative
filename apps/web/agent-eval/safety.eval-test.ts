@@ -41,6 +41,8 @@ describe('Evaluation safety', () => {
     expect(() => options(dir)).toThrow('empty')
     expect(() => options(temp(), ['--agents', 'claude'])).toThrow('deferred')
     expect(() => options(temp(), ['--dry-run'])).toThrow('--agents codex')
+    expect(() => options(temp(), ['--agents', 'pi'])).toThrow('Agents must be')
+    expect(options(temp(), ['--agents', 'minimax-code,codebuddy']).agents).toEqual(['minimax-code', 'codebuddy'])
   })
 
   it('rejects real data, nested paths, ancestors and symlink aliases before writing', () => {

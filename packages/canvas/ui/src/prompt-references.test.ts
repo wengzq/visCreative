@@ -1,6 +1,6 @@
 import { promptRef, type NodeView } from '@vis/protocol'
 import { describe, expect, it } from 'vitest'
-import { hasBrokenReferences, numberedReferences, PromptHistory, promptParts, promptText } from './prompt-references'
+import { canvasReferences, filterReferenceChoices, hasBrokenReferences, numberedReferences, pickPromptReference, promptMention, PromptHistory, promptParts, promptText } from './prompt-references'
 import { parameterSummary } from './params'
 
 const node = (nodeId: string, kind: NodeView['kind'] = 'image'): NodeView => ({
@@ -21,11 +21,12 @@ describe('Prompt references', () => {
 
   it('computes chip numbers from input order after reorder and unrelated removal without rewriting markers', () => {
     const body = promptRef('b')
-    const number = (inputs: string[]) => promptParts(body, numberedReferences(inputs, nodes)).map(part => part.type === 'reference' ? part.reference?.number : null)
-    expect(number(['a', 'b', 'c'])).toEqual([2])
-    expect(number(['c', 'b', 'a'])).toEqual([2])
-    expect(number(['b', 'c'])).toEqual([1])
-    expect(promptText(promptParts(body, numberedReferences(['c', 'b'], nodes)))).toBe(body)
+    const mixedNodes = [...nodes, node('d', 'video')]
+    const number = (inputs: string[]) => promptParts(body, numberedReferences(inputs, mixedNodes)).map(part => part.type === 'reference' ? part.reference?.number : null)
+    expect(number(['a', 'd', 'b', 'c'])).toEqual([2])
+    expect(number(['c', 'b', 'd', 'a'])).toEqual([1])
+    expect(number(['d', 'b', 'c'])).toEqual([2])
+    expect(promptText(promptParts(body, numberedReferences(['c', 'b'], mixedNodes)))).toBe(body)
   })
 
   it('detects removed references and missing nodes without numbering them', () => {
@@ -42,7 +43,7 @@ describe('Prompt references', () => {
       ...nodes, node('text', 'text'), { ...node('empty'), slots: [] },
     ])
     expect(references.map(reference => [reference.nodeId, reference.number])).toEqual([
-      ['text', undefined], ['empty', undefined], ['b', 1], ['a', 2],
+      ['text', undefined], ['empty', undefined], ['b', 1], ['a', 1],
     ])
     expect(hasBrokenReferences(promptRef('text'), references)).toBe(true)
     expect(hasBrokenReferences(promptRef('empty'), references)).toBe(true)
@@ -59,6 +60,73 @@ describe('Prompt references', () => {
     expect(history.redo()).toBeUndefined()
     expect(history.undo()?.text).toBe('abc')
     expect(history.undo()).toBeUndefined()
+  })
+})
+
+describe('Canvas prompt reference choices', () => {
+  const title = (node: NodeView) => node.title ?? node.nodeId
+  const limits = { image: 1, video: { max: 1, minMs: 1, maxMs: 30000, totalMs: 30000 } }
+  it('excludes the edited node, attached and missing inputs, non-media and empty media while retaining hidden working sources', () => {
+    const all = [node('target'), ...nodes, node('text', 'text'), node('frame', 'frame'), { ...node('empty'), slots: [] }, { ...node('hidden', 'video'), purpose: 'working' as const }]
+    const attached = numberedReferences(['a', 'deleted'], all)
+    const choices = canvasReferences('target', all, attached, title, limits)
+    expect(choices.map(choice => choice.reference.nodeId)).toEqual(['b', 'hidden'])
+    expect(choices.map(choice => choice.reference.number)).toEqual([undefined, undefined])
+    expect(filterReferenceChoices(attached, choices, '', title).attached.map(reference => reference.nodeId)).toEqual(['a'])
+  })
+
+  it('uses declared accepted kinds, leaves no canvas group for no-reference models, and retains legacy kinds without limits', () => {
+    expect(canvasReferences('target', nodes, [], title, { image: 0 })).toEqual([])
+    expect(canvasReferences('target', nodes, [], title, { image: 2 }).map(choice => choice.reference.nodeId)).toEqual(['a'])
+    expect(canvasReferences('target', nodes, [], title).map(choice => choice.reference.nodeId)).toEqual(['a', 'c'])
+    expect(canvasReferences('target', nodes, [], title, undefined, true).map(choice => choice.reference.nodeId)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('orders topmost first, breaks ties by title, filters both groups by title and caps only matching canvas choices', () => {
+    const all = Array.from({ length: 55 }, (_, index) => ({ ...node(`source-${index}`), z: index, title: index === 0 ? 'Rare MATCH' : `Source ${index}` }))
+    const attached = numberedReferences(['a', 'b'], [{ ...node('a'), title: 'Match attached' }, { ...node('b'), title: 'Other' }])
+    const candidates = canvasReferences('target', all, attached, title)
+    const shown = filterReferenceChoices(attached, candidates, '', title)
+    expect(shown.canvas).toHaveLength(50)
+    expect(shown.canvas[0]?.reference.nodeId).toBe('source-54')
+    expect(shown.hasMore).toBe(true)
+    const filtered = filterReferenceChoices(attached, candidates, 'mAtCh', title)
+    expect(filtered.attached.map(reference => reference.nodeId)).toEqual(['a'])
+    expect(filtered.canvas.map(choice => choice.reference.nodeId)).toEqual(['source-0'])
+    expect(filtered.hasMore).toBe(false)
+    expect(filterReferenceChoices(attached, candidates, 'nothing', title).canvas).toEqual([])
+    expect(canvasReferences('target', [{ ...node('z'), title: 'Beta' }, { ...node('y'), title: 'Alpha' }], [], title).map(choice => choice.title)).toEqual(['Alpha', 'Beta'])
+  })
+
+  it('disables additional candidates at per-kind and combined catalog count limits without counting empty or duplicate inputs', () => {
+    const all = [...nodes, node('image2'), node('video2', 'video'), node('audio2', 'audio'), { ...node('empty'), slots: [] }]
+    const refs = numberedReferences(['a', 'a', 'b', 'c', 'empty'], all)
+    const choices = canvasReferences('target', all, refs, title, { ...limits, audio: limits.video })
+    expect(choices.map(choice => choice.limit)).toEqual([{ kind: 'audio', max: 1 }, { kind: 'image', max: 1 }, { kind: 'video', max: 1 }])
+    expect(canvasReferences('target', all, refs, title, { image: 9, total: 3 }).map(choice => choice.limit)).toEqual([{ kind: 'total', max: 3 }])
+  })
+
+  it('attaches successfully before inserting and leaves prompt text untouched when attachment fails', async () => {
+    const calls: string[] = []
+    let finish!: () => void
+    const attach = async () => { calls.push('attach'); await new Promise<void>(resolve => { finish = resolve }) }
+    const picking = pickPromptReference('a', false, attach, () => calls.push('insert'))
+    expect(calls).toEqual(['attach'])
+    finish()
+    await picking
+    expect(calls).toEqual(['attach', 'insert'])
+    const failure = new Error('Attachment failed')
+    await expect(pickPromptReference('b', false, async () => { throw failure }, () => calls.push('bad insert'))).rejects.toBe(failure)
+    expect(calls).toEqual(['attach', 'insert'])
+    await pickPromptReference('a', true, attach, () => calls.push('existing insert'))
+    expect(calls).toEqual(['attach', 'insert', 'existing insert'])
+  })
+
+  it('replaces the complete search phrase and keeps selections and marker text out of title search', () => {
+    expect(promptMention('Use @Blue sky', { start: 13, end: 13 })).toEqual({ start: 4, end: 13, query: 'Blue sky' })
+    expect(promptMention('Use @Blue\nnext', { start: 14, end: 14 })).toBeNull()
+    expect(promptMention(promptRef('a'), { start: promptRef('a').length, end: promptRef('a').length })).toBeNull()
+    expect(promptMention('@Blue', { start: 2, end: 4 })).toBeNull()
   })
 })
 

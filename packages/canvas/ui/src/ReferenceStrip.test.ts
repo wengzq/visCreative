@@ -16,9 +16,9 @@ vi.mock('@vis/ui-kit', async importOriginal => ({
 }))
 beforeEach(() => { hooks.duration = null })
 
-function preview(kind: 'image' | 'video' | 'audio') {
+function preview(kind: 'image' | 'video' | 'audio', durationMs?: number) {
   return ReferencePreview({
-    reference: { nodeId: 'node', number: 1, node: { kind, slots: [{ slotKey: 'main', content: { type: 'asset', assetVersionId: 'asset' } }] } as NodeView },
+    reference: { nodeId: 'node', number: 1, durationMs, node: { kind, slots: [{ slotKey: 'main', content: { type: 'asset', assetVersionId: 'asset' } }] } as NodeView },
     assetUrl: id => `/assets/${id}`, posterUrl: id => `/posters/${id}`,
   }) as ReactElement<any>
 }
@@ -31,16 +31,22 @@ function elements(value: ReactNode): ReactElement<any>[] {
 
 it('uses a poster for video references while keeping image asset URLs', () => {
   const video = preview('video')
-  expect(video.type).toBe(VideoPoster)
-  expect(video.props).toMatchObject({ src: '/assets/asset', posterSrc: '/posters/asset' })
+  expect(elements(video).find(element => element.type === VideoPoster)?.props).toMatchObject({ src: '/assets/asset', posterSrc: '/posters/asset' })
   const image = preview('image')
   expect(image.type).toBe('img')
   expect(image.props.src).toBe('/assets/asset')
+})
+
+it('shows a video badge and pinned duration without creating a metadata decoder', () => {
+  const video = elements(preview('video', 75400))
+  expect(video.find(element => element.props['aria-label'] === 'Video')).toBeDefined()
+  expect(video.find(element => element.type === 'small')?.props.children).toBe('1:15')
+  expect(video.some(element => element.type === 'video')).toBe(false)
 })
 
 it('keeps loading audio metadata and displaying its duration', () => {
   const audio = elements(preview('audio')).find(element => element.type === 'audio')!
   expect(audio.props).toMatchObject({ src: '/assets/asset', preload: 'metadata' })
   audio.props.onLoadedMetadata({ currentTarget: { duration: 75.4 } })
-  expect(elements(preview('audio')).find(element => element.type === 'small')?.props.children.join('')).toBe('1:15')
+  expect(elements(preview('audio')).find(element => element.type === 'small')?.props.children).toBe('1:15')
 })

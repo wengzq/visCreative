@@ -1,5 +1,6 @@
 import { NodeToolbar, useViewport } from '@xyflow/react'
 import { type ComponentProps, useLayoutEffect, useRef } from 'react'
+import { placeFloatingToolbar } from './toolbar'
 
 /** Keep node actions reachable when their anchor is panned behind fixed canvas controls. */
 export function FloatingNodeToolbar({ children, ...props }: ComponentProps<typeof NodeToolbar>) {
@@ -15,20 +16,14 @@ export function FloatingNodeToolbar({ children, ...props }: ComponentProps<typeo
       element.style.translate = '0px 0px'
       const bounds = element.getBoundingClientRect()
       const area = canvas.getBoundingClientRect()
-      let dx = Math.max(area.left + 8 - bounds.left, Math.min(0, area.right - 8 - bounds.right))
-      let dy = Math.max(area.top + 8 - bounds.top, Math.min(0, area.bottom - 8 - bounds.bottom))
-      for (const obstacle of host?.querySelectorAll('[data-canvas-obstacle]') ?? []) {
-        const fixed = obstacle.getBoundingClientRect()
-        if (bounds.left + dx >= fixed.right || bounds.right + dx <= fixed.left || bounds.top + dy >= fixed.bottom || bounds.bottom + dy <= fixed.top) continue
-        if (obstacle.getAttribute('data-canvas-obstacle') === 'top') {
-          const beside = [fixed.left - 8 - bounds.right, fixed.right + 8 - bounds.left]
-            .filter(move => bounds.left + move >= area.left + 8 && bounds.right + move <= area.right - 8)
-            .sort((a, b) => Math.abs(a) - Math.abs(b))[0]
-          // Moving sideways preserves access to the node title and its media controls.
-          if (beside !== undefined) dx = beside
-          else dy = fixed.bottom + 8 - bounds.top
-        } else dy = fixed.top - 8 - bounds.bottom
-      }
+      const nodeId = element.closest('.react-flow__node-toolbar')?.getAttribute('data-id')
+      const anchor = [...canvas.querySelectorAll('.react-flow__node')].find(node => node.getAttribute('data-id') === nodeId)
+      const obstacles = [
+        ...(host?.querySelectorAll('[data-canvas-obstacle]') ?? []),
+        ...(anchor ? [anchor, ...anchor.querySelectorAll('.vis-node-label')] : []),
+        ...canvas.querySelectorAll('.vis-node-version-strip'),
+      ].filter(target => !element.contains(target)).map(target => target.getBoundingClientRect())
+      const { x: dx, y: dy } = placeFloatingToolbar(bounds, area, obstacles)
       element.style.translate = `${dx}px ${dy}px`
     }
     update()

@@ -21,8 +21,8 @@ describe('0023 batches and frames', () => {
 
   it('models declare frame modes', () => {
     const provider = { id: 'mock', type: 'mock', label: 'Mock', needsKey: false, available: true, hasKey: true, models: [{ id: 'v', label: 'V', kind: 'video', paramsSchema: {}, frameModes: ['first', 'first_last'] }] }
-    expect(METHODS['providers.list'].result.safeParse({ providerTypes: [], providers: [provider], defaults: {} }).success).toBe(true)
-    expect(METHODS['providers.list'].result.safeParse({ providerTypes: [], providers: [{ ...provider, models: [{ ...provider.models[0], frameModes: ['last'] }] }], defaults: {} }).success).toBe(false)
+    expect(METHODS['providers.list'].result.safeParse({ videoReferences: 'hosting_required', providerTypes: [], providers: [provider], defaults: {} }).success).toBe(true)
+    expect(METHODS['providers.list'].result.safeParse({ videoReferences: 'hosting_required', providerTypes: [], providers: [{ ...provider, models: [{ ...provider.models[0], frameModes: ['last'] }] }], defaults: {} }).success).toBe(false)
   })
 
   it('batch views, plans and approval cards', () => {

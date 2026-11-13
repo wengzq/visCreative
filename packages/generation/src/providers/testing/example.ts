@@ -1,8 +1,8 @@
-import { createServer } from 'node:http'
 import { z } from 'zod'
 import { boundedBody } from '../download'
 import type { ProviderType } from '../registry'
 import { ProviderError, type ProviderAdapter } from '../types'
+import { createIsolatedHttpServer } from '../../../../../scripts/testing/isolated-http'
 
 export const EXAMPLE_SECRET = 'fake-example-key-contract'
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=', 'base64')
@@ -15,7 +15,7 @@ export async function exampleService(scenario: Scenario = 'normal') {
   let cancelled = false
   let authenticated = 0
   let origin = ''
-  const server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const path = new URL(req.url!, 'http://localhost').pathname
     const send = (value: unknown, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
     if (path.endsWith('/output')) {
@@ -40,10 +40,9 @@ export async function exampleService(scenario: Scenario = 'normal') {
       send({ cancelled })
     } else send({ state: cancelled ? 'cancelled' : scenario === 'lost' || scenario.startsWith('cancel-') ? 'pending' : 'succeeded', url: `${origin}/output` })
   })
+  const { server } = isolated
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Example server has not started')
-  origin = `http://127.0.0.1:${address.port}`
+  origin = isolated.baseUrl
   const type: ProviderType = {
     type: 'example', label: { zh: '示例服务', en: 'Example' }, needsKey: true, kinds: ['image'],
     regions: [

@@ -1,12 +1,12 @@
 import type { CanvasOp, JobView, MediaPreview, MediaTaskView, MethodParams, MethodResult, NodeKind, NodeView } from '@vis/protocol'
-import { ASSET_REF_PATTERN, isMediaKind, PROMPT_REF_PATTERN } from '@vis/protocol'
+import { ASSET_REF_PATTERN, isMediaKind, modelOperations, operationKind, PROMPT_REF_PATTERN } from '@vis/protocol'
 import type { CanvasActions } from '@vis/canvas-ui'
 import { assembleScriptTimeline, nodeTitleNumber, readChoice, resolveChoice, timelineMessages } from '@vis/canvas-ui'
 import { describeError, formatter, messagesFor, type Locale } from '@vis/ui-kit'
 import { actionMessages } from './messages'
 import { RpcError } from './rpc'
 import type { SpaceConnection } from './space'
-import { generationOperations, operationChoice } from './operations'
+import { generationOperations } from './operations'
 import { previzCanvasActions } from './previz-actions'
 import { scriptCanvasActions } from './script-actions'
 import { scriptMessages } from './script-messages'
@@ -52,6 +52,14 @@ export function canvasActions(conn: SpaceConnection, notify: (n: Omit<Notice, 'i
     jobActions.set(key, result)
     return result
   }
+  const regenerate = (jobId: string, targetNodeId?: string) => jobAction(`regenerate:${jobId}:${targetNodeId ?? ''}`, async () => {
+    try {
+      const job = await call<JobView>('generation.get', { jobId })
+      if (job.status === 'unknown' && !window.confirm(m().regenerateConfirm)) return
+      await call('generation.regenerate', { requestId: rid(), jobId, ...(targetNodeId ? { targetNodeId } : {}) })
+      conn.dismissJobs([jobId])
+    } catch (error) { fail(() => m().regenerate)(error) }
+  })
   let renderRequests = renderRequestsByConnection.get(conn)
   if (!renderRequests) {
     renderRequests = new Map()
@@ -136,23 +144,23 @@ export function canvasActions(conn: SpaceConnection, notify: (n: Omit<Notice, 'i
     onMediaAnalyze: (nodeId, slotId) => call<{ durationMs: number; pointsMs: number[] }>('media.analyze', { operation: 'audio.silence', nodeId, slotId })
       .catch(fail(() => m().analyzeMedia)),
 
-    async onRunOperation(nodeId, operation) {
+    onSubmitOperation: (nodeId, request) => jobAction(`operation:${nodeId}:${JSON.stringify(request)}`, async () => {
       try {
         const { nodes } = await call<{ nodes: NodeView[] }>('canvas.get', { nodeIds: [nodeId] })
         const node = nodes.find(node => node.nodeId === nodeId)
         if (!node) throw new Error(m().nodeDeleted)
         const main = node.slots.find(slot => slot.slotKey === 'main')
         if (!main || main.content.type !== 'asset') throw new Error(m().missingMedia)
-        const catalog = conn.getView().providers
-        const choice = catalog ? operationChoice(catalog, node, operation) : null
-        if (!choice) throw new Error(m().unsupportedOperation)
+        const provider = conn.getView().providers?.providers.find(provider => provider.id === request.provider)
+        const model = provider?.models.find(model => model.id === request.model && model.kind === node.kind && modelOperations(model).includes(request.operation))
+        if (!provider?.available || (provider.needsKey && !provider.hasKey) || !model || operationKind(request.operation) !== node.kind) throw new Error(m().unsupportedOperation)
         await call('generation.submit', {
-          requestId: rid(), operation, kind: node.kind, ...choice,
+          requestId: rid(), kind: node.kind, ...request,
           inputs: [{ slotId: main.slotId, revision: main.revision }],
           targets: [{ outputIndex: 0, kind: 'new_node', nearNodeId: nodeId }],
         })
       } catch (error) { fail(() => m().generate)(error) }
-    },
+    }),
 
     async onUploadReference(nodeId, files) {
       try {
@@ -467,14 +475,8 @@ export function canvasActions(conn: SpaceConnection, notify: (n: Omit<Notice, 'i
       catch (error) { fail(() => m().recheck)(error) }
     }),
 
-    onRegenerate: jobId => jobAction(`regenerate:${jobId}`, async () => {
-      try {
-        const job = await call<JobView>('generation.get', { jobId })
-        if (job.status === 'unknown' && !window.confirm(m().regenerateConfirm)) return
-        await call('generation.regenerate', { requestId: rid(), jobId })
-        conn.dismissJobs([jobId])
-      } catch (error) { fail(() => m().regenerate)(error) }
-    }),
+    onRegenerate: jobId => regenerate(jobId),
+    onRegenerateNode: (nodeId, jobId) => regenerate(jobId, nodeId),
 
     onDropFiles: (files, at) => {
       assertCurrentProject()

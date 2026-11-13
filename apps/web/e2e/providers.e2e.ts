@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 // Real studiod + web host + Chrome; Ark and SecretStore stay inside the test process without accessing real services or Keychain.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import type { Server } from 'node:http'
 import { join } from 'node:path'
 import { inspect } from 'node:util'
 import { type Browser, chromium, type Page } from 'playwright-core'
@@ -14,6 +14,7 @@ import { createMemorySecretStore } from '../../../services/studiod/src/secret-st
 import { startStudiod, type Studiod } from '../../../services/studiod/src/studiod'
 import { createWebHost, type WebHost } from '../src/host/server'
 import { openStudiodLink, type StudiodLink } from '../src/host/studiod-link'
+import { createIsolatedHttpServer } from '../../../scripts/testing/isolated-http'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const CHROME = chromePath()
@@ -62,7 +63,7 @@ describe.skipIf(!ready)('Generation service settings and model parameters', () =
     for (const method of ['log', 'info', 'warn', 'error'] as const) {
       vi.spyOn(console, method).mockImplementation((...args) => { logs.push(inspect(args)) })
     }
-    server = createServer(async (req, res) => {
+    const isolated = createIsolatedHttpServer(async (req, res) => {
       const chunks: Buffer[] = []
       for await (const chunk of req) chunks.push(Buffer.from(chunk))
       const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown> : {}
@@ -82,10 +83,9 @@ describe.skipIf(!ready)('Generation service settings and model parameters', () =
         res.end(readFileSync(join(root, 'packages/generation/src/providers/mock/fixtures/sample.mp4')))
       } else res.writeHead(404).end('{}')
     })
+    server = isolated.server
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('Test Ark service has not started')
-    origin = `http://127.0.0.1:${address.port}`
+    origin = isolated.baseUrl
     studiod = await startStudiod({
       dataDir: dir, studiodVersion: 'e2e', runtimes: {}, secretStore: createMemorySecretStore(),
       providers: [createMockProvider({ latencyMs: 0 }), createRenderProvider({ workDir: join(dir, 'render') })],
@@ -286,7 +286,8 @@ describe.skipIf(!ready)('Generation service settings and model parameters', () =
     expect(await popup.getByRole('button', { name: /E2E 图片模型/ }).count()).toBe(0)
     expect(await popup.getByRole('button', { name: '1080p', exact: true }).isVisible()).toBe(true)
     expect(await popup.getByRole('group', { name: '数量', exact: true }).count()).toBe(0)
-    expect(await popup.getByRole('switch').count()).toBe(3)
+    expect(await popup.getByRole('switch').count()).toBe(4)
+    expect(await popup.getByRole('switch', { name: '返回尾帧', exact: true }).isVisible()).toBe(true)
     const normalViewport = page.viewportSize()!
     // Force overflow even with the runner's smaller fallback font metrics, then wait for the resize handler.
     await page.setViewportSize({ width: 1600, height: 500 })

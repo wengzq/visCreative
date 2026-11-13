@@ -163,9 +163,9 @@ MediaTaskView = { taskId, status, operation, nodeId, assetVersionIds?, nodeIds?,
 
 ### 8. 输入面板
 
-- **参考素材编号**：仅对持有素材的图片、视频、音频输入，按 `inputs` 顺序去重后从 1 编号；文本与空媒体输入不编号。缩略图左上角显示序号，音频显示时长。
+- **参考素材编号**：仅对持有素材的图片、视频、音频输入，按 `inputs` 顺序去重，各媒体类型分别从 1 编号（RFC 0043 修正）；文本与空媒体输入不编号。缩略图左上角显示序号，音频显示时长。
 - **提示词里引用**：输入 `@` 或点击缩略图，会在光标处插入引用标签，显示为「缩略图 + 图片 7」。存储格式是 `{{ref:<nodeId>}}`，编号在显示时按当前顺序计算，所以调整顺序或删除别的输入后编号依然正确。
-  - 提交时服务端把引用标记替换成「图片 N」「视频 N」「音频 N」（N 按同一媒体素材编号规则计算，不计提示词槽位），再交给 provider。
+  - 提交时服务端按 provider/model 声明的格式替换引用标记（Seedance 2.0/2.5 见 RFC 0043）；未声明格式时沿用「图片 N」「视频 N」「音频 N」。N 与界面使用同一媒体类型内的编号，不计提示词槽位。
   - 引用了已不在 `inputs` 里的节点：标签显示为失效样式，发送按钮禁用；服务端同样检查，返回 `invalid_params`。
   - Agent 写提示词时也可以用同样的标记，`prompt.ts` 补充说明。
 - **来源按钮**：「上传」（选择本机文件，在原节点附近新建素材节点并加为输入）、「画布参考」（现有的点选）。
@@ -177,6 +177,28 @@ MediaTaskView = { taskId, status, operation, nodeId, assetVersionIds?, nodeIds?,
 - 展开使用 ui-kit 的原生 `dialog.vis-dialog` 样式，编辑器始终挂载在同一位置，展开、收起不会重置光标或编辑历史；展开时按 Esc 仅收起，不丢弃文本。引用、普通输入、换行、纯文本粘贴共用本地撤销栈；输入法组合期间不重建标签、不保存中间文本，也不响应提交快捷键。
 - 参数摘要按 `paramsSchema.properties` 顺序读取当前值和默认值；字符串直接显示，数字和布尔值带字段的本地化名称，不猜测模型未声明的单位。独立参数浮层与原有模型浮层共用同一套 schema 控件，原模型浮层保留参数编辑以兼容现有操作习惯。
 - 缺失节点、文本与空媒体输入均不占编号，不提供 `@` 候选或缩略图插入；已有标记显示失效并禁用发送。失效标记保留原节点 ID，重新加入有效媒体素材后自动恢复。上传接口尚未接入时禁用上传按钮。
+
+#### Attached references and canvas visibility (2026-11-11)
+
+`@` lists only attached media inputs that hold assets; it does not attach unrelated canvas media. The author attaches sources through Add reference, upload or an incoming edge. Resolve those input IDs against the complete project node list, independently of canvas visibility: hiding working nodes must not remove their existing references, numbers or prompt chips. Selected media and script node snapshots retain that complete list; unselected media nodes keep the lightweight snapshot. Operation panels resolve their own subject directly and need no canvas lookup.
+
+#### Amendment: pick canvas media with `@` (maintainer, 2026-11-11)
+
+Supersedes the first sentence of the note above. `@` can also reach canvas media that is not attached yet; picking it attaches it.
+
+- **Where.** Generate prompt panels (image, video, audio) and the script prompt editor. Operation panels keep their fixed subject and offer no canvas candidates.
+- **List.** Two groups in one listbox: attached references first, numbered as today. Below them, **On canvas**: the project's other image, video and audio nodes that hold an asset, including hidden working media. Excluded: the node being edited, frames, text, empty media, deleted nodes, and media kinds the selected model does not accept as references. When the model accepts no references at all, the second group is absent.
+- **Search.** Text typed after `@` filters both groups by node title (case-insensitive substring). The canvas group shows at most 50 matches, topmost on the canvas first (descending z, then title), with a localized "type to narrow" hint when more exist. Keyboard and mouse picking work as today; Escape closes the list and keeps the typed text.
+- **Pick = explicit attach.** Picking an unattached item appends it to the node's `inputs` through the same action as **Add reference** (with its revision handling), then inserts the `{{ref:<nodeId>}}` chip at the cursor. If attaching fails, nothing is inserted and the localized reason is shown. Nothing is attached except by this pick, so the author keeps control of what the model receives.
+- **Limits.** The model catalog's existing reference limits apply: when attaching would exceed the count for that kind, the option is shown disabled with the reason. Duration and hosting checks stay where they are (before submit), as for any attached reference.
+- **Undo and removal.** Removing a chip from the prompt never detaches the input; detaching stays in the reference strip. Prompt undo affects text only, not the attachment.
+- Agents are unaffected: they reference inputs through the contract as before.
+
+##### As built (2026-11-11)
+
+Generate panels and the script prompt editor share one searchable listbox with labeled Attached references and On canvas groups. Canvas choices use the complete project node list, including hidden working media, ordered by descending z and then title; only the matching canvas group is capped at 50. The selected model's catalog controls accepted kinds and per-kind/combined count limits. Missing declarations retain legacy image/audio attachment support; video requires a declared video reference capability. Scripts accept all three media kinds without a generation model. Duration and hosting checks remain before submit.
+
+A canvas pick uses the existing Add reference action and waits for its input event and reference number before inserting the marker; attachment failures preserve the typed search and show the localized reason. Disabled options expose their reason through ARIA and cannot attach via mouse or keyboard. Chip removal and prompt undo change text only. Operation panels and the lightweight unselected-media snapshots are unchanged. Unit coverage exercises candidate derivation and attachment ordering/failure; mock-provider browser coverage verifies hidden image/video sources, search, persistence, removal, undo, count limits and script prompts. Screenshots are kept outside the repository under `/tmp/vis-at-canvas/`.
 
 ## 契约变更汇总
 

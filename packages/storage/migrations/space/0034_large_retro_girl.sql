@@ -1,0 +1,1 @@
+CREATE INDEX `scene_proposals_status_slot` ON `scene_proposals` (`status`,`slot_id`);

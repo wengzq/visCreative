@@ -193,6 +193,20 @@ describe('vis mcp', () => {
     expect(await server.handle({ jsonrpc: '2.0', id: 9, method: 'resources/list' })).toMatchObject({ error: { code: -32601 } })
   })
 
+  it('preserves Agent-facing gateway hints on refused tool calls without forwarding unrelated error data', async () => {
+    const hint = 'Use scene.propose to propose this change for the author to review'
+    const fake = await studiod(() => ({ error: { code: -32000, message: 'Only the author can change or delete Bench', data: {
+      code: 'forbidden', reason: 'scene.object_protected', params: { name: 'Bench' }, hint, internal: 'not-agent-visible',
+    } } }))
+    const server = createMcpServer(fake.env)
+    cleanup.push(() => server.close())
+    const result = await server.handle(call('canvas_apply', { requestId: 'protected-write', ops: [{ op: 'node.delete', nodeId: 'stage' }] })) as any
+    expect(result.result.isError).toBe(true)
+    expect(textOf(result)).toEqual({ requestId: 'protected-write', error: {
+      code: 'forbidden', message: 'Only the author can change or delete Bench', reason: 'scene.object_protected', params: { name: 'Bench' }, hint,
+    } })
+  })
+
   it('stdio: reads line by line and returns -32700 on parse failure', async () => {
     const lines: string[] = []
     async function* input() {

@@ -2,9 +2,10 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { LocaleProvider, type Locale } from '@vis/ui-kit'
-import { CanvasView, type CanvasViewProps } from './CanvasView'
+import { CanvasView, selectCanvasNode, type CanvasViewProps } from './CanvasView'
 import { OrganizationPreview } from './OrganizationPreview'
 import type { NodeView } from '@vis/protocol'
+import { numberedReferences } from './prompt-references'
 
 const render = (locale: Locale) => renderToStaticMarkup(createElement(LocaleProvider, {
   locale, setLocale() {}, children: createElement(CanvasView, { nodes: [], assetUrl: (id: string) => id } as unknown as CanvasViewProps),
@@ -38,4 +39,25 @@ it('The English organization preview preserves original titles of reused frames'
   }))
   expect(html).toContain('>未分类</text>')
   expect(html).toContain('Uncategorized 0 nodes')
+})
+
+
+it.each(['image', 'video', 'script'] as const)('keeps hidden attached media in the selected %s node snapshot', kind => {
+  const media = (nodeId: string, kind: 'image' | 'video'): NodeView => ({
+    nodeId, kind, purpose: 'working', x: 0, y: 0, w: 100, h: 100, z: 0, layoutRevision: 0,
+    slots: [{ slotId: nodeId, slotKey: 'main', revision: 1, contentType: kind, content: { type: 'asset', assetVersionId: nodeId, mime: `${kind}/test` } }],
+  })
+  const target: NodeView = { ...media('target', 'image'), kind, purpose: 'artifact', slots: [], inputs: ['image', 'video'] }
+  const allNodes = [media('image', 'image'), media('video', 'video'), target]
+  const state = {
+    nodeViews: new Map(allNodes.map(node => [node.nodeId, node])), nodes: [target], allNodes,
+    selectedId: 'target', titleNumbers: new Map(), frameRunning: new Map(),
+  } as unknown as Parameters<typeof selectCanvasNode>[0]
+  const snapshot = selectCanvasNode(state, undefined, 'target')!
+  expect(snapshot.nodes).toEqual([target])
+  expect(numberedReferences(target.inputs!, snapshot.allNodes).map(reference => [reference.node?.kind, reference.number])).toEqual([
+    ['image', 1], ['video', 1],
+  ])
+  const unselected = selectCanvasNode({ ...state, selectedId: null }, undefined, 'target')!
+  if (kind !== 'script') expect(unselected.allNodes).toEqual([])
 })

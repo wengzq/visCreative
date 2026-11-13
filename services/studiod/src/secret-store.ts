@@ -30,17 +30,18 @@ const runSecurity: SecurityCommandRunner = (args, input) => new Promise((resolve
   child.stdin.end(input)
 })
 
-const SERVICE = 'vis-creative.provider'
+type CredentialService = 'vis-creative.provider' | 'vis-creative.provider.test' | 'vis-creative.hosting' | 'vis-creative.hosting.test'
+const SERVICE: CredentialService = 'vis-creative.provider'
 const NOT_FOUND = 44
 
-export function createSystemSecretStore(): SecretStore {
-  return process.platform === 'win32' ? createWindowsCredentialStore() : createKeychainSecretStore()
+export function createSystemSecretStore(service: CredentialService = SERVICE): SecretStore {
+  return process.platform === 'win32' ? createWindowsCredentialStore({ resource: service }) : createKeychainSecretStore({ service })
 }
 
 export function createWindowsCredentialStore(options: {
   platform?: NodeJS.Platform
   run?: WindowsCommandRunner
-  resource?: 'vis-creative.provider' | 'vis-creative.provider.test'
+  resource?: CredentialService
 } = {}): SecretStore {
   const run = options.run ?? runPowerShell
   const resource = options.resource ?? SERVICE
@@ -79,9 +80,10 @@ export function createWindowsCredentialStore(options: {
   }
 }
 
-export function createKeychainSecretStore(options: { platform?: NodeJS.Platform; run?: SecurityCommandRunner } = {}): SecretStore {
+export function createKeychainSecretStore(options: { platform?: NodeJS.Platform; run?: SecurityCommandRunner; service?: CredentialService } = {}): SecretStore {
   const run = options.run ?? runSecurity
   const platform = options.platform ?? process.platform
+  const service = options.service ?? SERVICE
 
   function validate(value: string): void {
     if (platform !== 'darwin') throw new Error('macOS Keychain is not supported on this platform; configure provider API keys on macOS')
@@ -99,7 +101,7 @@ export function createKeychainSecretStore(options: { platform?: NodeJS.Platform;
   return {
     async get(id) {
       validate(id)
-      const result = await execute(['find-generic-password', '-s', SERVICE, '-a', id, '-w'])
+      const result = await execute(['find-generic-password', '-s', service, '-a', id, '-w'])
       if (result.exitCode === NOT_FOUND) return undefined
       if (result.exitCode !== 0) throw new Error('Cannot read the API key from macOS Keychain')
       return result.stdout.replace(/\r?\n$/, '')
@@ -108,7 +110,7 @@ export function createKeychainSecretStore(options: { platform?: NodeJS.Platform;
       validate(id)
       validate(secret)
       const quote = (value: string) => `"${value.replace(/[\\"]/g, '\\$&')}"`
-      const command = `add-generic-password -U -s ${quote(SERVICE)} -a ${quote(id)} -w ${quote(secret)}\n`
+      const command = `add-generic-password -U -s ${quote(service)} -a ${quote(id)} -w ${quote(secret)}\n`
       // The security interactive command buffer is only 4096 bytes; truncation would interpret the remainder as another command.
       if (Buffer.byteLength(command, 'utf8') >= 4096) throw new Error('Keychain field is too long')
       const result = await execute(['-i'], command)
@@ -116,12 +118,12 @@ export function createKeychainSecretStore(options: { platform?: NodeJS.Platform;
     },
     async delete(id) {
       validate(id)
-      const result = await execute(['delete-generic-password', '-s', SERVICE, '-a', id])
+      const result = await execute(['delete-generic-password', '-s', service, '-a', id])
       if (result.exitCode !== 0 && result.exitCode !== NOT_FOUND) throw new Error('Cannot delete the API key from macOS Keychain')
     },
     async has(id) {
       validate(id)
-      const result = await execute(['find-generic-password', '-s', SERVICE, '-a', id])
+      const result = await execute(['find-generic-password', '-s', service, '-a', id])
       if (result.exitCode === NOT_FOUND) return false
       if (result.exitCode !== 0) throw new Error('Cannot check the API key in macOS Keychain')
       return true

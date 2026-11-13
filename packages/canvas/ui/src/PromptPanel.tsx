@@ -1,4 +1,4 @@
-import type { NodeView } from '@vis/protocol'
+import type { GenerationOperation, NodeView } from '@vis/protocol'
 import { CloseIcon, IconButton, useMessages } from '@vis/ui-kit'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { CanvasActions } from './CanvasView'
@@ -11,8 +11,19 @@ import { ReferenceStrip } from './ReferenceStrip'
 import { hasBrokenReferences, numberedReferences } from './prompt-references'
 import { promptMessages } from './prompt-messages'
 import './prompt-panel.css'
+import { GenerationProvenance } from './GenerationProvenance'
+import { isOperationSource, sameGenerationDraft, sourceDefaults, type GenerationSource } from './generation-provenance'
+import { usePromptPanelBounds } from './prompt-panel-bounds'
+import { OperationPromptPanel } from './OperationPromptPanel'
+import { ReferenceFeedback } from './ReferenceFeedback'
+import { videoReferenceState } from './reference-validation'
+import { useVideoReferences } from './use-video-references'
 
-export function PromptPanel({ view, nodes, text, saving, generation, actions, assetUrl, posterUrl, picking, onPick, onChange, onCommit, onReset, panel }: {
+type PromptPanelProps = {
+  operation?: { operation: GenerationOperation; onClose(): void } | undefined
+  source?: GenerationSource | undefined
+  expectedPromptRevision?: number | undefined
+  editingDraft?: boolean | undefined
   panel?: { header: ReactNode; generationLabel: string; paidLabel?: string | undefined; action: string; hideAction?: boolean; hint?: string | undefined; allowEmpty?: boolean }
   view: NodeView
   nodes: NodeView[]
@@ -27,20 +38,34 @@ export function PromptPanel({ view, nodes, text, saving, generation, actions, as
   onChange(text: string): void
   onCommit(): Promise<boolean>
   onReset(): void
-}) {
+}
+
+export function PromptPanel(props: PromptPanelProps) {
+  return props.operation ? <OperationPromptPanel key={props.operation.operation} view={props.view} operation={props.operation.operation} actions={props.actions}
+    assetUrl={props.assetUrl} posterUrl={props.posterUrl} onClose={props.operation.onClose} /> : <DraftPromptPanel {...props} />
+}
+
+function DraftPromptPanel({ view, nodes, text, saving, generation, actions, assetUrl, posterUrl, picking, onPick, onChange, onCommit, onReset, panel, source, expectedPromptRevision, editingDraft }: PromptPanelProps) {
   const m = useMessages(messages)
   const p = useMessages(promptMessages)
   const [expanded, setExpanded] = useState(false)
   const [composing, setComposing] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [sending, setSending] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const expandButton = useRef<HTMLButtonElement>(null)
   const upload = useRef<HTMLInputElement>(null)
   const input = useRef<PromptRefInputHandle>(null)
-  const references = useMemo(() => numberedReferences(view.inputs ?? [], nodes), [view.inputs, nodes])
+  const inputs = useMemo(() => numberedReferences(view.inputs ?? [], nodes), [view.inputs, nodes])
+  const videoReferences = useVideoReferences(inputs, actions.onResolveAsset)
+  const references = videoReferences.references
+  const referenceState = videoReferenceState(references, generation.model, generation.catalog?.videoReferences, generation.choice?.params ?? {})
   const broken = hasBrokenReferences(text, references)
   const kind = view.kind === 'audio' ? 'audio' : view.kind === 'video' ? 'video' : 'image'
+  const legacy = !panel && !isOperationSource(source) && !view.slots.some(slot => slot.slotKey === 'prompt')
+  const emptyProvenance = Boolean(source && !isOperationSource(source) && !editingDraft && !text.trim() && (legacy || !sameGenerationDraft(view, source, nodes, text, generation.choice ?? view.generation, sourceDefaults(generation.catalog, source))))
+  usePromptPanelBounds(dialog, Boolean(source) && !panel && !expanded)
   useEffect(() => {
     const element = dialog.current
     if (!element) return
@@ -77,14 +102,17 @@ export function PromptPanel({ view, nodes, text, saving, generation, actions, as
       </div>
       {references.length ? <ReferenceStrip references={references} assetUrl={assetUrl} posterUrl={posterUrl} onInsert={nodeId => input.current?.insert(nodeId)}
         onRemove={nodeId => void actions.onSetInputs(view.nodeId, (view.inputs ?? []).filter(id => id !== nodeId)).catch(() => {})} /> : null}
-      <PromptRefInput ref={input} value={text} references={references} assetUrl={assetUrl} posterUrl={posterUrl} placeholder={kind === 'audio' ? m.audioPrompt : kind === 'video' ? m.videoPrompt : m.imagePrompt}
-        readOnly={saving || sending} onChange={onChange} onCommit={() => void onCommit()} onReset={expanded ? () => setExpanded(false) : onReset} onComposing={setComposing} />
+      <ReferenceFeedback state={referenceState} loading={videoReferences.loading} failed={videoReferences.failed} onManage={() => generation.onManage('hosting')} onRetry={videoReferences.retry} />
+      {!emptyProvenance ? <PromptRefInput ref={input} value={text} references={references} canvas={panel ? undefined : { nodeId: view.nodeId, nodes, limits: generation.model?.referenceInputs, attach: nodeId => actions.onSetInputs(view.nodeId, [...new Set([...(view.inputs ?? []), nodeId])]) }} assetUrl={assetUrl} posterUrl={posterUrl} placeholder={kind === 'audio' ? m.audioPrompt : kind === 'video' ? m.videoPrompt : m.imagePrompt}
+        readOnly={saving || sending || restoring || legacy} onChange={onChange} onCommit={() => { if (!restoring) void onCommit() }} onReset={expanded ? () => setExpanded(false) : onReset} onComposing={setComposing} /> : null}
       {broken ? <div className="vis-prompt-broken" role="status">{p.brokenReferenceHint}</div> : null}
       {panel?.hint ? <p role="status">{panel.hint}</p> : null}
+      {source ? <GenerationProvenance key={`${source.jobId}:${view.slots.find(slot => slot.slotKey === 'main')?.revision}`} source={source} view={view} nodes={nodes} text={text} generation={generation} actions={actions}
+        emptyDraft={emptyProvenance} expectedRevision={expectedPromptRevision ?? view.slots.find(slot => slot.slotKey === 'prompt')?.revision ?? 0} assetUrl={assetUrl} posterUrl={posterUrl} onRestored={onReset} onBusy={setRestoring} /> : null}
       <div className="vis-prompt-footer">
         <div className="vis-prompt-settings"><ModelPicker kind={kind} settings={generation} placement={panel ? 'beside' : 'above'} /><ParamsSummary settings={generation} /></div>
         {!panel?.hideAction ? <button className={panel ? 'is-primary' : 'vis-send-button'} aria-label={panel?.action ?? m.generate} title={panel?.hint ?? (broken ? p.brokenReferenceHint : generation.blocked ? m.configureKey : m.generate)}
-          disabled={Boolean(panel?.hint) || (!panel?.allowEmpty && !text.trim()) || broken || composing || sending || uploading || generation.blocked || generation.saving}
+          disabled={Boolean(panel?.hint) || (!panel?.allowEmpty && !text.trim()) || broken || referenceState.blocked || composing || sending || uploading || restoring || legacy || generation.blocked || generation.saving}
           onMouseDown={event => event.preventDefault()} onClick={() => {
             setSending(true)
             void (async () => {

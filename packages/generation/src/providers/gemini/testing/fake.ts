@@ -1,4 +1,3 @@
-import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +6,7 @@ import type { ContractScenario } from '../../contract'
 import type { ProviderRequest } from '../../types'
 import { createGeminiProvider } from '../index'
 import { GEMINI_BASE_URL, GEMINI_MODELS } from '../models'
+import { createIsolatedHttpServer } from '../../../../../../scripts/testing/isolated-http'
 
 export const SECRET = 'gemini-fixture-key/never-real'
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=', 'base64')
@@ -30,7 +30,7 @@ export async function fakeGemini(scenario: Scenario = 'normal', kind: 'image' | 
     createBody: undefined as Record<string, unknown> | undefined,
     pollBody: undefined as Record<string, unknown> | undefined,
   }
-  const server = createServer(async (req, res) => {
+  const isolated = createIsolatedHttpServer(async (req, res) => {
     const chunks: Buffer[] = []
     for await (const chunk of req) chunks.push(Buffer.from(chunk))
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown> : {}
@@ -80,10 +80,9 @@ export async function fakeGemini(scenario: Scenario = 'normal', kind: 'image' | 
       steps: [{ type: 'model_output', content: [{ type: 'video', mime_type: 'video/mp4', ...(controls.uriOutput ? { uri: controls.outputUri } : { data: mp4.toString('base64') }) }] }],
     })
   })
+  const { server } = isolated
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Fake Gemini server did not start')
-  const origin = `http://127.0.0.1:${address.port}`
+  const origin = isolated.baseUrl
   const fetcher: typeof fetch = (input, init) => {
     const url = new URL(String(input))
     if (url.origin !== 'https://generativelanguage.googleapis.com') throw new Error('Fake Gemini transport refuses external requests')

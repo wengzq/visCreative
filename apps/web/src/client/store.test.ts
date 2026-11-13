@@ -165,6 +165,21 @@ describe('Generation state on nodes', () => {
     expect(d.unanchored.running).toBe(0)
   })
 
+  it('a placeholder carries its job state and problems, falling back to the reference once it is gone (RFC 0047)', () => {
+    let s = applyEvent(base, ev(11, 'job.stateChanged', {
+      jobId: 'j1', status: 'running', job: job('j1', 'running', [{ outputIndex: 0, kind: 'new_node', status: 'pending', nearNodeId: 'n1', nodeId: 'n2', slotId: 'slot_n2' }]),
+    }))
+    expect(nodeDecorations(s).byNode.get('n2')).toMatchObject({ running: 1 })
+    expect(nodeDecorations(s).byNode.has('n1')).toBe(false)
+    s = applyEvent(s, ev(12, 'job.stateChanged', {
+      jobId: 'j1', status: 'failed', error: { code: 'provider_error', message: 'boom' },
+      job: { ...job('j1', 'failed', [{ outputIndex: 0, kind: 'new_node', status: 'no_output', nearNodeId: 'n1', nodeId: 'n2', slotId: 'slot_n2' }]), error: { code: 'provider_error', message: 'boom' } },
+    }))
+    expect(nodeDecorations(s).byNode.get('n2')!.problems).toHaveLength(1)
+    s = applyEvent(s, ev(13, 'node.deleted', { nodeId: 'n2' }))
+    expect(nodeDecorations(s).byNode.get('n1')!.problems).toHaveLength(1)
+  })
+
   it('success with conflicts or no output shows notices on the corresponding nodes', () => {
     const s = applyEvent(base, ev(11, 'job.stateChanged', {
       jobId: 'j1', status: 'succeeded',

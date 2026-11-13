@@ -7,18 +7,21 @@
     "node": ">=24"
   },
   "scripts": {
+    "build:ffmpeg:mac": "node scripts/build-ffmpeg-macos.mjs",
     "fonts:fetch": "node scripts/fetch-fonts.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check:agents": "node scripts/check-agent-literals.mjs",
-    "check": "pnpm check:agents && pnpm check:boundaries && pnpm check:i18n && pnpm check:english && pnpm typecheck && pnpm test",
+    "check": "pnpm check:agents && pnpm check:boundaries && pnpm check:i18n && pnpm check:english && pnpm check:privacy && pnpm typecheck && pnpm test",
     "build": "pnpm --filter @vis/cli --filter @vis/studiod --filter @vis/devcli --filter @vis/web build",
     "dev:studiod": "pnpm build && node scripts/dev-studiod.mjs",
     "dev:client": "pnpm --filter @vis/devcli build && node apps/devcli/dist/vis-dev.mjs",
     "dev:web": "pnpm --filter @vis/web build && node apps/web/dist/vis-web.mjs",
+    "dev:desktop": "pnpm build && pnpm --filter @vis/desktop build && pnpm --filter @vis/desktop start",
     "check:i18n": "node scripts/check-i18n.mjs",
-    "check:english": "node scripts/check-english.mjs"
+    "check:english": "node scripts/check-english.mjs",
+    "check:privacy": "node scripts/check-privacy.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

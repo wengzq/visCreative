@@ -572,6 +572,17 @@ describe.skipIf(!ready)('RFC 0010 session panel', () => {
     await page.keyboard.press('Escape')
     expect(await page.getByRole('dialog', { name: '会话入口的操作', exact: true }).count()).toBe(0)
     await back()
+    // macOS and Linux fire contextmenu on press; the menu must survive the release that follows outside it.
+    const box = (await card('会话入口').boundingBox())!
+    await page.mouse.move(box.x + 12, box.y + 8)
+    await page.mouse.down({ button: 'right' })
+    await page.mouse.up({ button: 'right' })
+    const contextMenu = page.getByRole('dialog', { name: '会话入口的操作', exact: true })
+    await contextMenu.waitFor()
+    await page.waitForTimeout(300)
+    expect(await contextMenu.isVisible()).toBe(true)
+    await page.keyboard.press('Escape')
+    expect(await contextMenu.count()).toBe(0)
   })
 
   it('clicking a todo without a session selects an agent; activation opens the new session', async () => {

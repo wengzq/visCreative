@@ -43,6 +43,7 @@ let runtime: ReturnType<typeof createClaudeRuntime>
 let calls: FakeQuery[]
 let nextQuery: ((q: FakeQuery) => void) | undefined
 let clock = 1_800_000_000_000
+let fallbackDirs: string[]
 let tokenSeq = 0
 let environment: Record<string, string | undefined>
 
@@ -55,6 +56,7 @@ const result = (subtype: 'success' | 'error_during_execution' = 'success') => ({
 beforeEach(() => {
   db = openSpaceDb(':memory:')
   calls = []
+  fallbackDirs = []
   tokenSeq = 0
   nextQuery = undefined
   environment = { PATH: '/usr/bin', HOME: '/home/u' }
@@ -70,6 +72,7 @@ beforeEach(() => {
     issueToken: () => ({ token: `spc_1.tok${++tokenSeq}`, tokenHash: `hash${tokenSeq}` }),
     socketPath: '/tmp/vis.sock',
     cliBinDir: '/opt/vis/bin',
+    fallbackDirs,
     initTimeoutMs: 200,
     interruptGraceMs: 50,
     env: environment,
@@ -95,6 +98,14 @@ const until = async (check: () => boolean) => {
 }
 
 describe('A single turn', () => {
+  it('appends packaged media after the user PATH for the SDK Agent', async () => {
+    fallbackDirs.push('/app/ffmpeg')
+    nextQuery = q => q.push(init())
+    send(newSession(), 'test')
+    await sessions.idle()
+    expect(calls[0]!.options.env!.PATH).toBe(['/opt/vis/bin', '/usr/bin', '/app/ffmpeg'].join(delimiter))
+  })
+
   it('Send now force-ends startup that ignores abort and starts its selected message before late init arrives', async () => {
     sessions.dispose()
     sessions = createSessionService({ db, runtime: { ensureReady: id => runtime.ensureReady(id), dispatchTurn: input => runtime.dispatchTurn(input), interruptTurn: input => runtime.interruptTurn(input), terminateTurn: input => runtime.terminateTurn(input) }, watchdog: { stopGraceMs: 10 }, now: () => ++clock })

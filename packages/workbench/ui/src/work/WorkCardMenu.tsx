@@ -6,7 +6,10 @@ import type { WorkCardAction } from './WorkCard'
 import { statusLabels, STATUS_ORDER } from './model'
 import './work.css'
 
-export type WorkCardMenuHandle = { open(x: number, y: number, focus: HTMLElement | null): void }
+export type WorkCardMenuHandle = {
+  open(x: number, y: number, focus: HTMLElement | null): void
+  openFromContextMenu(event: { clientX: number; clientY: number; buttons: number }, focus: HTMLElement | null): void
+}
 export type WorkCardMenuProps = {
   item: WorkItemView
   onAction?: ((item: WorkItemView, action: WorkCardAction) => void) | undefined
@@ -34,7 +37,13 @@ export function WorkCardMenu(p: WorkCardMenuProps) {
     setParentsOpen(false)
     setMenu({ x, y })
   }
-  useImperativeHandle(p.ref, () => ({ open }))
+  // macOS fires contextmenu while the button is still down; opening then lets the release outside the popover light-dismiss it.
+  const openFromContextMenu: WorkCardMenuHandle['openFromContextMenu'] = (event, focus) => {
+    const { clientX, clientY } = event
+    if (!event.buttons) return open(clientX, clientY, focus)
+    window.addEventListener('pointerup', () => setTimeout(() => open(clientX, clientY, focus)), { once: true, capture: true })
+  }
+  useImperativeHandle(p.ref, () => ({ open, openFromContextMenu }))
   useLayoutEffect(() => {
     if (!menu) return
     const element = dialog.current!
