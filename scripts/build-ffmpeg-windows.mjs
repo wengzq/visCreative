@@ -131,7 +131,8 @@ for (const source of manifest) {
       build('make', ['install'], { LD: cc })
       break
     case 'opus':
-      cmake(['-DOPUS_BUILD_TESTING=OFF', '-DOPUS_BUILD_PROGRAMS=OFF', '-DOPUS_DRED=OFF', '-DOPUS_OSCE=OFF', '-DOPUS_DEEP_PLC=OFF'])
+      // With mingw both hardening defaults link GCC's shared libssp-0.dll, a runtime outside the bundle's source closure.
+      cmake(['-DOPUS_BUILD_TESTING=OFF', '-DOPUS_BUILD_PROGRAMS=OFF', '-DOPUS_DRED=OFF', '-DOPUS_OSCE=OFF', '-DOPUS_DEEP_PLC=OFF', '-DOPUS_STACK_PROTECTOR=OFF', '-DOPUS_FORTIFY_SOURCE=OFF'])
       break
     case 'dav1d':
       meson(['-Denable_tools=false', '-Denable_tests=false'])
