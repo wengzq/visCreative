@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { distDir, stageDir } from './package-paths.mjs'
 import { nativeFiles } from './stage.mjs'
 import { iconDir } from './icons.mjs'
-import { assertStagedTarget } from './packaging-helpers.mjs'
+import { assertShellAsarContents, assertStagedTarget } from './packaging-helpers.mjs'
 import { assertNoPackagedFFmpegSources } from './ffmpeg-source-offer.mjs'
 
 const require = createRequire(import.meta.url)
@@ -25,9 +25,10 @@ export default {
     assertStagedTarget(target, { platform: context.electronPlatformName, arch: Arch[context.arch] })
   },
   afterPack: async context => {
-    assertNoPackagedFFmpegSources(join(context.appOutDir, 'visCreative.app/Contents/Resources/ffmpeg'))
-    const files = appBuilderRequire('@electron/asar').listPackage(join(context.appOutDir, 'visCreative.app/Contents/Resources/app.asar'))
-    if (files.some(path => path.includes('/node_modules'))) throw new Error('The shell asar must not include runtime node_modules; stage them as extraResources')
+    const resources = join(context.appOutDir, context.electronPlatformName === 'darwin' ? 'visCreative.app/Contents/Resources' : 'resources')
+    assertNoPackagedFFmpegSources(join(resources, 'ffmpeg'))
+    const files = appBuilderRequire('@electron/asar').listPackage(join(resources, 'app.asar'))
+    assertShellAsarContents(files)
   },
   electronDownload: { cache: process.env.electron_config_cache },
   extraResources: [
@@ -49,7 +50,14 @@ export default {
     // extraResources stay outside asar; explicitly include executable sidecars in the ad-hoc signature.
     binaries: (await nativeFiles(join(stageDir, 'resources'))).map(path => join('Contents/Resources', relative(join(stageDir, 'resources'), path))),
   },
-  win: { icon: join(iconDir, 'app-win.png') },
+  win: {
+    icon: join(iconDir, 'app-win.png'),
+    target: [{ target: 'nsis', arch: ['x64'] }],
+    artifactName: 'visCreative-${version}-win-x64-setup.${ext}',
+    signAndEditExecutable: true,
+    forceCodeSigning: false,
+  },
+  nsis: { oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true },
   dmg: { sign: false, icon: join(iconDir, 'app.icns') },
   publish: null,
 }

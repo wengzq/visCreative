@@ -11,6 +11,7 @@
     "start": "electron .",
     "test:smoke": "vitest run -c vitest.smoke.config.ts",
     "dist:mac": "node package.mjs",
+    "dist:win": "node package.mjs --win",
     "test:packaged": "vitest run -c vitest.packaged.config.ts"
   },
   "dependencies": {

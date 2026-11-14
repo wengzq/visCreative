@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
-import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { outputDir, root, stageDir } from './package-paths.mjs'
-import { assertStagedTarget, visLauncher } from './packaging-helpers.mjs'
+import { assertStagedTarget, desktopVersion, visLauncher } from './packaging-helpers.mjs'
 import { ffmpegSourceOffer, includeFFmpegResource } from './ffmpeg-source-offer.mjs'
 
 const desktop = fileURLToPath(new URL('.', import.meta.url))
@@ -33,8 +33,8 @@ function packageRoot(name, resolver = studiodRequire) {
 const copy = (from, to, options = {}) => cp(from, to, { recursive: true, dereference: true, ...options })
 const withoutModules = path => basename(path) !== 'node_modules'
 
-export async function stage(arch) {
-  const target = assertStagedTarget({ arch, platform: 'darwin', electronVersion: require('electron/package.json').version })
+export async function stage(arch, { platform = 'darwin', version } = {}) {
+  const target = assertStagedTarget({ arch, platform, electronVersion: require('electron/package.json').version })
   const app = join(stageDir, 'app')
   const resources = join(stageDir, 'resources')
   const modules = join(resources, 'node_modules')
@@ -43,15 +43,18 @@ export async function stage(arch) {
   await mkdir(join(app, 'node_modules'))
   await mkdir(modules, { recursive: true })
   const metadata = JSON.parse(await readFile(join(desktop, 'package.json'), 'utf8'))
-  await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'vis-creative-desktop', version: metadata.version, description: metadata.description, main: 'dist/main.mjs', type: 'module', author: 'visCreative contributors', dependencies: {} }, null, 2) + '\n')
+  await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'vis-creative-desktop', version: desktopVersion(version ?? metadata.version), description: metadata.description, main: 'dist/main.mjs', type: 'module', author: 'visCreative contributors', dependencies: {} }, null, 2) + '\n')
   await copy(join(desktop, 'dist'), join(app, 'dist'))
   await copy(join(root, 'services/studiod/dist'), join(resources, 'studiod/dist'))
   await copy(join(root, 'services/studiod/migrations'), join(resources, 'studiod/migrations'))
   await copy(join(root, 'apps/web/dist/client'), join(resources, 'web/client'))
   await copy(join(root, 'apps/cli/dist/vis.mjs'), join(resources, 'cli/vis.mjs'))
-  // Resolve from the installed app at invocation time, including spaces and a renamed .app directory.
-  await writeFile(join(resources, 'cli/vis'), visLauncher, { mode: 0o755 })
-  await chmod(join(resources, 'cli/vis'), 0o755)
+  if (platform === 'darwin') {
+    // Resolve from the installed app at invocation time, including spaces and a renamed .app directory.
+    await writeFile(join(resources, 'cli/vis'), visLauncher, { mode: 0o755 })
+    await chmod(join(resources, 'cli/vis'), 0o755)
+  }
+  // On Windows studiod creates an absolute vis.cmd in the isolated runtime directory.
   await copy(join(root, 'resources/fonts/files'), join(resources, 'fonts'))
 
   const ffmpeg = process.env.VIS_PACKAGE_FFMPEG_DIR
@@ -64,7 +67,11 @@ export async function stage(arch) {
     await copy(bundleRoot, join(resources, 'ffmpeg'), { filter: path => includeFFmpegResource(bundleRoot, path) })
     await writeFile(join(resources, 'ffmpeg/SOURCE-OFFER.txt'), offer)
     if (!sourceUrl) console.warn('WARNING: VIS_FFMPEG_SOURCE_URL is unset; this local preview offers sources on request. The d1 release script must require a hosted source URL.')
-    for (const name of ['ffmpeg', 'ffprobe']) await chmod(join(resources, 'ffmpeg', name), 0o755)
+    for (const name of ['ffmpeg', 'ffprobe']) {
+      const binary = join(resources, 'ffmpeg', platform === 'win32' ? `${name}.exe` : name)
+      if (platform === 'win32') await access(binary)
+      else await chmod(binary, 0o755)
+    }
   } else console.warn('WARNING: VIS_PACKAGE_FFMPEG_DIR is unset; ffmpeg is omitted and this app requires ffmpeg/ffprobe on PATH for media operations.')
 
   const sqliteSource = packageRoot('better-sqlite3')
@@ -87,9 +94,9 @@ export async function stage(arch) {
   const sdkSource = packageRoot(sdkName)
   const sdk = join(modules, sdkName)
   await copy(sdkSource, sdk, { filter: withoutModules })
-  const nativeName = `${sdkName}-darwin-${arch}`
+  const nativeName = `${sdkName}-${platform}-${arch}`
   const sdkRequire = createRequire(join(sdkSource, 'package.json'))
-  const binarySource = dirname(sdkRequire.resolve(`${nativeName}/claude`))
+  const binarySource = dirname(sdkRequire.resolve(`${nativeName}/${platform === 'win32' ? 'claude.exe' : 'claude'}`))
   await copy(binarySource, join(sdk, 'node_modules', nativeName), { filter: withoutModules })
   await copy(packageRoot('playwright-core'), join(modules, 'playwright-core'), { filter: withoutModules })
   await writeFile(join(stageDir, 'target.json'), JSON.stringify(target, null, 2) + '\n')
@@ -102,7 +109,7 @@ export async function nativeFiles(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name)
     if (entry.isDirectory()) paths.push(...await nativeFiles(path))
-    else if (entry.name.endsWith('.node') || entry.name.endsWith('.dylib') || ['claude', 'ffmpeg', 'ffprobe'].includes(entry.name)) paths.push(path)
+    else if (/\.(?:node|dylib|exe|dll)$/i.test(entry.name) || ['claude', 'ffmpeg', 'ffprobe'].includes(entry.name)) paths.push(path)
   }
   return paths
 }

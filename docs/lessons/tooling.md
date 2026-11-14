@@ -1,5 +1,19 @@
 # Tooling lessons
 
+## Asar file lists use the build host's separators
+
+- **Symptom:** a post-pack guard finds runtime node_modules inside a macOS shell asar but would silently accept the same contents on Windows.
+- **Cause:** `@electron/asar` constructs `listPackage` entries with `node:path.join`; Windows entries contain backslashes, so a literal `/node_modules` check never matches.
+- **Instead:** normalize list separators before applying the shared shell-contents guard, and cover both Windows and POSIX entries. Keep runtime packages outside asar through the existing explicit extraResources mapping.
+- **Found in:** [shared desktop builder configuration](../../apps/desktop/electron-builder.config.mjs), `apps/desktop/src/packaging.test.ts`.
+
+## Strict Windows media tests still need the detached launcher's system tools
+
+- **Symptom:** a packaged smoke with a system-only PATH times out before the first window, and teardown waits on a startup error dialog.
+- **Cause:** `powershell.exe` lives in `System32/WindowsPowerShell/v1.0`, rather than directly in `System32`; restricting PATH to the latter prevents the shell from launching detached studiod. Separately, Node's default argument quoting escapes the quotes intended for `cmd /s /c`, so executing the runtime `vis.cmd` fails even though the shim is correct.
+- **Instead:** include both Windows system directories while excluding user media tools, use `windowsVerbatimArguments` for explicitly constructed cmd command lines, and bound app closure before stopping only Playwright's owned child tree. Identify the daemon through the isolated named pipe's server PID, verify its executable, entry and creation identity, and wait for its actual exit before deleting data or repackaging.
+- **Found in:** [RFC 0046 Windows packaging](../rfc/0046-desktop-app.md#as-built-windows-packaging-2026-11-13), `apps/desktop/e2e/packaged.e2e.ts`.
+
 ## Scene readiness polls must include WebGL initialization
 
 - **Symptom:** the first Escape review case fails on Windows before sending any key, while later review cases pass.

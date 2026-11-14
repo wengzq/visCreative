@@ -11,7 +11,7 @@ app.whenReady().then(async () => {
   const source = await readFile(process.env.VIS_ICON_SOURCE)
   const output = process.env.VIS_ICON_OUTPUT
   const iconset = join(output, 'app.iconset')
-  await mkdir(iconset, { recursive: true })
+  if (process.platform === 'darwin') await mkdir(iconset, { recursive: true })
   const win = new BrowserWindow({ width: 1024, height: 1024, useContentSize: true, show: false, transparent: true, frame: false, webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } })
   async function rasterize(canvas, body) {
     win.setContentSize(canvas, canvas)
@@ -24,11 +24,13 @@ app.whenReady().then(async () => {
     if (image.getSize().width !== canvas || image.getSize().height !== canvas) throw new Error('Icon capture has the wrong pixel size')
     return image
   }
-  const mac = await rasterize(1024, 824)
-  await writeFile(join(output, 'app.png'), mac.toPNG())
-  for (const size of [16, 32, 128, 256, 512]) {
-    await writeFile(join(iconset, `icon_${size}x${size}.png`), mac.resize({ width: size, height: size, quality: 'best' }).toPNG())
-    await writeFile(join(iconset, `icon_${size}x${size}@2x.png`), mac.resize({ width: size * 2, height: size * 2, quality: 'best' }).toPNG())
+  if (process.platform === 'darwin') {
+    const mac = await rasterize(1024, 824)
+    await writeFile(join(output, 'app.png'), mac.toPNG())
+    for (const size of [16, 32, 128, 256, 512]) {
+      await writeFile(join(iconset, `icon_${size}x${size}.png`), mac.resize({ width: size, height: size, quality: 'best' }).toPNG())
+      await writeFile(join(iconset, `icon_${size}x${size}@2x.png`), mac.resize({ width: size * 2, height: size * 2, quality: 'best' }).toPNG())
+    }
   }
   const windows = await rasterize(256, 256)
   await writeFile(join(output, 'app-win.png'), windows.toPNG())

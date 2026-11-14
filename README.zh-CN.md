@@ -278,6 +278,10 @@ macOS 上 Codex 与 dsh 使用外层沙箱：允许工作区写入和联网，�
 
 `VIS_DESKTOP_OUTPUT_DIR` 可迁移暂存文件、安装包和默认缓存（默认 `artifacts/desktop/`）；`electron_config_cache`、`ELECTRON_BUILDER_CACHE` 可分别覆盖 Electron 与打包器下载缓存。路径可用绝对路径，仓库不写入机器专有路径。`dist:mac --x64` 选择独立的 Intel 目标，尚未验证。此阶段不使用 Developer ID 或公证；正式签名和更新留待后续步骤。挂载 DMG 并复制应用后，可运行 `VIS_PACKAGED_APP="<复制目标>/visCreative.app" pnpm --filter @vis/desktop test:packaged`。测试隔离数据及项目目录，仅使用 mock 和本地生成，明确报告缺少 H.264 编码器或 Chrome 时的跳过，并在清理前关闭自己启动的 studiod。`test:smoke` 继续检查源码外壳；两种桌面验收均不计入 `pnpm check` 或网页 e2e。
 
+在 Windows x64 主机上，`pnpm --filter @vis/desktop dist:win -- --version 0.1.0-preview-win.0` 使用同一套暂存和打包配置，在输出目录下生成 `dist/win-unpacked/` 与 `dist/visCreative-0.1.0-preview-win.0-win-x64-setup.exe`。Windows 预览版使用独立的 `0.1.0-preview-win.N` 版本序列。两个打包命令都接受 `--version <semver>`（或 `VIS_DESKTOP_VERSION`）；该覆盖只改变暂存应用和安装包，默认取 `apps/desktop/package.json`。Windows 媒体包沿用 `VIS_PACKAGE_FFMPEG_DIR` 接口，包含 `ffmpeg.exe`、`ffprobe.exe`、同目录 DLL、`LICENSES/`、声明 `win32` / `x64` 的 `BUILDINFO.json`，以及单独托管的 `source/`。打包时生成源码提供说明，`source/` 不进入应用。未签名安装器允许按用户选择安装目录；SmartScreen 可能需要点 **更多信息 › 仍要运行**，智能应用控制可能拦截未签名应用。
+
+对 `win-unpacked` 运行 `pnpm --filter @vis/desktop test:packaged`；`VIS_DESKTOP_EXECUTABLE` 可指定其他可执行文件。严格内置媒体模式同样适用于 Windows：应用和等同 Agent 的 shell 只能使用系统工具及内置媒体回退，测试检查运行时 `vis.cmd`、本地截取和不透明渲染，最后停止隔离的 studiod 并等待其退出，以便再次打包时能替换可执行文件。
+
 桌面及安装包图标在打包时从网站的 `favicon.svg` 生成，不维护第二份图案。macOS 应用和 DMG 使用带透明边距的 Apple 图标网格；Windows 可执行文件及 NSIS 安装器使用同一图案的 256 像素版本。
 
 内置 `vis` 启动器支持从其他 bin 目录建立符号链接。打包时记录暂存架构并拒绝不匹配的目标；Intel 通过独立的 `dist:mac --x64` 暂存流程构建。本地截取、mock 视频和不透明渲染优先使用 x264，并提供 LGPL 编码器回退；时间线导出保持硬件优先。编码器探测失败后，下次请求会重新探测。

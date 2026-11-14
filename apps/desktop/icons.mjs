@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url)
 export const iconDir = join(outputDir, 'icons')
 
 export async function buildIcons() {
-  if (process.platform !== 'darwin') throw new Error('The macOS icon build requires iconutil')
+  if (!['darwin', 'win32'].includes(process.platform)) throw new Error('Desktop icons require macOS or Windows')
   const profile = await mkdtemp(join(tmpdir(), 'vis-icon-'))
   await rm(iconDir, { recursive: true, force: true })
   await mkdir(iconDir, { recursive: true })
@@ -20,7 +20,7 @@ export async function buildIcons() {
     const env = { ...process.env, VIS_ICON_PROFILE: profile, VIS_ICON_OUTPUT: iconDir, VIS_ICON_SOURCE: join(root, 'apps/web/src/client/public/favicon.svg') }
     delete env.ELECTRON_RUN_AS_NODE
     await exec(require('electron'), [fileURLToPath(new URL('render-icons.cjs', import.meta.url))], { env, timeout: 60_000 })
-    await exec('/usr/bin/iconutil', ['-c', 'icns', join(iconDir, 'app.iconset'), '-o', join(iconDir, 'app.icns')])
+    if (process.platform === 'darwin') await exec('/usr/bin/iconutil', ['-c', 'icns', join(iconDir, 'app.iconset'), '-o', join(iconDir, 'app.icns')])
   } finally {
     await rm(profile, { recursive: true, force: true })
   }
