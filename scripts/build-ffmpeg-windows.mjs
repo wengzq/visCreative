@@ -158,6 +158,9 @@ for (const source of manifest) {
         `--extra-cflags=-O2 -I${prefix}/include`, `--extra-ldflags=-L${prefix}/lib`,
         '--enable-shared', '--disable-static', '--disable-autodetect', '--disable-gpl', '--disable-version3', '--disable-nonfree',
         '--disable-debug', '--disable-doc', '--disable-ffplay', '--disable-network',
+        // The app captures nothing; lavfi is the only device anything uses. This keeps DirectShow, Video for Windows
+        // (avicap32.dll) and GDI screen capture, and the system DLLs they import, out of the bundle.
+        '--disable-indevs', '--enable-indev=lavfi', '--disable-outdevs',
         '--enable-zlib', '--disable-iconv',
         '--enable-mediafoundation', '--enable-ffnvcodec', '--enable-nvenc', '--enable-amf', '--enable-libvpl', '--enable-d3d11va', '--enable-dxva2',
         '--enable-libass', '--enable-libfreetype', '--enable-libharfbuzz', '--enable-libfribidi',
