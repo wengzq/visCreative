@@ -239,9 +239,12 @@ flowchart LR
 
 ## 试用桌面预览版
 
-适用于 **Apple 芯片 Mac** 的桌面应用预览版在 [Releases](https://github.com/aliuda/visCreative/releases) 页面；项目介绍见 [everythingviscreative.com](https://everythingviscreative.com)。下载 `.dmg`，把 visCreative 拖到“应用程序”后打开。预览版尚未公证，macOS 会拦截第一次启动：在 **系统设置 › 隐私与安全性** 里点 **仍要打开**。
+适用于 **Apple 芯片 Mac** 和 **Windows 10/11 x64** 的桌面应用预览版在 [Releases](https://github.com/aliuda/visCreative/releases) 页面；项目介绍见 [everythingviscreative.com](https://everythingviscreative.com)。
 
-应用不需要 Node.js、pnpm 或 ffmpeg：它自己启动后台服务，并内置 LGPL 版 ffmpeg（源码随每个版本一起提供）。要用的 Agent 命令行仍需自行安装并登录；本机渲染需要 Google Chrome。数据保存在 `~/Library/Application Support/visCreative`。Intel Mac 和 Windows 版本稍后提供；预览版暂不自动更新，下载新的 DMG 替换即可。
+- **macOS：** 下载 `.dmg`，把 visCreative 拖到“应用程序”后打开。预览版尚未公证，macOS 会拦截第一次启动：在 **系统设置 › 隐私与安全性** 里点 **仍要打开**。数据保存在 `~/Library/Application Support/visCreative`。
+- **Windows：** 在 `preview-win` 版本中下载并运行 `-win-x64-setup.exe`。安装程序尚未签名，SmartScreen 会发出提示：点 **更多信息 › 仍要运行**（开启智能应用控制时，未签名应用可能被直接拦截）。只为当前用户安装，可以选择安装目录。数据保存在 `%APPDATA%\visCreative`。Windows 上没有 macOS 那样的 Agent 沙箱：Agent 以你的用户身份运行，应用自身的权限和审批规则仍然生效。
+
+应用不需要 Node.js、pnpm 或 ffmpeg：它自己启动后台服务，并内置 LGPL 版 ffmpeg（源码随每个版本一起提供）。要用的 Agent 命令行仍需自行安装并登录；本机渲染需要 Google Chrome（Windows 上也可用 Microsoft Edge）。Intel Mac 版本稍后提供。预览版暂不自动更新：下载新的 DMG 或安装程序即可更新，数据会保留。
 
 ## 快速开始
 
@@ -538,7 +541,7 @@ RFC 0010 升级保留历史事件与请求记录：旧游标重取当前快照�
 - [ ] 已知问题：Windows 上的测试稳定性和一些 UI 小问题，清单见 [docs/known-issues.md](docs/known-issues.md)
 - [ ] 负载下的性能：Windows 上机器负载高时，单测和浏览器测试会超时（页面加载超过 5 秒、每个测试文件各自启动 studiod 和 Chrome）；浏览器 e2e 已改为同时跑 4 个文件，准备阶段的超时消失、总时长不变；下一步测量启动、首屏加载和单测并行度，并确认应用本身是否也会变慢
 - [ ] 「释放」：空闲时关闭项目（RFC 0011 推迟）
-- [ ] RFC 0046 [桌面应用](docs/rfc/0046-desktop-app.md)（步骤 a、b、c1、c2 已完成：运行前提、源码外壳、临时签名的 arm64 DMG 打包和独立的打包验收测试，以及随包附带的、从源码构建的 macOS LGPL ffmpeg 工具包；适用于 Apple 芯片的预览版以 GitHub 预发布版发布，最新为 2026-11-13 的 [0.1.0-preview.2](https://github.com/aliuda/visCreative/releases/tag/v0.1.0-preview.2)）：基于 Electron 的 macOS（Apple 芯片与 Intel）和 Windows 应用，自行启动 studiod，并在主进程内运行现有网页宿主，界面包不改；内置 LGPL 版 ffmpeg 和字幕字体，以书面说明提供单独托管的源码，在用户 PATH 之后向 Agent 提供内置 ffmpeg 后备，并从登录 shell 读取 PATH，从访达启动时也能找到 Agent 命令行。步骤：studiod 运行前提、外壳、打包、未签名预览版（Windows 自动更新，macOS 提示有新版本），最后是签名并公证的正式版
+- [ ] RFC 0046 [桌面应用](docs/rfc/0046-desktop-app.md)（步骤 a、b、c1、c2 已完成：运行前提、源码外壳、临时签名的 arm64 DMG 打包和独立的打包验收测试，以及随包附带的、从源码构建的 macOS LGPL ffmpeg 工具包；Windows x64 NSIS 打包沿用同一套暂存流程，随附在 GitHub Actions 上用相同锁定源码交叉编译的 LGPL ffmpeg；预览版以 GitHub 预发布版发布，Apple 芯片最新为 2026-11-13 的 [0.1.0-preview.2](https://github.com/aliuda/visCreative/releases/tag/v0.1.0-preview.2)，首个 Windows 版为 2026-11-14 的 [0.1.0-preview-win.1](https://github.com/aliuda/visCreative/releases/tag/v0.1.0-preview-win.1)）：基于 Electron 的 macOS（Apple 芯片与 Intel）和 Windows 应用，自行启动 studiod，并在主进程内运行现有网页宿主，界面包不改；内置 LGPL 版 ffmpeg 和字幕字体，以书面说明提供单独托管的源码，在用户 PATH 之后向 Agent 提供内置 ffmpeg 后备，并从登录 shell 读取 PATH，从访达启动时也能找到 Agent 命令行。步骤：studiod 运行前提、外壳、打包、未签名预览版（Windows 自动更新，macOS 提示有新版本），最后是签名并公证的正式版
 
 ## 致谢
 
