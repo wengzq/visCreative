@@ -70,7 +70,8 @@ if (!dry && /^#define _UCRT(?:\s|$)/m.test(run(cc, ['-dM', '-E', '-include', '_m
 }
 const crossFile = join(work, 'meson-cross.ini')
 const cmakeFile = join(work, 'cmake-cross.cmake')
-const mesonText = `[binaries]\nc = '${cc}'\ncpp = '${cxx}'\nar = '${triple}-ar'\nstrip = '${triple}-strip'\nwindres = '${triple}-windres'\npkg-config = 'pkg-config'\n[host_machine]\nsystem = 'windows'\ncpu_family = 'x86_64'\ncpu = 'x86_64'\nendian = 'little'\n[properties]\nneeds_exe_wrapper = true\n`
+// A cross build finds host tools only through this file, so nasm (libass, dav1d) must be named here.
+const mesonText = `[binaries]\nc = '${cc}'\ncpp = '${cxx}'\nar = '${triple}-ar'\nstrip = '${triple}-strip'\nwindres = '${triple}-windres'\nnasm = 'nasm'\npkg-config = 'pkg-config'\n[host_machine]\nsystem = 'windows'\ncpu_family = 'x86_64'\ncpu = 'x86_64'\nendian = 'little'\n[properties]\nneeds_exe_wrapper = true\n`
 const cmakeText = `set(CMAKE_SYSTEM_NAME Windows)\nset(CMAKE_SYSTEM_PROCESSOR x86_64)\nset(CMAKE_C_COMPILER ${cc})\nset(CMAKE_CXX_COMPILER ${cxx})\nset(CMAKE_RC_COMPILER ${triple}-windres)\nset(CMAKE_FIND_ROOT_PATH "${prefix}" "/usr/${triple}")\nset(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\nset(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\nset(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\nset(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)\nset(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF)\nset(CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY OFF)\n`
 await writeFile(crossFile, mesonText)
 await writeFile(cmakeFile, cmakeText)
