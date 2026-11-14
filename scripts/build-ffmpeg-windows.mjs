@@ -196,7 +196,6 @@ for (const [pkg, license] of runtimeSources) {
   if (dry) {
     if (pkg === 'gcc-13-source') build('dpkg-query', ['-W', '-f=${Built-Using}', 'gcc-mingw-w64-x86-64-posix-runtime'])
     const identity = pkg === 'gcc-13-source' ? '<exact GCC source identity from compiler runtime Built-Using>' : `<exact source:Package=source:Version of ${pkg}>`
-    build('apt-get', ['source', '--download-only', '--print-uris', identity])
     build('apt-get', ['source', '--download-only', identity])
     if (pkg === 'gcc-13-source') console.log('If apt no longer indexes the exact Built-Using GCC source, download its .dsc and SHA-256-verified payloads from the Ubuntu primary source archive.')
     continue
@@ -206,30 +205,31 @@ for (const [pkg, license] of runtimeSources) {
     : run('dpkg-query', ['-W', '-f=${source:Package}=${source:Version}', pkg]).trim()
   if (!identity) throw new Error('The compiler runtime must identify its exact GCC sources in Built-Using')
   toolchain.sourceIdentities.push(identity)
-  let archives
+  // The files are identified by the .dsc's own SHA-256 list and recorded under Ubuntu's public primary archive.
+  // apt's --print-uris is not used: hosted runners use mirror+file: sources whose URIs are neither public nor stable.
+  const [name, version] = identity.split('=')
+  const directory = `https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/${name}/${version}/`
+  const dsc = `${name}_${version.replace(/^\d+:/, '')}.dsc`
+  const download = (url, file) => run('curl', ['--fail', '--location', '--retry', '3', '--connect-timeout', '30', '--max-time', '900', '--output', join(cwd, file), url], { stdio: 'inherit' })
+  let fromApt = true
   try {
-    const uris = run('apt-get', ['source', '--download-only', '--print-uris', identity], { cwd })
     run('apt-get', ['source', '--download-only', identity], { cwd, stdio: 'inherit' })
-    archives = [...uris.matchAll(/^'(https?:\/\/[^']+)'\s+(\S+)\s+/gm)].map(match => ({ url: match[1], archive: match[2] }))
   } catch (error) {
     if (pkg !== 'gcc-13-source') throw error
     // GCC can remain Built-Using after an apt index retires that source version.
-    const [name, version] = identity.split('=')
-    const directory = `https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/${name}/${version}/`
-    const dsc = `${name}_${version.replace(/^\d+:/, '')}.dsc`
-    const download = (url, file) => run('curl', ['--fail', '--location', '--retry', '3', '--connect-timeout', '30', '--max-time', '900', '--output', join(cwd, file), url], { stdio: 'inherit' })
+    fromApt = false
     download(directory + dsc, dsc)
-    const contents = await readFile(join(cwd, dsc), 'utf8')
-    const checksums = contents.match(/^Checksums-Sha256:\r?\n((?: [^\r\n]+\r?\n)+)/m)?.[1]
-    if (!checksums) throw new Error(`Missing source checksums in ${dsc}`)
-    archives = [{ url: directory + dsc, archive: dsc }]
-    for (const line of checksums.trim().split(/\r?\n/)) {
-      const match = /^([a-f0-9]{64})\s+\d+\s+([a-zA-Z0-9_.+~-]+)$/.exec(line.trim())
-      if (!match) throw new Error(`Invalid source checksum in ${dsc}`)
-      download(directory + match[2], match[2])
-      if (await sha256(join(cwd, match[2])) !== match[1]) throw new Error(`Source checksum mismatch: ${match[2]}`)
-      archives.push({ url: directory + match[2], archive: match[2] })
-    }
+  }
+  const contents = await readFile(join(cwd, dsc), 'utf8')
+  const checksums = contents.match(/^Checksums-Sha256:\r?\n((?: [^\r\n]+\r?\n)+)/m)?.[1]
+  if (!checksums) throw new Error(`Missing source checksums in ${dsc}`)
+  const archives = [{ url: directory + dsc, archive: dsc }]
+  for (const line of checksums.trim().split(/\r?\n/)) {
+    const match = /^([a-f0-9]{64})\s+\d+\s+([a-zA-Z0-9_.+~-]+)$/.exec(line.trim())
+    if (!match) throw new Error(`Invalid source checksum in ${dsc}`)
+    if (!fromApt) download(directory + match[2], match[2])
+    if (await sha256(join(cwd, match[2])) !== match[1]) throw new Error(`Source checksum mismatch: ${match[2]}`)
+    archives.push({ url: directory + match[2], archive: match[2] })
   }
   const licenseDir = join(cwd, pkg)
   await mkdir(licenseDir)
